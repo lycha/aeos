@@ -9,7 +9,7 @@ const VALID_COLUMNS = Object.values(Column).join(', ');
 
 export function registerTicketListCommand(
   program: Command,
-  ticketListUseCase: TicketListPort,
+  getTicketListUseCase: () => TicketListPort,
   projectRepo: ProjectRepository,
 ): void {
   const ticketCmd =
@@ -51,7 +51,7 @@ export function registerTicketListCommand(
         const project = projectRepo.read(projectPath);
 
         // 3. Call the use case
-        const tickets = ticketListUseCase.execute({
+        const tickets = getTicketListUseCase().execute({
           projectId: project.id,
           columnFilter,
         });

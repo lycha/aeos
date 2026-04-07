@@ -26,9 +26,13 @@ export function buildProgram(): Command {
   const container = createContainer();
   registerInstallCommand(program, container.install);
   registerProjectInitCommand(program, container.projectInit);
-  registerTicketCreateCommand(program, container.ticketCreate, container.projectRepo);
-  registerTicketListCommand(program, container.ticketList, container.projectRepo);
-  registerTicketShowCommand(program, container.ticketShow, container.projectRepo);
+
+  // Ticket commands access the DB — resolve lazily inside the action callback,
+  // not at program build time. This allows `aeos install` and `aeos project init`
+  // to run before .aeos/ (and state.db) exist.
+  registerTicketCreateCommand(program, () => container.ticketCreate, container.projectRepo);
+  registerTicketListCommand(program, () => container.ticketList, container.projectRepo);
+  registerTicketShowCommand(program, () => container.ticketShow, container.projectRepo);
 
   return program;
 }

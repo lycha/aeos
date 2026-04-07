@@ -32,14 +32,29 @@ export function createContainer(): Container {
   const projectRepo = new FsProjectRepository();
   const gitGateway = new SimpleGitGateway();
   const artifactStore = new FsArtifactStore();
-  const ticketRepo = new SqliteTicketRepository(getDb());
+
+  // Lazy DB + ticket repo — only resolved when a command that needs the DB runs.
+  // `install` and `project-init` do NOT need the DB (they create ~/.aeos/ first).
+  let ticketRepo: SqliteTicketRepository | null = null;
+  const getTicketRepo = (): SqliteTicketRepository => {
+    if (!ticketRepo) {
+      ticketRepo = new SqliteTicketRepository(getDb());
+    }
+    return ticketRepo;
+  };
 
   return {
     install: new InstallUseCase(configStore),
     projectInit: new ProjectInitUseCase(projectRepo, configStore, gitGateway),
-    ticketCreate: new TicketCreateUseCase(ticketRepo, artifactStore, gitGateway),
-    ticketList: new TicketListUseCase(ticketRepo),
-    ticketShow: new TicketShowUseCase(ticketRepo, artifactStore),
+    get ticketCreate() {
+      return new TicketCreateUseCase(getTicketRepo(), artifactStore, gitGateway);
+    },
+    get ticketList() {
+      return new TicketListUseCase(getTicketRepo());
+    },
+    get ticketShow() {
+      return new TicketShowUseCase(getTicketRepo(), artifactStore);
+    },
     projectRepo,
   };
 }

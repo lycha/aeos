@@ -6,7 +6,7 @@ import type { ProjectRepository } from '../../domain/ports/driven/project-reposi
 
 export function registerTicketCreateCommand(
   program: Command,
-  ticketCreateUseCase: TicketCreatePort,
+  getTicketCreateUseCase: () => TicketCreatePort,
   projectRepo: ProjectRepository,
 ): void {
   const ticketCmd =
@@ -31,7 +31,7 @@ export function registerTicketCreateCommand(
 
         const project = projectRepo.read(projectPath);
 
-        const result = ticketCreateUseCase.execute({
+        const result = getTicketCreateUseCase().execute({
           title,
           projectId: project.id,
           projectKey: project.key,

@@ -52,7 +52,7 @@ describe('registerTicketListCommand', () => {
     program.exitOverride();
     useCase = createMockTicketListUseCase();
     projectRepo = createMockProjectRepo();
-    registerTicketListCommand(program, useCase, projectRepo);
+    registerTicketListCommand(program, () => useCase, projectRepo);
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     savedExitCode = process.exitCode;

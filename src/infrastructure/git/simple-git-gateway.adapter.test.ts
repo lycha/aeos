@@ -38,11 +38,11 @@ describe('SimpleGitGateway.commitFiles', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('should create a commit for a new file in .aeos/', async () => {
+  it('should create a commit for a new file', () => {
     const filePath = path.join(aeosPath, 'ticket.md');
     fs.writeFileSync(filePath, '# Ticket\n');
 
-    await gateway.commitFiles('[AEOS-1][TICKET][v1][human][create]', [filePath]);
+    gateway.commitFiles(aeosPath, [filePath], '[AEOS-1][TICKET][v1][human][create]');
 
     const log = execFileSync('git', ['log', '--oneline'], {
       cwd: aeosPath,
@@ -51,12 +51,12 @@ describe('SimpleGitGateway.commitFiles', () => {
     expect(log.trim()).toMatch(/\S+/); // at least one commit
   });
 
-  it('should store the commit message verbatim', async () => {
+  it('should store the commit message verbatim', () => {
     const filePath = path.join(aeosPath, 'ticket.md');
     fs.writeFileSync(filePath, '# Ticket\n');
 
     const message = '[AEOS-1][TICKET][v1][human][create]';
-    await gateway.commitFiles(message, [filePath]);
+    gateway.commitFiles(aeosPath, [filePath], message);
 
     const log = execFileSync('git', ['log', '--format=%s', '-1'], {
       cwd: aeosPath,
@@ -65,15 +65,15 @@ describe('SimpleGitGateway.commitFiles', () => {
     expect(log.trim()).toBe(message);
   });
 
-  it('should not error on empty diff (nothing to commit)', async () => {
+  it('should not error on empty diff (nothing to commit)', () => {
     const filePath = path.join(aeosPath, 'ticket.md');
     fs.writeFileSync(filePath, '# Ticket\n');
 
     // First commit
-    await gateway.commitFiles('first', [filePath]);
+    gateway.commitFiles(aeosPath, [filePath], 'first');
 
     // Second commit with same content — should not throw
-    await expect(gateway.commitFiles('second', [filePath])).resolves.toBeUndefined();
+    expect(() => gateway.commitFiles(aeosPath, [filePath], 'second')).not.toThrow();
 
     // Verify only 1 commit exists (no empty commit created)
     const log = execFileSync('git', ['log', '--oneline'], {
@@ -84,34 +84,30 @@ describe('SimpleGitGateway.commitFiles', () => {
     expect(commits).toHaveLength(1);
   });
 
-  it('should throw an error for files outside .aeos/', async () => {
+  it('should throw an error for files outside the dir', () => {
     const outsideFile = path.join(tmpDir, 'outside.txt');
     fs.writeFileSync(outsideFile, 'outside\n');
 
-    await expect(gateway.commitFiles('bad', [outsideFile])).rejects.toThrow(
-      /outside the \.aeos\/ directory/,
-    );
+    expect(() => gateway.commitFiles(aeosPath, [outsideFile], 'bad')).toThrow(/outside/);
   });
 
-  it('should throw a descriptive error for a corrupt .aeos/.git', async () => {
+  it('should throw a descriptive error for a corrupt .git', () => {
     const filePath = path.join(aeosPath, 'ticket.md');
     fs.writeFileSync(filePath, '# Ticket\n');
 
     // Corrupt the git repo by deleting .git
     fs.rmSync(path.join(aeosPath, '.git'), { recursive: true, force: true });
 
-    await expect(gateway.commitFiles('msg', [filePath])).rejects.toThrow(
-      /Git commit failed in \.aeos\//,
-    );
+    expect(() => gateway.commitFiles(aeosPath, [filePath], 'msg')).toThrow();
   });
 
-  it('should commit multiple files at once', async () => {
+  it('should commit multiple files at once', () => {
     const file1 = path.join(aeosPath, 'file1.md');
     const file2 = path.join(aeosPath, 'file2.md');
     fs.writeFileSync(file1, 'content 1\n');
     fs.writeFileSync(file2, 'content 2\n');
 
-    await gateway.commitFiles('multi', [file1, file2]);
+    gateway.commitFiles(aeosPath, [file1, file2], 'multi');
 
     const log = execFileSync('git', ['log', '--oneline'], {
       cwd: aeosPath,
@@ -126,19 +122,5 @@ describe('SimpleGitGateway.commitFiles', () => {
     });
     expect(files).toContain('file1.md');
     expect(files).toContain('file2.md');
-  });
-
-  it('should accept explicit root parameter', async () => {
-    const filePath = path.join(aeosPath, 'ticket.md');
-    fs.writeFileSync(filePath, '# Ticket\n');
-
-    // Use explicit root instead of relying on cwd
-    await gateway.commitFiles('explicit-root', [filePath], tmpDir);
-
-    const log = execFileSync('git', ['log', '--format=%s', '-1'], {
-      cwd: aeosPath,
-      encoding: 'utf-8',
-    });
-    expect(log.trim()).toBe('explicit-root');
   });
 });

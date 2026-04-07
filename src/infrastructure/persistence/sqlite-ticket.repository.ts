@@ -58,6 +58,17 @@ export class SqliteTicketRepository implements TicketRepository {
       );
   }
 
+  /** Atomically allocates the next ticket ID and inserts the ticket. */
+  createAtomic(projectId: string, buildTicket: (nextNum: number) => Ticket): Ticket {
+    const txn = this.db.transaction(() => {
+      const nextNum = this.nextId(projectId);
+      const ticket = buildTicket(nextNum);
+      this.save(ticket);
+      return ticket;
+    });
+    return txn();
+  }
+
   deleteById(projectId: string, ticketId: string): void {
     this.db.prepare('DELETE FROM tickets WHERE project_id = ? AND id = ?').run(projectId, ticketId);
   }

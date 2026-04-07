@@ -69,6 +69,13 @@ class StubTicketRepository implements TicketRepository {
       this.store.set(this.key(projectId, ticketId), ticket);
     }
   }
+
+  createAtomic(projectId: string, buildTicket: (nextNum: number) => Ticket): Ticket {
+    const nextNum = this.nextId(projectId);
+    const ticket = buildTicket(nextNum);
+    this.save(ticket);
+    return ticket;
+  }
 }
 
 class StubTransitionRepository implements TransitionRepository {
@@ -76,6 +83,10 @@ class StubTransitionRepository implements TransitionRepository {
 
   record(transition: TransitionRecord): void {
     this.records.push(transition);
+  }
+
+  findByTicket(projectId: string, ticketId: string): TransitionRecord[] {
+    return this.records.filter((r) => r.projectId === projectId && r.ticketId === ticketId);
   }
 }
 

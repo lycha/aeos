@@ -9,8 +9,6 @@ import type {
   TicketCreateInput,
   TicketCreateResult,
 } from '../domain/ports/driving/ticket-create.port.js';
-import type { Ticket } from '../domain/model/ticket.js';
-
 export class TicketCreateUseCase implements TicketCreatePort {
   constructor(
     private readonly ticketRepo: TicketRepository,
@@ -21,9 +19,22 @@ export class TicketCreateUseCase implements TicketCreatePort {
   execute(input: TicketCreateInput): TicketCreateResult {
     const { title, projectId, projectKey, projectPath } = input;
 
-    // 1. Determine next ticket number
-    const nextNum = this.ticketRepo.nextId(projectId);
-    const ticketId = `${projectKey}-${nextNum}`;
+    // 1. Atomically allocate ID + insert in a single transaction (prevents race conditions)
+    const ticket = this.ticketRepo.createAtomic(projectId, (nextNum) => {
+      const ticketId = `${projectKey}-${nextNum}`;
+      const now = new Date().toISOString();
+      return {
+        id: ticketId,
+        projectId,
+        title,
+        column: 'BACKLOG' as const,
+        subState: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
+
+    const ticketId = ticket.id;
 
     // 2. Build ticket markdown content
     const content = [
@@ -42,19 +53,6 @@ export class TicketCreateUseCase implements TicketCreatePort {
       '<!-- Additional context, links, constraints -->',
       '',
     ].join('\n');
-
-    // 3. Persist ticket in DB first (source of truth)
-    const now = new Date().toISOString();
-    const ticket: Ticket = {
-      id: ticketId,
-      projectId,
-      title,
-      column: 'BACKLOG',
-      subState: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.ticketRepo.save(ticket);
 
     // 4. Write artifact file; compensate on failure
     const filename = `${ticketId}-ticket.md`;

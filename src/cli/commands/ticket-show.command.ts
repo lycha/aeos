@@ -6,7 +6,7 @@ import type { ProjectRepository } from '../../domain/ports/driven/project-reposi
 
 export function registerTicketShowCommand(
   program: Command,
-  ticketShowUseCase: TicketShowPort,
+  getTicketShowUseCase: () => TicketShowPort,
   projectRepo: ProjectRepository,
 ): void {
   const ticketCmd =
@@ -42,7 +42,7 @@ export function registerTicketShowCommand(
       const project = projectRepo.read(projectPath);
 
       // 2. Call use case (case-insensitive via ticketId uppercasing handled in repo)
-      const result = ticketShowUseCase.execute({
+      const result = getTicketShowUseCase().execute({
         projectId: project.id,
         ticketId: id,
         projectPath,

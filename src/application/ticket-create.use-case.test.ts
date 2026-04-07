@@ -11,6 +11,13 @@ function createMockTicketRepo(): TicketRepository {
   return {
     nextId: vi.fn().mockReturnValue(1),
     save: vi.fn(),
+    createAtomic: vi
+      .fn()
+      .mockImplementation((_projectId: string, buildTicket: (n: number) => Ticket) => {
+        const nextNum = 1;
+        const ticket = buildTicket(nextNum);
+        return ticket;
+      }),
     deleteById: vi.fn(),
     findById: vi.fn().mockReturnValue(null),
     findByProject: vi.fn().mockReturnValue([]),
@@ -31,7 +38,7 @@ function createMockGitGateway(): GitGateway {
   return {
     init: vi.fn(),
     commit: vi.fn(),
-    commitFiles: vi.fn().mockResolvedValue(undefined),
+    commitFiles: vi.fn(),
   };
 }
 
@@ -61,10 +68,10 @@ describe('TicketCreateUseCase', () => {
     expect(result).toEqual({ ticketId: 'AEOS-1', title: 'Add rate limiting' });
   });
 
-  it('should query nextId with the project ID', () => {
+  it('should call createAtomic with the project ID', () => {
     useCase.execute(defaultInput);
 
-    expect(ticketRepo.nextId).toHaveBeenCalledWith('startup-a');
+    expect(ticketRepo.createAtomic).toHaveBeenCalledWith('startup-a', expect.any(Function));
   });
 
   it('should write artifact with correct filename and path', () => {
@@ -92,19 +99,25 @@ describe('TicketCreateUseCase', () => {
     expect(content).toContain('## Notes');
   });
 
-  it('should save ticket to DB with column BACKLOG and null sub_state', () => {
+  it('should build ticket with column BACKLOG and null sub_state via createAtomic', () => {
+    let capturedTicket: Ticket | null = null;
+    (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mockImplementation(
+      (_pid: string, build: (n: number) => Ticket) => {
+        capturedTicket = build(1);
+        return capturedTicket;
+      },
+    );
+
     useCase.execute(defaultInput);
 
-    expect(ticketRepo.save).toHaveBeenCalledOnce();
-    const savedTicket = (ticketRepo.save as ReturnType<typeof vi.fn>).mock.calls[0][0] as Ticket;
-
-    expect(savedTicket.id).toBe('AEOS-1');
-    expect(savedTicket.projectId).toBe('startup-a');
-    expect(savedTicket.title).toBe('Add rate limiting');
-    expect(savedTicket.column).toBe('BACKLOG');
-    expect(savedTicket.subState).toBeNull();
-    expect(savedTicket.createdAt).toBeTruthy();
-    expect(savedTicket.updatedAt).toBeTruthy();
+    expect(capturedTicket).not.toBeNull();
+    expect(capturedTicket!.id).toBe('AEOS-1');
+    expect(capturedTicket!.projectId).toBe('startup-a');
+    expect(capturedTicket!.title).toBe('Add rate limiting');
+    expect(capturedTicket!.column).toBe('BACKLOG');
+    expect(capturedTicket!.subState).toBeNull();
+    expect(capturedTicket!.createdAt).toBeTruthy();
+    expect(capturedTicket!.updatedAt).toBeTruthy();
   });
 
   it('should commit with structured message', () => {
@@ -117,7 +130,9 @@ describe('TicketCreateUseCase', () => {
   });
 
   it('should auto-increment ticket ID', () => {
-    (ticketRepo.nextId as ReturnType<typeof vi.fn>).mockReturnValue(5);
+    (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mockImplementation(
+      (_pid: string, build: (n: number) => Ticket) => build(5),
+    );
 
     const result = useCase.execute(defaultInput);
 
@@ -126,21 +141,32 @@ describe('TicketCreateUseCase', () => {
 
   it('should call operations in correct order', () => {
     const callOrder: string[] = [];
+    (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mockImplementation(
+      (_pid: string, build: (n: number) => Ticket) => {
+        callOrder.push('createAtomic');
+        return build(1);
+      },
+    );
     (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mockImplementation(() =>
       callOrder.push('writeArtifact'),
     );
-    (ticketRepo.save as ReturnType<typeof vi.fn>).mockImplementation(() => callOrder.push('save'));
     (gitGateway.commit as ReturnType<typeof vi.fn>).mockImplementation(() =>
       callOrder.push('commit'),
     );
 
     useCase.execute(defaultInput);
 
-    expect(callOrder).toEqual(['save', 'writeArtifact', 'commit']);
+    expect(callOrder).toEqual(['createAtomic', 'writeArtifact', 'commit']);
   });
 
   it('should produce two distinct tickets when called twice', () => {
-    (ticketRepo.nextId as ReturnType<typeof vi.fn>).mockReturnValueOnce(1).mockReturnValueOnce(2);
+    let callCount = 0;
+    (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mockImplementation(
+      (_pid: string, build: (n: number) => Ticket) => {
+        callCount++;
+        return build(callCount);
+      },
+    );
 
     const r1 = useCase.execute(defaultInput);
     const r2 = useCase.execute({ ...defaultInput, title: 'Second ticket' });
@@ -148,6 +174,6 @@ describe('TicketCreateUseCase', () => {
     expect(r1.ticketId).toBe('AEOS-1');
     expect(r2.ticketId).toBe('AEOS-2');
     expect(artifactStore.writeArtifact).toHaveBeenCalledTimes(2);
-    expect(ticketRepo.save).toHaveBeenCalledTimes(2);
+    expect(ticketRepo.createAtomic).toHaveBeenCalledTimes(2);
   });
 });

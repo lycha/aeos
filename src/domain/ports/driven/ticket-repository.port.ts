@@ -9,6 +9,8 @@ export interface TicketRepository {
   nextId(projectId: string): number;
   /** Persists a ticket row */
   save(ticket: Ticket): void;
+  /** Atomically allocates the next ticket ID and inserts the ticket in a single transaction */
+  createAtomic(projectId: string, buildTicket: (nextNum: number) => Ticket): Ticket;
   /** Deletes a ticket by project and ticket ID (used for compensating rollback) */
   deleteById(projectId: string, ticketId: string): void;
   /** Returns a single ticket by project and ticket ID (case-insensitive), or null if not found */

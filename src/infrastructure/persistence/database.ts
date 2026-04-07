@@ -1,10 +1,16 @@
 // Infrastructure — SQLite connection and migration helper
+//
+// Design decision: single global DB at ~/.aeos/state.db.
+// All projects share this database, isolated by project_id composite keys.
+// This simplifies cross-project queries (dashboard, costs) and avoids
+// per-project DB lifecycle management. See ADR in code-review/REVIEW-20260407-M1-milestone.md.
 
 import Database from 'better-sqlite3';
 import type BetterSqlite3 from 'better-sqlite3';
 import { aeosDbPath } from '../../shared/config.js';
 
 let instance: BetterSqlite3.Database | null = null;
+let schemaApplied = false;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS tickets (
@@ -48,8 +54,10 @@ CREATE TABLE IF NOT EXISTS cost_records (
 `;
 
 export function initSchema(db: BetterSqlite3.Database): void {
+  if (schemaApplied) return;
   db.pragma('journal_mode = WAL');
   db.exec(DDL);
+  schemaApplied = true;
 }
 
 /** Returns a singleton Database connection to ~/.aeos/state.db */
@@ -68,4 +76,5 @@ export function resetDb(): void {
     instance.close();
     instance = null;
   }
+  schemaApplied = false;
 }
