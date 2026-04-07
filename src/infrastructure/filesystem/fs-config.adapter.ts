@@ -10,23 +10,19 @@ import type {
   GlobalConfig,
   ProjectRegistryEntry,
 } from '../../domain/ports/driven/config-store.port.js';
-import { aeosHome, CONFIG_FILENAME, REGISTRY_FILENAME } from '../../shared/config.js';
+import { aeosHome, aeosConfigPath, aeosRegistryPath } from '../../shared/config.js';
 
 export class FsConfigStore implements ConfigStore {
-  private get homePath(): string {
-    return aeosHome();
-  }
-
   private get configPath(): string {
-    return path.join(this.homePath, CONFIG_FILENAME);
+    return aeosConfigPath();
   }
 
   private get registryPath(): string {
-    return path.join(this.homePath, REGISTRY_FILENAME);
+    return aeosRegistryPath();
   }
 
   ensureHomeDir(): void {
-    fs.mkdirSync(this.homePath, { recursive: true });
+    fs.mkdirSync(aeosHome(), { recursive: true });
   }
 
   readConfig(): GlobalConfig | null {

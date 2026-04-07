@@ -1,9 +1,8 @@
 // Infrastructure — SQLite connection and migration helper
 
-import * as path from 'node:path';
 import Database from 'better-sqlite3';
 import type BetterSqlite3 from 'better-sqlite3';
-import { aeosHome } from '../../shared/config.js';
+import { aeosDbPath } from '../../shared/config.js';
 
 let instance: BetterSqlite3.Database | null = null;
 
@@ -57,7 +56,7 @@ export function initSchema(db: BetterSqlite3.Database): void {
 export function getDb(): BetterSqlite3.Database {
   if (instance) return instance;
 
-  const dbPath = path.join(aeosHome(), 'state.db');
+  const dbPath = aeosDbPath();
   instance = new Database(dbPath);
   initSchema(instance);
   return instance;
