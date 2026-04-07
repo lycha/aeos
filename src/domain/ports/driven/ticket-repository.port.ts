@@ -1,6 +1,7 @@
 // Driven port — TicketRepository: CRUD for tickets (backed by SQLite)
 
 import type { Column } from '../../model/column.js';
+import type { SubStateOrNull } from '../../model/sub-state.js';
 import type { Ticket } from '../../model/ticket.js';
 
 export interface TicketRepository {
@@ -14,4 +15,8 @@ export interface TicketRepository {
   findById(projectId: string, ticketId: string): Ticket | null;
   /** Returns all tickets for a project, optionally filtered by column, sorted by numeric ticket number */
   findByProject(projectId: string, columnFilter?: Column): Ticket[];
+  /** Updates a ticket's column and updated_at timestamp */
+  updateColumn(projectId: string, ticketId: string, column: Column): void;
+  /** Updates a ticket's sub-state and updated_at timestamp */
+  updateSubState(projectId: string, ticketId: string, subState: SubStateOrNull): void;
 }

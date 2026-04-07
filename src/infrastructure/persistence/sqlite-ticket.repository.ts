@@ -91,4 +91,16 @@ export class SqliteTicketRepository implements TicketRepository {
 
     return rows.map((row) => this.mapRowToTicket(row));
   }
+
+  updateColumn(projectId: string, ticketId: string, column: Column): void {
+    this.db
+      .prepare(`UPDATE tickets SET "column" = ?, updated_at = ? WHERE project_id = ? AND id = ?`)
+      .run(column, new Date().toISOString(), projectId, ticketId);
+  }
+
+  updateSubState(projectId: string, ticketId: string, subState: SubStateOrNull): void {
+    this.db
+      .prepare(`UPDATE tickets SET sub_state = ?, updated_at = ? WHERE project_id = ? AND id = ?`)
+      .run(subState, new Date().toISOString(), projectId, ticketId);
+  }
 }

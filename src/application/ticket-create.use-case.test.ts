@@ -14,6 +14,8 @@ function createMockTicketRepo(): TicketRepository {
     deleteById: vi.fn(),
     findById: vi.fn().mockReturnValue(null),
     findByProject: vi.fn().mockReturnValue([]),
+    updateColumn: vi.fn(),
+    updateSubState: vi.fn(),
   };
 }
 
