@@ -9,6 +9,7 @@ import { registerInstallCommand } from './commands/install.command.js';
 import { registerProjectInitCommand } from './commands/project-init.command.js';
 import { registerTicketCreateCommand } from './commands/ticket-create.command.js';
 import { registerTicketListCommand } from './commands/ticket-list.command.js';
+import { registerTicketShowCommand } from './commands/ticket-show.command.js';
 
 export { createContainer } from './container.js';
 export type { Container } from './container.js';
@@ -16,6 +17,7 @@ export { registerInstallCommand } from './commands/install.command.js';
 export { registerProjectInitCommand } from './commands/project-init.command.js';
 export { registerTicketCreateCommand } from './commands/ticket-create.command.js';
 export { registerTicketListCommand } from './commands/ticket-list.command.js';
+export { registerTicketShowCommand } from './commands/ticket-show.command.js';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -26,6 +28,7 @@ export function buildProgram(): Command {
   registerProjectInitCommand(program, container.projectInit);
   registerTicketCreateCommand(program, container.ticketCreate, container.projectRepo);
   registerTicketListCommand(program, container.ticketList, container.projectRepo);
+  registerTicketShowCommand(program, container.ticketShow, container.projectRepo);
 
   return program;
 }

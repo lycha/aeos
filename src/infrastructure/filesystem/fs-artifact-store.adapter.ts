@@ -26,6 +26,16 @@ export class FsArtifactStore implements ArtifactStore {
     }
   }
 
+  listArtifacts(projectPath: string, ticketId: string): string[] {
+    FsArtifactStore.validatePathComponent(ticketId, 'ticketId');
+    const dir = path.join(projectPath, AEOS_DIR, TICKETS_DIR, ticketId);
+    if (!fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir)
+      .filter((f) => fs.statSync(path.join(dir, f)).isFile())
+      .sort();
+  }
+
   private static validatePathComponent(value: string, name: string): void {
     if (value.includes('..') || value.includes(path.sep) || value.includes('/')) {
       throw new Error(`Invalid ${name}: must not contain path separators or '..' segments`);

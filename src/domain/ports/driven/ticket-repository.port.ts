@@ -10,6 +10,8 @@ export interface TicketRepository {
   save(ticket: Ticket): void;
   /** Deletes a ticket by project and ticket ID (used for compensating rollback) */
   deleteById(projectId: string, ticketId: string): void;
+  /** Returns a single ticket by project and ticket ID (case-insensitive), or null if not found */
+  findById(projectId: string, ticketId: string): Ticket | null;
   /** Returns all tickets for a project, optionally filtered by column, sorted by numeric ticket number */
   findByProject(projectId: string, columnFilter?: Column): Ticket[];
 }

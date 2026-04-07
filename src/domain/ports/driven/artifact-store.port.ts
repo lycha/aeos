@@ -5,4 +5,6 @@ export interface ArtifactStore {
   writeArtifact(projectPath: string, ticketId: string, filename: string, content: string): void;
   /** Removes an artifact file (used for compensating rollback) */
   removeArtifact(projectPath: string, ticketId: string, filename: string): void;
+  /** Lists artifact filenames in .aeos/tickets/<ticketId>/ — returns empty array if dir does not exist */
+  listArtifacts(projectPath: string, ticketId: string): string[];
 }
