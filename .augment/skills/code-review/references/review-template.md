@@ -69,9 +69,20 @@
 
 ---
 
+## Architecture Compliance
+
+- [ ] Dependency direction: `cli → application → domain ← infrastructure`
+- [ ] Domain layer purity: no I/O, no framework imports in `src/domain/`
+- [ ] Barrel exports updated for any new modules
+- [ ] Composition root (`container.ts`) updated if new adapters/use cases added
+
+---
+
 ## Verification Notes
 
-- [Tests run or recommended]
+- `npm run typecheck` — [PASS/FAIL]
+- `npm run lint` — [PASS/FAIL]
+- `npm test` — [PASS/FAIL] ([N] tests, [N] passing)
 - [Key paths to validate manually]
 
 ---
