@@ -7,3 +7,8 @@ coverage/
 
 # IDE
 .idea/
+/scripts/implementation-script.sh
+/code-review/REVIEW-20260407-implementation-script.md
+/docs/reviews/REVIEW-20260407-M1-012-fs-project-root.md
+/docs/reviews/REVIEW-20260407-M1-013-fs-artifact-path.md
+/docs/reviews/REVIEW-20260407-M1-014-fs-git-commit.md
