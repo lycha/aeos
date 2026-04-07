@@ -4,10 +4,63 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Project } from '../../domain/model/project.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import {
+  ProjectRootNotFoundError,
+  ProjectConfigNotFoundError,
+  ProjectConfigCorruptError,
+} from '../../shared/errors.js';
 
 const AEOS_DIR = '.aeos';
 const PROJECT_JSON = 'project.json';
 const COLUMN_SPECS_DIR = 'column-specs';
+const MAX_WALK_DEPTH = 256;
+
+/**
+ * Walks up from `startDir` (defaults to process.cwd()) looking for .aeos/.
+ * Returns the absolute path of the directory containing .aeos/.
+ * Throws ProjectRootNotFoundError if none is found before hitting filesystem root.
+ */
+export function projectRoot(startDir?: string): string {
+  let current = path.resolve(startDir ?? process.cwd());
+
+  for (let depth = 0; depth < MAX_WALK_DEPTH; depth++) {
+    if (fs.existsSync(path.join(current, AEOS_DIR))) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      throw new ProjectRootNotFoundError();
+    }
+    current = parent;
+  }
+
+  throw new ProjectRootNotFoundError('Max directory depth (256) exceeded — possible symlink loop');
+}
+
+/** Returns the absolute path to the .aeos/ directory for the project. */
+export function aeosDir(root?: string): string {
+  return path.join(projectRoot(root), AEOS_DIR);
+}
+
+/** Reads and parses .aeos/project.json. Throws if not found or invalid JSON. */
+export function readProjectConfig(root?: string): Project {
+  const dir = aeosDir(root);
+  const configPath = path.join(dir, PROJECT_JSON);
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf-8');
+  } catch {
+    throw new ProjectConfigNotFoundError();
+  }
+
+  try {
+    return JSON.parse(raw) as Project;
+  } catch {
+    throw new ProjectConfigCorruptError();
+  }
+}
 
 export class FsProjectRepository implements ProjectRepository {
   exists(projectPath: string): boolean {
@@ -37,7 +90,7 @@ export class FsProjectRepository implements ProjectRepository {
     let current = path.resolve(startDir);
     const root = path.parse(current).root;
 
-    while (true) {
+    for (let depth = 0; depth < MAX_WALK_DEPTH; depth++) {
       const candidate = path.join(current, AEOS_DIR, PROJECT_JSON);
       if (fs.existsSync(candidate)) {
         return current;
@@ -47,5 +100,7 @@ export class FsProjectRepository implements ProjectRepository {
       }
       current = path.dirname(current);
     }
+
+    return null;
   }
 }
