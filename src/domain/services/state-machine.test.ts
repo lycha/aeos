@@ -161,3 +161,80 @@ describe('StateMachineService.transition()', () => {
     });
   });
 });
+
+describe('StateMachineService.setSubState()', () => {
+  let svc: StateMachineService;
+  let ticketRepo: TicketRepository;
+
+  function setup(ticket: Ticket | null) {
+    const stubs = createStubRepos(ticket);
+    ticketRepo = stubs.ticketRepo;
+    svc = new StateMachineService(stubs.ticketRepo, stubs.transitionRepo);
+    return stubs;
+  }
+
+  describe('happy path', () => {
+    it('sets sub-state on a non-BACKLOG ticket', () => {
+      const stubs = setup(makeTicket({ column: Column.IMPLEMENTATION, subState: null }));
+      const result = svc.setSubState('proj', 'PROJ-1', SubState.WORKING);
+      expect(result).toEqual({ ok: true });
+      expect(ticketRepo.updateSubState).toHaveBeenCalledWith('proj', 'PROJ-1', SubState.WORKING);
+      expect(stubs.getTicket()!.subState).toBe('WORKING');
+    });
+  });
+
+  describe('BACKLOG guard', () => {
+    it('rejects sub-state change on BACKLOG ticket', () => {
+      const stubs = setup(makeTicket({ column: Column.BACKLOG, subState: null }));
+      const result = svc.setSubState('proj', 'PROJ-1', SubState.WORKING);
+      expect(result).toEqual({
+        ok: false,
+        reason: 'Cannot set sub-state on a BACKLOG ticket',
+      });
+      expect(ticketRepo.updateSubState).not.toHaveBeenCalled();
+      expect(stubs.getTicket()!.subState).toBeNull();
+    });
+  });
+
+  describe('ticket not found', () => {
+    it('returns error when ticket does not exist', () => {
+      setup(null);
+      const result = svc.setSubState('proj', 'PROJ-999', SubState.WORKING);
+      expect(result).toEqual({ ok: false, reason: 'Ticket not found' });
+    });
+  });
+
+  describe('invalid sub-state', () => {
+    it('rejects an invalid sub-state string', () => {
+      setup(makeTicket({ column: Column.TECH_SPEC, subState: null }));
+      const result = svc.setSubState('proj', 'PROJ-1', 'RUNNING' as unknown as SubState);
+      expect(result).toEqual({
+        ok: false,
+        reason: 'Invalid sub-state: RUNNING',
+      });
+      expect(ticketRepo.updateSubState).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sequential updates', () => {
+    it('updates sub-state from one value to another', () => {
+      const stubs = setup(makeTicket({ column: Column.CODE_REVIEW, subState: SubState.WORKING }));
+      const r1 = svc.setSubState('proj', 'PROJ-1', SubState.IN_REVIEW);
+      expect(r1).toEqual({ ok: true });
+      expect(stubs.getTicket()!.subState).toBe('IN_REVIEW');
+
+      const r2 = svc.setSubState('proj', 'PROJ-1', SubState.SIGNED_OFF);
+      expect(r2).toEqual({ ok: true });
+      expect(stubs.getTicket()!.subState).toBe('SIGNED_OFF');
+    });
+  });
+
+  describe('same sub-state idempotency', () => {
+    it('allows setting the same sub-state again (refreshes updated_at)', () => {
+      setup(makeTicket({ column: Column.IMPLEMENTATION, subState: SubState.WORKING }));
+      const result = svc.setSubState('proj', 'PROJ-1', SubState.WORKING);
+      expect(result).toEqual({ ok: true });
+      expect(ticketRepo.updateSubState).toHaveBeenCalledWith('proj', 'PROJ-1', SubState.WORKING);
+    });
+  });
+});
