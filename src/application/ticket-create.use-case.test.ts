@@ -31,6 +31,7 @@ function createMockGitGateway(): GitGateway {
   return {
     init: vi.fn(),
     commit: vi.fn(),
+    commitFiles: vi.fn().mockResolvedValue(undefined),
   };
 }
 

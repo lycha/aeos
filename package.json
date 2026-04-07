@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",
-    "commander": "^14.0.3"
+    "commander": "^14.0.3",
+    "simple-git": "^3.35.2"
   }
 }
