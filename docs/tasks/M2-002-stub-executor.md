@@ -13,6 +13,7 @@ Implement in `src/infrastructure/executor/stub-executor.adapter.ts`:
 ```typescript
 export class StubExecutor implements Executor {
   async run(invocation: ExecutorInvocation): Promise<ExecutorResult>
+  async interrupt(): Promise<void>
 }
 ```
 
@@ -35,7 +36,13 @@ Implementation:
      usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
    }
    ```
-3. Ensure the output directory exists before writing (`fs.mkdirSync({ recursive: true })`)
+3. Ensure the output directory exists before writing (`await fs.mkdir(path.dirname(invocation.outputPath), { recursive: true })`)
+4. `interrupt()` is a no-op — `StubExecutor` completes synchronously so there is nothing to cancel:
+   ```typescript
+   async interrupt(): Promise<void> {
+     // StubExecutor completes synchronously; nothing to interrupt.
+   }
+   ```
 
 ## Acceptance Criteria
 - [ ] Given a valid `ExecutorInvocation`, when calling `StubExecutor.run()`, then the output file exists at `outputPath`
@@ -50,6 +57,7 @@ Implementation:
 
 ## Technical Notes / Hints
 - Use `node:fs/promises` for async file writing: `await fs.mkdir(dir, { recursive: true })` then `await fs.writeFile(path, content, 'utf8')`
+- `Column` values are string literals (e.g., `'PRODUCT_SCOPING'`) and can be interpolated directly into the placeholder template via `${invocation.column}`
 
 ## Dependencies
 - M2-001: `Executor` interface
@@ -61,7 +69,7 @@ Domain port:     src/domain/ports/driven/executor.port.ts              — Execu
 ```
 
 ## Definition of Done
-- [ ] `StubExecutor` implements `Executor` interface (TypeScript enforced)
+- [ ] `StubExecutor` implements `Executor` interface (TypeScript enforced), including `interrupt()`
 - [ ] File is written correctly with placeholder content
-- [ ] Unit tests: file written, content includes ticket ID and column, missing dir created
+- [ ] Unit tests (`src/infrastructure/executor/stub-executor.adapter.test.ts`): file written, content includes ticket ID and column, missing dir created
 - [ ] Code reviewed and approved

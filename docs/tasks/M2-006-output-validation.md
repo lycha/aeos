@@ -12,11 +12,18 @@ Implement as a domain service in `src/domain/services/output-validation.ts`. The
 
 Exports:
 
+**`src/domain/model/validation-result.ts`:**
 ```typescript
 export interface ValidationResult {
   passed: boolean;
   violations: string[];
 }
+```
+
+**`src/domain/services/output-validation.ts`:**
+```typescript
+import { ValidationResult } from '../model/validation-result.js';
+import { ColumnSpec } from '../model/column-spec.js';
 
 export interface ValidationRule {
   name: string;
@@ -47,9 +54,10 @@ Built-in rules applied in order:
 ## Out of Scope
 - Semantic validation (that's the reviewer agent's job)
 - LLM-based quality checks
+- File path matching against output_spec (orchestration concern — handled by M2-011 before calling validateOutput)
 
 ## Dependencies
-- M2-007/M2-008: `ColumnSpec` type (can stub with a minimal interface for this task)
+- M2-007/M2-008: `ColumnSpec` type (can stub with `{ minWordCount: number; requiredSections: string[] }` if implementing before M2-007)
 
 ## Layer Mapping
 ```
@@ -57,6 +65,12 @@ Domain service:  src/domain/services/output-validation.ts     — validateOutput
 Domain model:    src/domain/model/validation-result.ts        — ValidationResult value object
                  src/domain/model/column-spec.ts              — ColumnSpec (input)
 ```
+
+## Technical Notes / Hints
+- ValidationResult is defined in `src/domain/model/validation-result.ts`; imported by the service
+- ValidationRule is exported for forward compatibility; in v1 only built-in rules run; custom rule injection is v2
+- Word count: split on whitespace (`\s+`), filter empty strings. Markdown tokens count as words — acceptable for minimum-threshold checks
+- `validateOutput()` is a pure function — no ports, no state, no infrastructure dependencies
 
 ## Definition of Done
 - [ ] All 4 built-in rules implemented and tested

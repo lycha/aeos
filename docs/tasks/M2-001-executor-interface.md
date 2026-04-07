@@ -43,7 +43,14 @@ export interface ExecutorResult {
 }
 
 export interface Executor {
+  /** Execute a prompt and write the artifact to the specified output path. */
   run(invocation: ExecutorInvocation): Promise<ExecutorResult>;
+
+  /**
+   * Interrupt a running execution. Kills any in-flight process.
+   * No-op if nothing is running. Used by `aeos ticket interrupt`.
+   */
+  interrupt(): Promise<void>;
 }
 ```
 
@@ -52,8 +59,20 @@ No implementation in this file — interface only.
 ## Acceptance Criteria
 - [ ] Given `src/domain/ports/driven/executor.port.ts`, when importing `Executor`, then it is a TypeScript interface (not a class)
 - [ ] Given an object implementing `Executor`, when TypeScript checks it, then it must have a `run` method matching the signature
+- [ ] Given an object implementing `Executor`, when TypeScript checks it, then it must have an `interrupt` method returning `Promise<void>`
 - [ ] Given `ExecutorResult` with `success: false`, when accessing `error`, then TypeScript allows it (it is optional)
 - [ ] Given `ExecutorInvocation`, when inspecting types, then `column` is typed as `Column` (from enums)
+
+## Design Notes
+
+### `AgentInvocation` → `ExecutorInvocation` rename
+The system design (§4.1) uses the name `AgentInvocation`. This task renames it to `ExecutorInvocation` because the invocation is sent to the executor, not to an abstract agent. The agent is a configuration; the executor is the runtime component. This aligns the name with the hexagonal port it accompanies.
+
+### Field evolution from system design (`exitCode?`/`stderr?` → `usage?`/`error?`)
+The system design (§4.1) defines `exitCode?` and `stderr?` on the result type. This task deliberately replaces them:
+- `exitCode?` is dropped — it is an implementation detail of CLI-based executors; API-based executors have no exit code. Keeping it would leak adapter concerns into the domain port.
+- `stderr?` is replaced by `error?` — a more general, executor-agnostic error string.
+- `usage?` (`inputTokens`, `outputTokens`, `costUsd`) is added to support cost tracking (PRD FR-30, FR-31) and maps directly to cost records (system design §9.1).
 
 ## Out of Scope
 - Any implementation (StubExecutor is M2-002, ClaudeCodeCliExecutor is M2-003)

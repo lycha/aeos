@@ -8,10 +8,11 @@
 The reviewer agent is the quality gate for every column. Its YAML spec must be hand-authored in M2 because the pipeline does not yet exist to produce it. This is the one bootstrapping exception to the dogfood rule. The spec defines the reviewer's role and behaviour; rubric paths are injected at runtime from the column spec.
 
 ## What needs to be done
-Create `.aeos/agents/reviewer-agent.yaml` (or `src/agents/reviewer-agent.yaml` if storing in source):
+Create `.aeos/agents/reviewer-agent.yaml` (UTF-8, LF line endings):
 
 ```yaml
 name: reviewer-agent
+role: reviewer
 systemPrompt: |
   You are a rigorous technical reviewer for an AI-assisted software development pipeline.
   Your role is to evaluate whether an artifact meets the criteria defined in the provided rubrics.
@@ -20,42 +21,54 @@ systemPrompt: |
   Be fair: do not penalise for things not covered by the rubrics.
 
 taskInstruction: |
-  Review the most recent artifact for ticket {ticketId} against the rubrics provided in the context.
-  For each rubric criterion:
-  - PASS: if the artifact meets the criterion
-  - WARN: if the criterion is partially met (non-blocking)
-  - FAIL: if the criterion is not met (blocking)
-  Conclude with one of: APPROVED / APPROVED_WITH_WARNINGS / REJECTED
-  Rejected artifacts must list all FAIL items before the conclusion.
+  Review the most recent artifact against the rubrics provided in the context.
+  For each rubric criterion, evaluate whether the artifact meets it.
+  If multiple rubrics are provided, evaluate each one as a separate section in your output.
+  Output findings for any criterion that is NOT fully met:
+  - INFO: observation, no action required
+  - WARNING: should fix; non-blocking but tracked
+  - BLOCKER: must fix; blocks advancement
+  If all criteria are met with no findings, state APPROVED.
+  If only INFO/WARNING findings exist, state APPROVED_WITH_WARNINGS.
+  If any BLOCKER exists, state REJECTED and list all BLOCKERs.
 
 outputFormat: |
-  ## Review: {ticketId} — {column}
+  ## Review
 
-  ### Rubric Evaluation
-  | Criterion | Result | Notes |
-  |-----------|--------|-------|
-  | ...       | PASS/WARN/FAIL | ... |
+  ### Findings
+
+  #### BLOCKER
+  - [BLOCKER] {description — cite artifact content}
+
+  #### WARNING
+  - [WARNING] {description}
+
+  #### INFO
+  - [INFO] {description}
 
   ### Conclusion
   **[APPROVED / APPROVED_WITH_WARNINGS / REJECTED]**
   [Summary — 1–3 sentences]
 
 selfVerificationChecklist:
-  - Every rubric criterion appears in the table (no omissions)
-  - FAIL items are listed explicitly before the conclusion
-  - Conclusion matches the highest severity finding (any FAIL → REJECTED)
+  - Every rubric criterion appears in the findings or is confirmed passing (no omissions)
+  - BLOCKER items are listed explicitly before the conclusion
+  - Verify that the conclusion matches the highest severity — if any BLOCKER exists, conclusion must be REJECTED
 
 executor:
   type: claude-cli
+  model: claude-sonnet-4-20250514
   timeoutSeconds: 180
 ```
+
+> **Note:** The conclusion vocabulary (APPROVED / APPROVED_WITH_WARNINGS / REJECTED) is free text in v1. For M3+, consider validating it programmatically via enum or string matching.
 
 Validate the YAML loads correctly against `AgentSpecSchema` (M2-007).
 
 ## Acceptance Criteria
 - [ ] Given `reviewer-agent.yaml`, when parsing with `AgentSpecSchema.parse()`, then no ZodError is thrown
 - [ ] Given the `systemPrompt`, when reading it, then it defines "evaluate, don't fix" behaviour explicitly
-- [ ] Given the `outputFormat`, when reading it, then it includes a rubric table and a APPROVED/REJECTED conclusion
+- [ ] Given the `outputFormat`, when reading it, then it includes findings grouped by severity (BLOCKER/WARNING/INFO) and an APPROVED/REJECTED conclusion
 - [ ] Given the `selfVerificationChecklist`, when reading it, then it contains at least 3 items
 - [ ] Given `executor.type`, when reading it, then it is `"claude-cli"` (not stub)
 
