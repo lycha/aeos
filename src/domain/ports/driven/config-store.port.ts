@@ -7,10 +7,13 @@ export interface GlobalConfig {
 }
 
 export interface ProjectRegistryEntry {
-  key: string;
+  uuid: string;
+  id: string;
   name: string;
+  key: string;
   path: string;
-  registeredAt: string;
+  aeos_path: string;
+  created_at: string;
 }
 
 export interface ConfigStore {
@@ -19,5 +22,6 @@ export interface ConfigStore {
   writeConfigIfNotExists(config: GlobalConfig): void;
   readRegistry(): ProjectRegistryEntry[];
   writeRegistry(entries: ProjectRegistryEntry[]): void;
+  writeRegistryIfNotExists(entries: ProjectRegistryEntry[]): void;
   ensureGlobalGitignore(pattern: string): void;
 }

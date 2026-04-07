@@ -10,7 +10,7 @@ export class InstallUseCase implements InstallPort {
   execute(): void {
     this.configStore.ensureHomeDir();
     this.configStore.writeConfigIfNotExists(DEFAULT_GLOBAL_CONFIG);
-    this.configStore.writeRegistry([]);
+    this.configStore.writeRegistryIfNotExists([]);
     this.configStore.ensureGlobalGitignore(AEOS_GITIGNORE_PATTERN);
   }
 }

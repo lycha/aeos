@@ -48,9 +48,13 @@ export class FsConfigStore implements ConfigStore {
   }
 
   writeRegistry(entries: ProjectRegistryEntry[]): void {
-    if (fs.existsSync(this.registryPath)) return;
     const data = { projects: entries };
     fs.writeFileSync(this.registryPath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+  }
+
+  writeRegistryIfNotExists(entries: ProjectRegistryEntry[]): void {
+    if (fs.existsSync(this.registryPath)) return;
+    this.writeRegistry(entries);
   }
 
   ensureGlobalGitignore(pattern: string): void {

@@ -10,6 +10,7 @@ function createMockConfigStore(): ConfigStore {
     writeConfigIfNotExists: vi.fn(),
     readRegistry: vi.fn().mockReturnValue([]),
     writeRegistry: vi.fn(),
+    writeRegistryIfNotExists: vi.fn(),
     ensureGlobalGitignore: vi.fn(),
   };
 }
@@ -33,9 +34,9 @@ describe('InstallUseCase', () => {
     expect(configStore.writeConfigIfNotExists).toHaveBeenCalledWith(DEFAULT_GLOBAL_CONFIG);
   });
 
-  it('should write empty registry', () => {
+  it('should write empty registry if not exists', () => {
     useCase.execute();
-    expect(configStore.writeRegistry).toHaveBeenCalledWith([]);
+    expect(configStore.writeRegistryIfNotExists).toHaveBeenCalledWith([]);
   });
 
   it('should ensure global gitignore pattern', () => {
@@ -51,8 +52,8 @@ describe('InstallUseCase', () => {
     (configStore.writeConfigIfNotExists as ReturnType<typeof vi.fn>).mockImplementation(() =>
       callOrder.push('writeConfigIfNotExists'),
     );
-    (configStore.writeRegistry as ReturnType<typeof vi.fn>).mockImplementation(() =>
-      callOrder.push('writeRegistry'),
+    (configStore.writeRegistryIfNotExists as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      callOrder.push('writeRegistryIfNotExists'),
     );
     (configStore.ensureGlobalGitignore as ReturnType<typeof vi.fn>).mockImplementation(() =>
       callOrder.push('ensureGlobalGitignore'),
@@ -63,7 +64,7 @@ describe('InstallUseCase', () => {
     expect(callOrder).toEqual([
       'ensureHomeDir',
       'writeConfigIfNotExists',
-      'writeRegistry',
+      'writeRegistryIfNotExists',
       'ensureGlobalGitignore',
     ]);
   });

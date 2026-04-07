@@ -98,22 +98,58 @@ describe('FsConfigStore', () => {
       expect(parsed).toEqual({ projects: [] });
     });
 
-    it('should not overwrite existing registry.json', () => {
+    it('should overwrite existing registry.json', () => {
       store.ensureHomeDir();
       store.writeRegistry([]);
 
-      // Write file with data manually
-      const registryPath = path.join(tmpDir, '.aeos', 'registry.json');
-      // writeRegistry should not overwrite
-      store.writeRegistry([{ key: 'k', name: 'n', path: '/p', registeredAt: '2024-01-01' }]);
+      const entry = {
+        uuid: 'u1',
+        id: 'n',
+        name: 'n',
+        key: 'K',
+        path: '/p',
+        aeos_path: '/p/.aeos',
+        created_at: '2024-01-01',
+      };
+      store.writeRegistry([entry]);
 
+      const registryPath = path.join(tmpDir, '.aeos', 'registry.json');
       const parsed = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
-      expect(parsed.projects).toEqual([]);
+      expect(parsed.projects).toEqual([entry]);
     });
 
     it('should return empty array when registry does not exist', () => {
       store.ensureHomeDir();
       expect(store.readRegistry()).toEqual([]);
+    });
+  });
+
+  describe('writeRegistryIfNotExists', () => {
+    it('should write registry.json when it does not exist', () => {
+      store.ensureHomeDir();
+      store.writeRegistryIfNotExists([]);
+      const registryPath = path.join(tmpDir, '.aeos', 'registry.json');
+      expect(fs.existsSync(registryPath)).toBe(true);
+    });
+
+    it('should not overwrite existing registry.json', () => {
+      store.ensureHomeDir();
+      store.writeRegistryIfNotExists([]);
+
+      const entry = {
+        uuid: 'u1',
+        id: 'n',
+        name: 'n',
+        key: 'K',
+        path: '/p',
+        aeos_path: '/p/.aeos',
+        created_at: '2024-01-01',
+      };
+      store.writeRegistryIfNotExists([entry]);
+
+      const registryPath = path.join(tmpDir, '.aeos', 'registry.json');
+      const parsed = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+      expect(parsed.projects).toEqual([]); // Original preserved
     });
   });
 
