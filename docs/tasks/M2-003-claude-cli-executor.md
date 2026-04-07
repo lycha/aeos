@@ -8,7 +8,7 @@
 The real executor that shells out to the `claude` CLI with the assembled prompt, captures stdout, and writes the artifact to disk. This is the primary LLM integration point for v1. Must be smoke-tested independently (M2-014) before M3 depends on it. Requires M2-001 (Executor interface).
 
 ## What needs to be done
-Create `src/executor/claude-cli-executor.ts` exporting:
+Implement in `src/infrastructure/executor/claude-cli-executor.adapter.ts`:
 
 ```typescript
 export class ClaudeCodeCliExecutor implements Executor {
@@ -45,6 +45,12 @@ Implementation:
 
 ## Dependencies
 - M2-001: `Executor` interface
+
+## Layer Mapping
+```
+Infrastructure:  src/infrastructure/executor/claude-cli-executor.adapter.ts  — ClaudeCodeCliExecutor adapter
+Domain port:     src/domain/ports/driven/executor.port.ts                    — Executor interface
+```
 
 ## Definition of Done
 - [ ] `ClaudeCodeCliExecutor` implements `Executor` interface

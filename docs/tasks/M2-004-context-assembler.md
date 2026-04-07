@@ -8,21 +8,24 @@
 Assembles the full context payload passed to `PromptBuilder`. Reads the ticket file, all prior artifacts for this ticket, and the project `CONSTRAINTS.md`. This is the primary source of truth for what the model sees — getting the assembly order wrong is the most common cause of "well-formed but wrong content" artifact failures.
 
 ## What needs to be done
-Create `src/prompt/context-assembler.ts` exporting:
+Implement as an application service in `src/application/services/context-assembler.ts`. The `AssembledContext` value object is already scaffolded in `src/domain/model/assembled-context.ts`.
+
+The service receives `ArtifactStore` and `ProjectRepository` ports via constructor injection — it does NOT directly call `fs` or `listArtifacts()`:
 
 ```typescript
-export interface AssembledContext {
-  ticketContent: string;
-  priorArtifacts: Array<{ name: string; content: string }>;
-  constraints: string | null;
-  columnSpec: ColumnSpec;
-}
+// src/application/services/context-assembler.ts
+export class ContextAssembler {
+  constructor(
+    private artifactStore: ArtifactStore,
+    private projectRepo: ProjectRepository,
+  ) {}
 
-export async function assembleContext(
-  ticketId: string,
-  columnSpec: ColumnSpec,
-  root?: string,
-): Promise<AssembledContext>
+  async assemble(
+    ticketId: string,
+    columnSpec: ColumnSpec,
+    projectRoot: string,
+  ): Promise<AssembledContext>
+}
 ```
 
 Assembly order and logic:
@@ -46,11 +49,19 @@ Assembly order and logic:
 - Lexicographic order of artifact file names ensures deterministic assembly: `AEOS-1-prd.md` before `AEOS-1-tech-spec.md`
 - Use `node:fs/promises` for async reads
 
+## Layer Mapping
+```
+Application:   src/application/services/context-assembler.ts  — ContextAssembler service
+Domain model:  src/domain/model/assembled-context.ts           — AssembledContext value object
+Domain ports:  src/domain/ports/driven/artifact-store.port.ts  — ArtifactStore (for reading artifacts)
+               src/domain/ports/driven/project-repository.port.ts — ProjectRepository (for CONSTRAINTS.md)
+```
+
 ## Dependencies
-- M1-013: `listArtifacts()` and `artifactPath()`
+- M1-013: `ArtifactStore` port implementation
 - M2-008: `ColumnSpec` type (from column spec loader)
 
 ## Definition of Done
-- [ ] `assembleContext()` correctly reads and orders all context pieces
-- [ ] Unit tests: 0 artifacts, 2 artifacts, missing CONSTRAINTS.md, CONSTRAINTS.md present
+- [ ] `ContextAssembler.assemble()` correctly reads and orders all context pieces
+- [ ] Unit tests with stub ports: 0 artifacts, 2 artifacts, missing CONSTRAINTS.md, CONSTRAINTS.md present
 - [ ] Code reviewed and approved

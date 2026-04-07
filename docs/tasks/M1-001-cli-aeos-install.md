@@ -11,16 +11,18 @@ First CLI command a user ever runs. Creates `~/.aeos/` global home directory, co
 
 ### CLI entrypoint wiring
 - Install Commander.js: `npm install commander`
-- Add `"bin": { "aeos": "./dist/cli.js" }` to `package.json`
-- Create `src/cli.ts` as the CLI entrypoint:
+- Add `"bin": { "aeos": "./dist/cli/index.js" }` to `package.json`
+- Update `src/cli/index.ts` as the CLI entrypoint:
   1. First line must be `#!/usr/bin/env node`
   2. Import and configure Commander.js: `const program = new Command(); program.name('aeos').version('0.1.0');`
   3. Register the `install` subcommand: `program.command('install').description('One-time global setup').action(installAction)`
-  4. Call `program.parse()`
+  4. Build the container via `createContainer()` from `src/cli/container.ts` and pass use cases to commands
+  5. Call `program.parse()`
 - After `npm run build`, run `npm link` to make `aeos` available globally during development
 
 ### Install command implementation
-- Implement `aeos install` command in `src/commands/install.ts`:
+- Implement the CLI command in `src/cli/commands/install.command.ts` — parses args, calls use case, formats output
+- Implement the use case in `src/application/install.use-case.ts` — orchestrates domain logic via `ConfigStore` and `GitGateway` ports:
   1. Create `~/.aeos/` directory if it does not exist (use `aeosHome()` from M1-011)
   2. Write `~/.aeos/config.json` with defaults if it does not exist: `{ "model": "claude-opus-4-6", "currency": "USD", "advanceMode": "manual" }`
   3. Create `~/.aeos/registry.json` as `{ "projects": [] }` if it does not exist
@@ -43,16 +45,23 @@ First CLI command a user ever runs. Creates `~/.aeos/` global home directory, co
 - First-run wizard / interactive prompts (M7-002)
 - Project-level init (M1-002)
 
+## Layer Mapping
+```
+CLI command:  src/cli/commands/install.command.ts    — parse args, call use case, print output
+Use case:     src/application/install.use-case.ts    — orchestrate via ConfigStore + GitGateway ports
+Domain:       (no new domain logic)
+Adapters:     FsConfigStore (src/infrastructure/filesystem/fs-config.adapter.ts)
+              SimpleGitGateway (src/infrastructure/git/simple-git-gateway.adapter.ts)
+```
+
 ## Technical Notes / Hints
-- Use `aeosHome()`, `aeosConfigPath()`, `aeosRegistryPath()` from `src/fs/aeos-home.ts` (M1-011) for all path resolution — do not use raw `os.homedir()` calls
-- Use `fs.existsSync` + `fs.mkdirSync({ recursive: true })` for directory creation
-- Use `fs.readFileSync` / `fs.writeFileSync` with JSON parse/stringify for config files
-- Use `child_process.execSync('git config --global core.excludesfile')` to read the existing value; handle the case where the command returns empty (no config set)
-- Wrap all filesystem and git operations in try/catch. On failure, print a clear error message indicating what failed and what the operator should check (e.g. `Error: Cannot write to ~/.aeos/. Check directory permissions.` or `Error: git is not installed or not in PATH.`). Exit with non-zero code on any failure.
+- The use case calls `ConfigStore.ensureHomeDir()`, `ConfigStore.writeConfigIfNotExists()`, `ConfigStore.writeRegistry()`, and `ConfigStore.ensureGlobalGitignore('.aeos/')` — all filesystem/git operations are in the adapter, not in the use case
+- The CLI command calls the use case, catches errors, formats the success/error message, and sets the exit code
+- Wrap all operations in try/catch. On failure, print a clear error message (e.g. `Error: Cannot write to ~/.aeos/. Check directory permissions.`). Exit with non-zero code on any failure.
 
 ## Dependencies
 - M0-002 through M0-005: TypeScript + scripts configured
-- M1-011: `aeosHome()` filesystem helper (implements path resolution utilities)
+- M1-011: `aeosHome()` filesystem helper (implements `FsConfigStore` adapter internals)
 
 ## Definition of Done
 - [ ] `aeos install` runs without error on a clean machine

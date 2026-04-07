@@ -8,7 +8,7 @@
 Walks up the directory tree from the current working directory to find the nearest `.aeos/` directory. Used by every ticket command to locate the project. Analogous to how `git` finds `.git/`. Requires M0-002 (TypeScript configured).
 
 ## What needs to be done
-Create `src/fs/project-root.ts` exporting:
+Implement in `src/infrastructure/filesystem/fs-project.repository.ts` as part of the `FsProjectRepository` adapter (implements `ProjectRepository` port). The `projectRoot()` function is an infrastructure concern — it walks the filesystem. Export it from the adapter or as a utility used internally by the adapter.
 
 ```typescript
 /**
@@ -28,17 +28,18 @@ Algorithm:
 4. If no: move to `path.dirname(current)`
 5. If `dirname(current) === current` (filesystem root): throw `ProjectRootNotFoundError`
 
-Also export:
+Also implement in the adapter:
 ```typescript
 export function aeosDir(root?: string): string  // returns projectRoot() + '/.aeos'
-export function stateDbPath(root?: string): string  // returns aeosDir() + '/state.db'
 ```
+
+> **Note:** `stateDbPath()` is no longer needed — the DB is global at `~/.aeos/state.db`, not per-project. Use `aeosHomePath('state.db')` from M1-011 instead.
 
 ## Acceptance Criteria
 - [ ] Given CWD inside a project with `.aeos/` in a parent, when calling `projectRoot()`, then it returns the correct parent directory
 - [ ] Given CWD with `.aeos/` in the same directory, when calling `projectRoot()`, then it returns CWD
 - [ ] Given CWD outside any AEOS project, when calling `projectRoot()`, then `ProjectRootNotFoundError` is thrown
-- [ ] Given `stateDbPath()` in a project, when called, then result ends with `/.aeos/state.db`
+- [ ] Given `aeosDir()` in a project, when called, then result ends with `/.aeos`
 
 ## Out of Scope
 - Validating that `.aeos/` is a well-formed project (beyond existence check)
@@ -49,6 +50,13 @@ export function stateDbPath(root?: string): string  // returns aeosDir() + '/sta
 
 ## Dependencies
 - M0-002: TypeScript configured
+
+## Layer Mapping
+```
+Infrastructure:  src/infrastructure/filesystem/fs-project.repository.ts  — projectRoot(), aeosDir() + ProjectRepository impl
+Domain port:     src/domain/ports/driven/project-repository.port.ts
+Shared:          src/shared/errors.ts                                     — ProjectRootNotFoundError
+```
 
 ## Definition of Done
 - [ ] `projectRoot()` walks up correctly and throws on missing project

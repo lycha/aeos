@@ -8,13 +8,20 @@
 Allows the operator to unblock a BLOCKED ticket after filling in answers in the questions artifact. The command validates the questions file has been modified and transitions the ticket back to WORKING so the run can resume. Requires M2-009 (pre-flight) and M1-009 (setSubState).
 
 ## What needs to be done
-Implement `src/commands/ticket-answer.ts`:
-1. Resolve project root and load ticket from DB
-2. Verify ticket sub-state is `BLOCKED`; if not, print error and exit 1
-3. Check that `<id>-questions.md` exists in `.aeos/`
-4. Read `<id>-questions.md` and verify it has been modified (file mtime > ticket `updated_at` timestamp)
-5. Call `setSubState(db, ticketId, 'WORKING')`
-6. Print: `✓ Ticket <id> unblocked. Run 'aeos ticket run <id>' to resume.`
+Implement the CLI command in `src/cli/commands/ticket-answer.command.ts` and the use case in `src/application/ticket-answer.use-case.ts`:
+
+**CLI command** (`ticket-answer.command.ts`):
+1. Parse `<id>` argument
+2. Resolve project context via `ProjectRepository`
+3. Call the use case; print result or error
+
+**Use case** (`ticket-answer.use-case.ts`):
+1. Load ticket via `TicketRepository.findById(projectId, ticketId)`
+2. Verify ticket sub-state is `BLOCKED`; if not, return error
+3. Check questions file exists via `ArtifactStore.artifactExists(ticketId, 'questions.md')`
+4. Read the questions file and verify it has been modified (file mtime > ticket `updated_at`)
+5. Call `stateMachine.setSubState(projectId, ticketId, 'WORKING')`
+6. Return success result to CLI command
 
 If ticket is not BLOCKED: `Error: Ticket <id> is not blocked (current state: <subState>). Only blocked tickets can be answered.`
 
@@ -32,10 +39,17 @@ If ticket is not BLOCKED: `Error: Ticket <id> is not blocked (current state: <su
 - Use `fs.statSync(path).mtime` for file modification time
 - For the confirmation prompt, use `readline` from `node:readline`
 
+## Layer Mapping
+```
+CLI command:     src/cli/commands/ticket-answer.command.ts       — parse args, call use case, format output
+Use case:        src/application/ticket-answer.use-case.ts       — orchestrate via ports
+Domain service:  src/domain/services/state-machine.ts            — StateMachineService.setSubState()
+Adapters:        SqliteTicketRepository, FsArtifactStore, FsProjectRepository
+```
+
 ## Dependencies
-- M1-009: `setSubState()`
+- M1-008/M1-009: `StateMachineService` (setSubState via ports)
 - M2-009: Pre-flight (creates questions file)
-- M1-012: `projectRoot()` helper
 
 ## Definition of Done
 - [ ] `aeos ticket answer` unblocks correctly on modified questions file

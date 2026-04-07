@@ -10,7 +10,8 @@ Reads and validates `.aeos/column-specs/*.yaml` files at runtime. The orchestrat
 ## What needs to be done
 Install: `npm install js-yaml` and `npm install -D @types/js-yaml`
 
-Create `src/column-spec/loader.ts` exporting:
+Implement in `src/infrastructure/spec-loader/yaml-column-spec-loader.adapter.ts` (implements `ColumnSpecLoader` port) and `src/infrastructure/spec-loader/yaml-agent-spec-loader.adapter.ts` (implements `AgentSpecLoader` port):
+
 
 ```typescript
 /**
@@ -60,6 +61,16 @@ Implementation for `loadColumnSpec`:
 ## Dependencies
 - M2-007: Zod schemas
 - M1-012: `aeosDir()` helper
+
+## Layer Mapping
+```
+Infrastructure:  src/infrastructure/spec-loader/yaml-column-spec-loader.adapter.ts  — ColumnSpecLoader impl
+                 src/infrastructure/spec-loader/yaml-agent-spec-loader.adapter.ts    — AgentSpecLoader impl
+Domain ports:    src/domain/ports/driven/column-spec-loader.port.ts
+                 src/domain/ports/driven/agent-spec-loader.port.ts
+Domain model:    src/domain/model/column-spec.ts — ColumnSpec type
+                 src/domain/model/agent-spec.ts  — AgentSpec type
+```
 
 ## Definition of Done
 - [ ] `loadColumnSpec()` and `loadAgentSpec()` load, validate, and return typed specs

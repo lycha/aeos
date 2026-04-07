@@ -8,7 +8,9 @@
 A structural sanity check run on every executor output before it is passed to the reviewer agent. Catches malformed or empty artifacts early — before spending tokens on a reviewer invocation. Returns a typed `ValidationResult` so the orchestrator can decide whether to fail the ticket or proceed.
 
 ## What needs to be done
-Create `src/validation/output-validator.ts` exporting:
+Implement as a domain service in `src/domain/services/output-validation.ts`. The `ValidationResult` value object is already scaffolded in `src/domain/model/validation-result.ts`.
+
+Exports:
 
 ```typescript
 export interface ValidationResult {
@@ -48,6 +50,13 @@ Built-in rules applied in order:
 
 ## Dependencies
 - M2-007/M2-008: `ColumnSpec` type (can stub with a minimal interface for this task)
+
+## Layer Mapping
+```
+Domain service:  src/domain/services/output-validation.ts     — validateOutput() + ValidationRule
+Domain model:    src/domain/model/validation-result.ts        — ValidationResult value object
+                 src/domain/model/column-spec.ts              — ColumnSpec (input)
+```
 
 ## Definition of Done
 - [ ] All 4 built-in rules implemented and tested

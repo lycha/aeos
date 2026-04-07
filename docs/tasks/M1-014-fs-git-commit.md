@@ -10,7 +10,7 @@ Wraps `simple-git` to produce structured commits in the `.aeos/.git` artifact re
 ## What needs to be done
 Install if not already present: `npm install simple-git`
 
-Create `src/fs/git-commit.ts` exporting:
+Implement in `src/infrastructure/git/simple-git-gateway.adapter.ts` as part of the `SimpleGitGateway` adapter (implements `GitGateway` port):
 
 ```typescript
 /**
@@ -58,6 +58,12 @@ Implementation:
 ## Dependencies
 - M1-002: `simple-git` available
 - M1-012: `aeosDir()` helper
+
+## Layer Mapping
+```
+Infrastructure:  src/infrastructure/git/simple-git-gateway.adapter.ts  — gitCommit() + GitGateway impl
+Domain port:     src/domain/ports/driven/git-gateway.port.ts
+```
 
 ## Definition of Done
 - [ ] `gitCommit()` stages and commits correctly

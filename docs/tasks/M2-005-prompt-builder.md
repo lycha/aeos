@@ -8,7 +8,7 @@
 Takes an `AssembledContext` and produces the final prompt string passed to the executor. The structure ([ROLE] / [CONTEXT] / [TASK] / [OUTPUT FORMAT] / [SELF-VERIFICATION]) is the primary quality lever for model output. Changes here affect every agent. Requires M2-004 (ContextAssembler).
 
 ## What needs to be done
-Create `src/prompt/prompt-builder.ts` exporting:
+Implement as an application service in `src/application/services/prompt-builder.ts`:
 
 ```typescript
 export function buildPrompt(
@@ -64,6 +64,13 @@ Where `AgentSpec` is a typed interface loaded from agent YAML files (see M2-007/
 ## Dependencies
 - M2-004: `AssembledContext` type
 - M2-007/M2-008: `AgentSpec` type (can be stubbed with a simple interface for this task)
+
+## Layer Mapping
+```
+Application:   src/application/services/prompt-builder.ts      — PromptBuilder service (or pure function)
+Domain model:  src/domain/model/assembled-context.ts           — AssembledContext input
+               src/domain/model/agent-spec.ts                  — AgentSpec input
+```
 
 ## Definition of Done
 - [ ] `buildPrompt()` produces correctly structured prompt string

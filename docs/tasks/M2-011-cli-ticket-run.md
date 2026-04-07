@@ -8,28 +8,49 @@
 The core orchestration command. Runs a full column cycle for a ticket: pre-flight → WORKING → executor → output validation → reviewer agent → SIGNED_OFF. This is the command that makes the pipeline real. Requires all M2 subsystems to be complete.
 
 ## What needs to be done
-Implement `src/commands/ticket-run.ts` with the following orchestration sequence:
+Implement the CLI command in `src/cli/commands/ticket-run.command.ts` and the use case in `src/application/ticket-run.use-case.ts`:
 
+**CLI command** (`ticket-run.command.ts`):
+1. Parse `<id>` argument
+2. Resolve project context; build the container (use cases + ports)
+3. Call the use case; print progress/result/errors
+
+**Use case** (`ticket-run.use-case.ts`) — receives all ports via constructor injection:
 ```
-1. Load ticket from DB; verify it is in a runnable state (not DONE, not already WORKING)
-2. Load ColumnSpec for current column; load AgentSpec from columnSpec.agentFile
-3. Run pre-flight (M2-009); if blocked → exit cleanly with "Ticket is blocked" message
-4. setSubState → WORKING
-5. assembleContext() (M2-004)
-6. buildPrompt() (M2-005)
+constructor(
+  ticketRepo: TicketRepository,
+  stateMachine: StateMachineService,
+  contextAssembler: ContextAssembler,
+  promptBuilder: PromptBuilder,
+  executor: Executor,
+  artifactStore: ArtifactStore,
+  gitGateway: GitGateway,
+  columnSpecLoader: ColumnSpecLoader,
+  agentSpecLoader: AgentSpecLoader,
+)
+```
+
+Orchestration sequence:
+```
+1. Load ticket via ticketRepo; verify it is in a runnable state (not DONE, not already WORKING)
+2. Load ColumnSpec via columnSpecLoader; load AgentSpec via agentSpecLoader
+3. Run pre-flight (M2-009); if blocked → return blocked result
+4. stateMachine.setSubState → WORKING
+5. contextAssembler.assemble()
+6. promptBuilder.buildPrompt()
 7. executor.run() → ExecutorResult
-8. If executor fails → setSubState(FAILED); print error; exit 1
-9. validateOutput() (M2-006); if violations → setSubState(FAILED); print violations; exit 1
+8. If executor fails → stateMachine.setSubState(FAILED); return error
+9. outputValidation.validateOutput(); if violations → stateMachine.setSubState(FAILED); return violations
 10. Run reviewer agent:
-    - assembleContext with the new artifact included
-    - buildPrompt using reviewer-agent.yaml + reviewer rubrics from columnSpec
+    - contextAssembler.assemble with the new artifact included
+    - promptBuilder.buildPrompt using reviewer-agent spec + reviewer rubrics
     - executor.run() → reviewer artifact (<id>-review.md)
-11. setSubState → IN_REVIEW; print reviewer output path
-12. setSubState → SIGNED_OFF (in v1, reviewer pass = automatic sign-off)
-13. Print: ✓ Column <column> complete for <id>. Run 'aeos ticket approve <id>' to advance.
+11. stateMachine.setSubState → IN_REVIEW
+12. stateMachine.setSubState → SIGNED_OFF (in v1, reviewer pass = automatic sign-off)
+13. Return success result
 ```
 
-The executor to use is determined by `agentSpec.executor.type` (stub or claude-cli).
+The executor to use is determined by container wiring (stub for tests, claude-cli for production).
 
 ## Acceptance Criteria
 - [ ] Given a ticket in BACKLOG with a stub column spec, when running `aeos ticket run AEOS-1`, then the ticket reaches SIGNED_OFF and an artifact is written
@@ -45,6 +66,18 @@ The executor to use is determined by `agentSpec.executor.type` (stub or claude-c
 ## Dependencies
 - M2-002 through M2-009: All harness subsystems
 - M2-013: `reviewer-agent.yaml` exists
+
+## Layer Mapping
+```
+CLI command:     src/cli/commands/ticket-run.command.ts              — parse args, call use case, print progress
+Use case:        src/application/ticket-run.use-case.ts              — orchestrate full column run
+App services:    src/application/services/context-assembler.ts       — ContextAssembler
+                 src/application/services/prompt-builder.ts          — PromptBuilder
+                 src/application/services/preflight.ts               — PreflightService (optional extraction)
+Domain service:  src/domain/services/state-machine.ts                — StateMachineService
+                 src/domain/services/output-validation.ts            — validateOutput()
+Domain ports:    Executor, TicketRepository, ArtifactStore, GitGateway, ColumnSpecLoader, AgentSpecLoader
+```
 
 ## Definition of Done
 - [ ] Full orchestration sequence executes in correct order

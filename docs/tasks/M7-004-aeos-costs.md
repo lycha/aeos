@@ -5,13 +5,18 @@
 **Method:** Manual
 
 ## Context
-Gives the operator visibility into LLM spend across all projects and tickets. Reads from `cost_records` tables in each project's `state.db`. Essential for users managing API budgets. Requires the `cost_records` table to have been populated by M2's executor (cost tracking is part of `ExecutorResult`).
+Gives the operator visibility into LLM spend across all projects and tickets. Reads from the `cost_records` table in the global `~/.aeos/state.db` (all cost records across all projects are stored centrally). Essential for users managing API budgets. Requires the `cost_records` table to have been populated by M2's executor (cost tracking is part of `ExecutorResult`).
 
 ## What needs to be done
-Implement `src/commands/costs.ts`:
+Implement the CLI command in `src/cli/commands/costs.command.ts` and the use case in `src/application/costs.use-case.ts`:
 
-1. Accept optional flags: `--project <key>`, `--ticket <id>`, `--since <YYYY-MM-DD>`
-2. Aggregate `cost_records` across all registered projects (or filtered by `--project`)
+**CLI command** (`costs.command.ts`):
+1. Parse optional flags: `--project <key>`, `--ticket <id>`, `--since <YYYY-MM-DD>`
+2. Call the use case with filters
+3. Render the report from returned data
+
+**Use case** (`costs.use-case.ts`):
+1. Query `CostRepository.findByFilters({ projectId?, ticketId?, since? })`
 3. Print a report:
    ```
    AEOS Cost Report
@@ -40,10 +45,22 @@ Implement `src/commands/costs.ts`:
 - Real-time budget alerts (v2)
 - Currency conversion (costs are stored in USD; display currency conversion is v2)
 
+## Technical Notes / Hints
+- Single DB query fetches all cost records — no need to open per-project DBs
+- The `agent` column (added to `cost_records` in M1-006 review) enables per-agent cost breakdowns in future iterations
+- Group by `project_id` for the "By Project" view
+
+## Layer Mapping
+```
+CLI command:  src/cli/commands/costs.command.ts     — parse flags, call use case, render report
+Use case:     src/application/costs.use-case.ts     — query CostRepository with filters, aggregate
+Domain ports: CostRepository
+Adapters:     SqliteCostRepository (src/infrastructure/persistence/sqlite-cost.repository.ts)
+```
+
 ## Dependencies
-- M1-006: SQLite `cost_records` table
+- M1-006: SQLite `cost_records` table (global DB with `project_id`, `agent`, `executor` columns)
 - M2-003: `ClaudeCodeCliExecutor` populates cost data
-- M1-011: `aeosRegistryPath()` to find all projects
 
 ## Definition of Done
 - [ ] `aeos costs` renders correct aggregated spend report

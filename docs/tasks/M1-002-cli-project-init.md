@@ -8,8 +8,8 @@
 Creates the per-project `.aeos/` working directory at the current working directory and registers the project in `~/.aeos/registry.json`. Required before any ticket commands can function. The `--key` flag sets the project ticket prefix (e.g., `AEOS`).
 
 ## What needs to be done
-Implement `src/commands/project-init.ts`:
-1. Accept `--name <name>` (defaults to the directory name) and `--key <key>` (defaults to uppercase dir name truncated to 4 chars). Validate that `--key` is 2–4 uppercase letters (regex: `/^[A-Z]{2,4}$/`); reject with a clear error if invalid.
+Implement the CLI command in `src/cli/commands/project-init.command.ts` and the use case in `src/application/project-init.use-case.ts`:
+1. **CLI command:** Accept `--name <name>` (defaults to the directory name) and `--key <key>` (defaults to uppercase dir name truncated to 4 chars). Validate that `--key` is 2–4 uppercase letters (regex: `/^[A-Z]{2,4}$/`); reject with a clear error if invalid. Pass validated args to use case.
 2. Derive a human-readable slug `id` from `--name` by lowercasing and replacing non-alphanumeric characters with hyphens (e.g. `"My Project"` → `"my-project"`). Also generate a `uuid` via `crypto.randomUUID()` for cross-project uniqueness.
 3. Create `.aeos/` at CWD if it does not exist
 4. Initialize `.aeos/.git` as a separate git repo (`git init`) for artifact versioning
@@ -54,14 +54,21 @@ Implement `src/commands/project-init.ts`:
 - State database initialisation (M1-006 — SQLite schema)
 - Column spec file creation (M2)
 
+## Layer Mapping
+```
+CLI command:  src/cli/commands/project-init.command.ts  — parse args, validate --key, call use case, print output
+Use case:     src/application/project-init.use-case.ts  — orchestrate via ProjectRepository, ConfigStore, GitGateway ports
+Domain:       src/domain/model/project.ts               — Project value object
+Adapters:     FsProjectRepository (src/infrastructure/filesystem/fs-project.repository.ts)
+              FsConfigStore (src/infrastructure/filesystem/fs-config.adapter.ts)
+              SimpleGitGateway (src/infrastructure/git/simple-git-gateway.adapter.ts)
+```
+
 ## Technical Notes / Hints
+- The use case calls `ProjectRepository.writeProject()`, `ConfigStore.writeRegistry()`, and `GitGateway.init()` — filesystem operations live in adapters
 - Use `crypto.randomUUID()` (Node 19+) for the project `uuid`
-- Use `child_process.execSync('git init', { cwd: aeosDir })` to initialise the git repo — `simple-git` is not needed for a one-shot `git init`. M1-014 (`gitCommit()` helper) will install `simple-git` when its richer async API is required.
-- Use `aeosRegistryPath()` from M1-011 to resolve `~/.aeos/registry.json` — do not hardcode `os.homedir()` paths
-- Wrap all filesystem and git operations in try/catch. On failure, print a clear error message and exit with non-zero code. Examples:
-  - `Error: Cannot create .aeos/ directory. Check directory permissions.`
-  - `Error: git is not installed or not in PATH.`
-  - `Error: ~/.aeos/registry.json is corrupt. Run 'aeos install' to reset.`
+- Use `child_process.execSync('git init', { cwd: aeosDir })` inside the `SimpleGitGateway` adapter — `simple-git` is not needed for a one-shot `git init`. M1-014 (`gitCommit()` helper) will install `simple-git` when its richer async API is required.
+- Wrap all operations in try/catch. On failure, print a clear error message and exit with non-zero code.
 
 ## Dependencies
 - M1-001: `aeos install` complete (global dirs exist)

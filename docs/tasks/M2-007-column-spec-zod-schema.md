@@ -10,7 +10,11 @@ Column specs are YAML files in `.aeos/column-specs/` that configure each pipelin
 ## What needs to be done
 Install: `npm install zod`
 
-Create `src/column-spec/schema.ts` exporting:
+Implement the Zod schemas alongside the existing domain model types. The schemas provide runtime validation; the inferred types replace the placeholder types:
+- `ColumnSpecSchema` → `src/domain/model/column-spec.ts`
+- `AgentSpecSchema` → `src/domain/model/agent-spec.ts`
+
+Exports:
 
 ```typescript
 import { z } from 'zod';
@@ -62,6 +66,13 @@ export type AgentSpec = z.infer<typeof AgentSpecSchema>;
 
 ## Dependencies
 - M0-002: TypeScript configured
+
+## Layer Mapping
+```
+Domain model:  src/domain/model/column-spec.ts   — ColumnSpecSchema + ColumnSpec type
+Domain model:  src/domain/model/agent-spec.ts     — AgentSpecSchema + AgentSpec type
+Barrel:        src/domain/model/index.ts          — re-exports both
+```
 
 ## Definition of Done
 - [ ] Both schemas exported and compile cleanly

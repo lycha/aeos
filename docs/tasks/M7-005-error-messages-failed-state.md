@@ -8,7 +8,7 @@
 Every FAILED state must have a specific, actionable error message that tells the operator exactly what went wrong and what to do next. Generic "something went wrong" errors are unacceptable for a CLI tool. This is a polish pass across the entire codebase — every `setSubState(FAILED)` call must be accompanied by a structured error message.
 
 ## What needs to be done
-Create `src/errors/error-messages.ts` with an enum of all FAILED scenarios and their messages:
+Implement in `src/shared/errors.ts` (extends the existing shared errors module) with an enum of all FAILED scenarios and their messages:
 
 **Failure scenarios to cover (minimum):**
 1. `EXECUTOR_TIMEOUT` — `✗ Executor timed out after {timeout}s for {ticketId} in {column}.\n  → Check claude CLI connectivity. Run 'aeos ticket run {id}' to retry.`
@@ -18,7 +18,7 @@ Create `src/errors/error-messages.ts` with an enum of all FAILED scenarios and t
 5. `PREFLIGHT_BLOCKED` — `✗ Pre-flight identified blockers for {ticketId}.\n  Questions: {questionsPath}\n  → Answer the questions and run 'aeos ticket answer {id}'.`
 6. `CLAUDE_NOT_FOUND` — `✗ 'claude' CLI not found on PATH.\n  → Install: npm install -g @anthropic-ai/claude-code`
 
-Audit every `setSubState(FAILED)` call in the codebase and ensure each one uses one of these messages.
+Audit every `stateMachine.setSubState(projectId, ticketId, 'FAILED')` call in the codebase and ensure each one uses one of these messages.
 
 ## Acceptance Criteria
 - [ ] Given executor timeout, when printed to stderr, then message includes timeout duration, ticket ID, and retry instruction
@@ -38,8 +38,13 @@ Audit every `setSubState(FAILED)` call in the codebase and ensure each one uses 
 ## Dependencies
 - All M1 and M2 implementation tasks complete (audit requires all setSubState calls to exist)
 
+## Layer Mapping
+```
+Shared:  src/shared/errors.ts   — FailedScenario enum + formatError() function
+```
+
 ## Definition of Done
-- [ ] `src/errors/error-messages.ts` implemented with all 6 scenarios
-- [ ] Every `setSubState(FAILED)` call in the codebase uses a named error message
+- [ ] `src/shared/errors.ts` extended with all 6 FAILED scenarios
+- [ ] Every `stateMachine.setSubState(..., 'FAILED')` call in the codebase uses a named error message
 - [ ] Unit tests: each message format renders correctly with its context variables
 - [ ] Code reviewed and approved

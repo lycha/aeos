@@ -8,7 +8,12 @@
 The Executor is the abstraction boundary between the orchestrator and whatever runs the LLM call. Defining the interface first lets `StubExecutor` and `ClaudeCodeCliExecutor` be built independently and swapped without changing the orchestrator. Required before M2-002 and M2-003.
 
 ## What needs to be done
-Create `src/executor/executor.ts` exporting:
+These types are already scaffolded across the domain layer. Implement them in their respective files:
+- `ExecutorInvocation` → `src/domain/model/executor-invocation.ts`
+- `ExecutorResult` → `src/domain/model/executor-result.ts`
+- `Executor` port → `src/domain/ports/driven/executor.port.ts`
+
+Definitions:
 
 ```typescript
 export interface ExecutorInvocation {
@@ -45,7 +50,7 @@ export interface Executor {
 No implementation in this file — interface only.
 
 ## Acceptance Criteria
-- [ ] Given `src/executor/executor.ts`, when importing `Executor`, then it is a TypeScript interface (not a class)
+- [ ] Given `src/domain/ports/driven/executor.port.ts`, when importing `Executor`, then it is a TypeScript interface (not a class)
 - [ ] Given an object implementing `Executor`, when TypeScript checks it, then it must have a `run` method matching the signature
 - [ ] Given `ExecutorResult` with `success: false`, when accessing `error`, then TypeScript allows it (it is optional)
 - [ ] Given `ExecutorInvocation`, when inspecting types, then `column` is typed as `Column` (from enums)
@@ -56,7 +61,15 @@ No implementation in this file — interface only.
 ## Dependencies
 - M1-007: `Column` enum
 
+## Layer Mapping
+```
+Domain model:  src/domain/model/executor-invocation.ts   — ExecutorInvocation value object
+Domain model:  src/domain/model/executor-result.ts       — ExecutorResult value object
+Domain port:   src/domain/ports/driven/executor.port.ts  — Executor interface
+Barrel:        src/domain/model/index.ts + src/domain/ports/driven/index.ts
+```
+
 ## Definition of Done
-- [ ] Interface file exists and compiles with `tsc --noEmit`
+- [ ] All three files exist and compile with `tsc --noEmit`
 - [ ] JSDoc comments on all fields
 - [ ] Code reviewed and approved

@@ -8,13 +8,18 @@
 Creates a new ticket markdown file in `.aeos/tickets/<ID>/` and registers it in the state database as `BACKLOG`. The ticket ID is auto-assigned using the project key and an incrementing counter (e.g., `AEOS-1`). Depends on M1-002 (project init) and M1-006 (SQLite schema).
 
 ## What needs to be done
-Implement `src/commands/ticket-create.ts`:
-1. Resolve project root by walking up from CWD to find `.aeos/` (use `projectRoot()` helper from M1-012)
-2. Read `project.json` to get the project `key`
-3. Determine next ticket number by querying the tickets table (MAX id + 1)
-4. Assign ticket ID: `<KEY>-<N>` (e.g., `AEOS-1`)
-5. Create `.aeos/tickets/<KEY>-<N>/` directory if it does not exist
-6. Write the ticket file using `artifactPath(ticketId, 'ticket.md')` from M1-013, with the following template:
+Implement the CLI command in `src/cli/commands/ticket-create.command.ts` and the use case in `src/application/ticket-create.use-case.ts`:
+
+**CLI command** (`ticket-create.command.ts`):
+1. Parse `<title>` argument
+2. Resolve project root via `ProjectRepository.findRoot()` and read project key
+3. Call the use case with `{ title, projectId }`
+4. Print: `✓ Created ticket <KEY>-<N>: "<title>"`
+
+**Use case** (`ticket-create.use-case.ts`):
+1. Query `TicketRepository.nextId(projectId)` to determine next ticket number
+2. Assign ticket ID: `<KEY>-<N>` (e.g., `AEOS-1`)
+3. Create ticket directory and write the ticket file via `ArtifactStore.writeArtifact(ticketId, 'ticket.md', content)` with the following template:
    ```markdown
    # Ticket: <KEY>-<N>
 
@@ -30,10 +35,10 @@ Implement `src/commands/ticket-create.ts`:
    ## Notes
    <!-- Additional context, links, constraints -->
    ```
-7. Insert a row into the `tickets` table: `{ id, title, column: 'BACKLOG', subState: null, createdAt }`
-   - `sub_state` is `null` for BACKLOG tickets — no agent has run, so no sub-state applies. Requires `sub_state` to be nullable in the DB schema (coordinate with M1-006).
-8. Commit the new file to `.aeos/.git` using `gitCommit()` helper (M1-014) with message: `[<KEY>-<N>][TICKET][v1][human][create]`
-9. Print: `✓ Created ticket <KEY>-<N>: "<title>"`
+4. Save ticket to DB via `TicketRepository.save({ id, projectId, title, column: 'BACKLOG', subState: null, createdAt, updatedAt })`
+   - `sub_state` is `null` for BACKLOG tickets — no agent has run, so no sub-state applies
+5. Commit the new file via `GitGateway.commit()` with message: `[<KEY>-<N>][TICKET][v1][human][create]`
+6. Return the created ticket ID to the CLI command
 
 ## Acceptance Criteria
 - [ ] Given an initialised project, when running `aeos ticket create "Add rate limiting"`, then `AEOS-1-ticket.md` exists in `.aeos/tickets/AEOS-1/`
@@ -46,17 +51,25 @@ Implement `src/commands/ticket-create.ts`:
 - Editing ticket description (done manually by operator in the file)
 - Template injection from column specs (M2)
 
+## Layer Mapping
+```
+CLI command:  src/cli/commands/ticket-create.command.ts   — parse title, resolve project, call use case, print result
+Use case:     src/application/ticket-create.use-case.ts   — orchestrate via TicketRepository, ArtifactStore, GitGateway ports
+Domain:       src/domain/model/ticket.ts                  — Ticket aggregate
+Adapters:     SqliteTicketRepository (src/infrastructure/persistence/sqlite-ticket.repository.ts)
+              FsArtifactStore (src/infrastructure/filesystem/fs-artifact-store.adapter.ts)
+              SimpleGitGateway (src/infrastructure/git/simple-git-gateway.adapter.ts)
+              FsProjectRepository (src/infrastructure/filesystem/fs-project.repository.ts)
+```
+
 ## Technical Notes / Hints
 - The ticket markdown file is immutable after creation — column state lives in the DB, not in the file
-- Use `artifactPath()` from M1-013 for all path construction — do not hardcode paths inline
-- The `tickets/` subdirectory under `.aeos/` keeps artifacts separated from AEOS config files (`project.json`, `state.db`, `column-specs/`)
+- The use case calls ports (TicketRepository, ArtifactStore, GitGateway) — no raw `fs` or `db` imports in the use case
+- The `tickets/` subdirectory under `.aeos/` keeps artifacts separated from AEOS config files (`project.json`, `column-specs/`)
 
 ## Dependencies
 - M1-002: `aeos project init` complete
 - M1-006: SQLite schema created (`sub_state` column must be nullable — coordinate)
-- M1-012: `projectRoot()` helper
-- M1-013: `artifactPath()` helper (canonical path for ticket artifacts)
-- M1-014: `gitCommit()` helper
 
 ## Definition of Done
 - [ ] `aeos ticket create` writes correct file in `.aeos/tickets/<ID>/` and DB row

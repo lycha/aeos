@@ -5,14 +5,20 @@
 **Method:** Manual
 
 ## Context
-A terminal-rendered Kanban view of all registered projects and their tickets. The operator can see the state of every AEOS project at a glance without changing directories. Reads from `~/.aeos/registry.json` and each project's `state.db`.
+A terminal-rendered Kanban view of all registered projects and their tickets. The operator can see the state of every AEOS project at a glance without changing directories. Reads from the global `~/.aeos/state.db` (all tickets across all projects are stored centrally) and `~/.aeos/registry.json` for project metadata (names, paths).
 
 ## What needs to be done
-Implement `src/commands/dashboard.ts`:
+Implement the CLI command in `src/cli/commands/dashboard.command.ts` and the use case in `src/application/dashboard.use-case.ts`:
 
-1. Read `~/.aeos/registry.json` to get all registered projects
-2. For each project, open its `state.db` (read-only) and query all tickets
-3. Group tickets by column
+**CLI command** (`dashboard.command.ts`):
+1. Call the use case (no arguments needed — dashboard is workspace-global)
+2. Render the terminal table from the returned data
+
+**Use case** (`dashboard.use-case.ts`):
+1. Read registry via `ConfigStore.readRegistry()`
+2. Query all tickets via `TicketRepository.findAll()` — sorted by `project_id`, then numerically by ticket number
+3. Group tickets by project, then by column
+4. Return structured data to CLI command for rendering
 4. Render a terminal table:
    ```
    ═══════════════════════════════════════════════════════════════
@@ -26,13 +32,12 @@ Implement `src/commands/dashboard.ts`:
    │ AEOS-6 BLOCKED  │                  │ AEOS-2 ✓         │
    └─────────────────┴──────────────────┴──────────────────┘
    ```
-5. Only show columns with tickets (skip empty columns in the display)
-6. If a project's DB is not accessible (project moved/deleted), skip it with a warning
+6. Only show columns with tickets (skip empty columns in the display)
+7. If a project in `registry.json` has no tickets in the DB, show it with an empty state message
 
 ## Acceptance Criteria
 - [ ] Given 2 registered projects each with 3 tickets, when running `aeos dashboard`, then both projects appear with their tickets grouped by column
 - [ ] Given a project with no tickets, when running `aeos dashboard`, then the project shows with an empty state message
-- [ ] Given a project whose `state.db` is inaccessible, when running `aeos dashboard`, then that project is skipped with `Warning: cannot read project at <path>`
 - [ ] Given output, when reading, then column counts in headers are accurate (e.g., `BACKLOG (2)`)
 - [ ] Given no registered projects, when running `aeos dashboard`, then: `No projects found. Run 'aeos project init' in a project directory.`
 
@@ -44,12 +49,23 @@ Implement `src/commands/dashboard.ts`:
 - Use box-drawing Unicode characters for borders (`┌`, `─`, `┬`, `┐`, `│`, `└`, `┘`)
 - `process.stdout.columns` gives the terminal width — use it to set max column width
 
+## Technical Notes / Hints
+- Single DB query fetches all tickets across all projects — no need to open per-project DBs
+- Use `registry.json` for project display metadata (name, path) and `project_id` for DB correlation
+- If `sub_state` is `null` (BACKLOG tickets), display the appropriate symbol (e.g., `⚪`)
+
+## Layer Mapping
+```
+CLI command:  src/cli/commands/dashboard.command.ts     — render terminal table
+Use case:     src/application/dashboard.use-case.ts     — query TicketRepository + ConfigStore, group data
+Domain ports: TicketRepository, ConfigStore
+Adapters:     SqliteTicketRepository, FsConfigStore
+```
+
 ## Dependencies
-- M1-006: SQLite schema (for reading project DBs)
-- M1-011: `aeosHome()` and `aeosRegistryPath()`
+- M1-006: SQLite schema (global `~/.aeos/state.db` with `project_id` column)
 
 ## Definition of Done
 - [ ] `aeos dashboard` renders multi-project Kanban in terminal
-- [ ] Inaccessible projects skipped gracefully
-- [ ] Unit tests: multiple projects, empty project, inaccessible DB
+- [ ] Unit tests: multiple projects, empty project, null sub_state display
 - [ ] Code reviewed and approved

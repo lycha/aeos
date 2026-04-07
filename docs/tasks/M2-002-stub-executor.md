@@ -8,7 +8,7 @@
 A no-op executor that writes a placeholder markdown artifact to the output path without making any real LLM call. Used to validate state machine flow end-to-end before the real executor is needed. The stub is the only executor used during M2's full pipeline smoke test. Requires M2-001 (Executor interface).
 
 ## What needs to be done
-Create `src/executor/stub-executor.ts` exporting:
+Implement in `src/infrastructure/executor/stub-executor.adapter.ts`:
 
 ```typescript
 export class StubExecutor implements Executor {
@@ -53,6 +53,12 @@ Implementation:
 
 ## Dependencies
 - M2-001: `Executor` interface
+
+## Layer Mapping
+```
+Infrastructure:  src/infrastructure/executor/stub-executor.adapter.ts  — StubExecutor adapter
+Domain port:     src/domain/ports/driven/executor.port.ts              — Executor interface
+```
 
 ## Definition of Done
 - [ ] `StubExecutor` implements `Executor` interface (TypeScript enforced)
