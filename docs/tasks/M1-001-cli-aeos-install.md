@@ -23,7 +23,7 @@ First CLI command a user ever runs. Creates `~/.aeos/` global home directory, co
 - Implement `aeos install` command in `src/commands/install.ts`:
   1. Create `~/.aeos/` directory if it does not exist (use `aeosHome()` from M1-011)
   2. Write `~/.aeos/config.json` with defaults if it does not exist: `{ "model": "claude-opus-4-6", "currency": "USD", "advanceMode": "manual" }`
-  3. Create `~/.aeos/registry.json` as an empty array `[]` if it does not exist
+  3. Create `~/.aeos/registry.json` as `{ "projects": [] }` if it does not exist
   4. Configure global gitignore (matching M0-006 logic):
      1. Read `git config --global core.excludesfile`
      2. If a value exists, use **that file** as the target
