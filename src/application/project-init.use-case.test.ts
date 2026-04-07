@@ -11,6 +11,7 @@ function createMockProjectRepo(): ProjectRepository {
     read: vi.fn(),
     writeProject: vi.fn(),
     ensureColumnSpecsDir: vi.fn(),
+    findRoot: vi.fn().mockReturnValue(null),
   };
 }
 
@@ -29,6 +30,7 @@ function createMockConfigStore(): ConfigStore {
 function createMockGitGateway(): GitGateway {
   return {
     init: vi.fn(),
+    commit: vi.fn(),
   };
 }
 

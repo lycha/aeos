@@ -32,4 +32,20 @@ export class FsProjectRepository implements ProjectRepository {
     const dir = path.join(projectPath, AEOS_DIR, COLUMN_SPECS_DIR);
     fs.mkdirSync(dir, { recursive: true });
   }
+
+  findRoot(startDir: string): string | null {
+    let current = path.resolve(startDir);
+    const root = path.parse(current).root;
+
+    while (true) {
+      const candidate = path.join(current, AEOS_DIR, PROJECT_JSON);
+      if (fs.existsSync(candidate)) {
+        return current;
+      }
+      if (current === root) {
+        return null;
+      }
+      current = path.dirname(current);
+    }
+  }
 }

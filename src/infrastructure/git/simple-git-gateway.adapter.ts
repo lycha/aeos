@@ -7,4 +7,12 @@ export class SimpleGitGateway implements GitGateway {
   init(dir: string): void {
     execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
   }
+
+  commit(dir: string, message: string): void {
+    execFileSync('git', ['add', '.'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', message, '--allow-empty'], {
+      cwd: dir,
+      stdio: 'ignore',
+    });
+  }
 }
