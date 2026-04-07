@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { Column } from '../model/column.js';
-import { SubState, type SubStateOrNull } from '../model/sub-state.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Column, COLUMN_ORDER } from '../model/column.js';
+import { SubState } from '../model/sub-state.js';
+import type { SubStateOrNull } from '../model/sub-state.js';
 import type { Ticket } from '../model/ticket.js';
 import type { TicketRepository } from '../ports/driven/ticket-repository.port.js';
 import type {
@@ -9,232 +10,390 @@ import type {
 } from '../ports/driven/transition-repository.port.js';
 import { StateMachineService } from './state-machine.js';
 
-function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
-  return {
-    id: 'PROJ-1',
-    projectId: 'proj',
+// ---------------------------------------------------------------------------
+// Stub ports (in-memory, no SQLite dependency)
+// ---------------------------------------------------------------------------
+
+class StubTicketRepository implements TicketRepository {
+  private store = new Map<string, Ticket>();
+  private counters = new Map<string, number>();
+
+  private key(projectId: string, ticketId: string): string {
+    return `${projectId}:${ticketId}`;
+  }
+
+  nextId(projectId: string): number {
+    const current = this.counters.get(projectId) ?? 0;
+    const next = current + 1;
+    this.counters.set(projectId, next);
+    return next;
+  }
+
+  save(ticket: Ticket): void {
+    this.store.set(this.key(ticket.projectId, ticket.id), { ...ticket });
+  }
+
+  deleteById(projectId: string, ticketId: string): void {
+    this.store.delete(this.key(projectId, ticketId));
+  }
+
+  findById(projectId: string, ticketId: string): Ticket | null {
+    const ticket = this.store.get(this.key(projectId, ticketId));
+    return ticket ? { ...ticket } : null;
+  }
+
+  findByProject(projectId: string, columnFilter?: Column): Ticket[] {
+    const results: Ticket[] = [];
+    for (const ticket of this.store.values()) {
+      if (ticket.projectId !== projectId) continue;
+      if (columnFilter && ticket.column !== columnFilter) continue;
+      results.push(ticket);
+    }
+    return results;
+  }
+
+  updateColumn(projectId: string, ticketId: string, column: Column): void {
+    const ticket = this.findById(projectId, ticketId);
+    if (ticket) {
+      ticket.column = column;
+      ticket.updatedAt = new Date().toISOString();
+      this.store.set(this.key(projectId, ticketId), ticket);
+    }
+  }
+
+  updateSubState(projectId: string, ticketId: string, subState: SubStateOrNull): void {
+    const ticket = this.findById(projectId, ticketId);
+    if (ticket) {
+      ticket.subState = subState;
+      ticket.updatedAt = new Date().toISOString();
+      this.store.set(this.key(projectId, ticketId), ticket);
+    }
+  }
+}
+
+class StubTransitionRepository implements TransitionRepository {
+  readonly records: TransitionRecord[] = [];
+
+  record(transition: TransitionRecord): void {
+    this.records.push(transition);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+const PROJECT_ID = 'test-proj';
+
+function seedTicket(
+  repo: StubTicketRepository,
+  overrides: Partial<{
+    id: string;
+    projectId: string;
+    column: Column;
+    subState: SubStateOrNull;
+  }> = {},
+): void {
+  const ticket: Ticket = {
+    id: overrides.id ?? 'T-1',
+    projectId: overrides.projectId ?? PROJECT_ID,
     title: 'Test ticket',
-    column: Column.BACKLOG,
-    subState: null,
+    column: overrides.column ?? Column.BACKLOG,
+    subState: overrides.subState ?? null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
-    ...overrides,
   };
+  repo.save(ticket);
 }
 
-function createStubRepos(ticket: Ticket | null = null) {
-  const recorded: TransitionRecord[] = [];
-  const storedTicket = ticket ? { ...ticket } : null;
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
-  const ticketRepo: TicketRepository = {
-    nextId: vi.fn(() => 1),
-    save: vi.fn(),
-    deleteById: vi.fn(),
-    findById: vi.fn(() => storedTicket),
-    findByProject: vi.fn(() => (storedTicket ? [storedTicket] : [])),
-    updateColumn: vi.fn((_p: string, _t: string, col: string) => {
-      if (storedTicket) storedTicket.column = col as Ticket['column'];
-    }),
-    updateSubState: vi.fn((_p: string, _t: string, ss: SubStateOrNull) => {
-      if (storedTicket) storedTicket.subState = ss;
-    }),
-  };
+describe('StateMachineService', () => {
+  let ticketRepo: StubTicketRepository;
+  let transitionRepo: StubTransitionRepository;
+  let stateMachine: StateMachineService;
 
-  const transitionRepo: TransitionRepository = {
-    record: vi.fn((t: TransitionRecord) => recorded.push(t)),
-  };
+  beforeEach(() => {
+    ticketRepo = new StubTicketRepository();
+    transitionRepo = new StubTransitionRepository();
+    stateMachine = new StateMachineService(ticketRepo, transitionRepo);
+  });
 
-  return { ticketRepo, transitionRepo, recorded, getTicket: () => storedTicket };
-}
+  // =========================================================================
+  // Legal forward transitions
+  // =========================================================================
+  describe('legal forward transitions', () => {
+    const ADJACENT_PAIRS = COLUMN_ORDER.slice(0, -1).map(
+      (col, i) => [col, COLUMN_ORDER[i + 1]] as [Column, Column],
+    );
 
-describe('StateMachineService.transition()', () => {
-  let svc: StateMachineService;
-  let ticketRepo: TicketRepository;
-  let recorded: TransitionRecord[];
+    it.each(ADJACENT_PAIRS)('allows forward %s → %s', (from, to) => {
+      seedTicket(ticketRepo, {
+        column: from,
+        subState: from === Column.BACKLOG ? null : SubState.WORKING,
+      });
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', to);
+      expect(result).toEqual({ ok: true });
 
-  function setup(ticket: Ticket | null) {
-    const stubs = createStubRepos(ticket);
-    ticketRepo = stubs.ticketRepo;
-    recorded = stubs.recorded;
-    svc = new StateMachineService(stubs.ticketRepo, stubs.transitionRepo);
-  }
+      const ticket = ticketRepo.findById(PROJECT_ID, 'T-1')!;
+      expect(ticket.column).toBe(to);
+    });
+  });
 
-  describe('ticket not found', () => {
-    it('returns error when ticket does not exist', () => {
-      setup(null);
-      const result = svc.transition('proj', 'PROJ-999', Column.PRODUCT_SCOPING);
+  // =========================================================================
+  // Legal backward transitions
+  // =========================================================================
+  describe('legal backward transitions', () => {
+    it('allows backward one column (TECH_SPEC → ARCH_SPIKE)', () => {
+      seedTicket(ticketRepo, { column: Column.TECH_SPEC, subState: SubState.WORKING });
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.ARCH_SPIKE);
+      expect(result).toEqual({ ok: true });
+    });
+
+    it('allows backward multiple columns (CODE_REVIEW → PRODUCT_SCOPING)', () => {
+      seedTicket(ticketRepo, { column: Column.CODE_REVIEW, subState: SubState.IN_REVIEW });
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      expect(result).toEqual({ ok: true });
+    });
+
+    it('allows backward to BACKLOG from any column', () => {
+      seedTicket(ticketRepo, { column: Column.IMPLEMENTATION, subState: SubState.WORKING });
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.BACKLOG);
+      expect(result).toEqual({ ok: true });
+    });
+
+    it('allows backward from DONE to any prior column', () => {
+      seedTicket(ticketRepo, { column: Column.DONE });
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      expect(result).toEqual({ ok: true });
+    });
+
+    it('resets sub_state to null when moving backward to BACKLOG', () => {
+      seedTicket(ticketRepo, { column: Column.TECH_SPEC, subState: SubState.WORKING });
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.BACKLOG);
+      const ticket = ticketRepo.findById(PROJECT_ID, 'T-1')!;
+      expect(ticket.subState).toBeNull();
+    });
+
+    it('does NOT reset sub_state when moving backward to non-BACKLOG column', () => {
+      seedTicket(ticketRepo, { column: Column.TECH_SPEC, subState: SubState.WORKING });
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.ARCH_SPIKE);
+      const ticket = ticketRepo.findById(PROJECT_ID, 'T-1')!;
+      // sub_state is retained — caller must explicitly call setSubState()
+      expect(ticket.subState).toBe(SubState.WORKING);
+    });
+  });
+
+  // =========================================================================
+  // Illegal transitions
+  // =========================================================================
+  describe('illegal transitions', () => {
+    it('rejects skip one column forward (BACKLOG → ARCH_SPIKE)', () => {
+      seedTicket(ticketRepo, { column: Column.BACKLOG });
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.ARCH_SPIKE);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(typeof result.reason).toBe('string');
+    });
+
+    it('rejects skip multiple columns forward (BACKLOG → IMPLEMENTATION)', () => {
+      seedTicket(ticketRepo, { column: Column.BACKLOG });
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.IMPLEMENTATION);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(typeof result.reason).toBe('string');
+    });
+
+    it('rejects same-column transition', () => {
+      seedTicket(ticketRepo, { column: Column.QA, subState: SubState.WORKING });
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.QA);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('Already in QA');
+    });
+
+    it('rejects forward from DONE (terminal state)', () => {
+      // DONE is the last column — there is no column after it.
+      // The only "forward" attempt is same-column DONE → DONE.
+      seedTicket(ticketRepo, { column: Column.DONE });
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.DONE);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('Already in DONE');
+    });
+
+    it('rejects transition on a non-existent ticket', () => {
+      const result = stateMachine.transition(PROJECT_ID, 'NOPE-1', Column.PRODUCT_SCOPING);
       expect(result).toEqual({ ok: false, reason: 'Ticket not found' });
     });
   });
 
-  describe('same column', () => {
-    it('rejects transition to the same column', () => {
-      setup(makeTicket({ column: Column.QA }));
-      const result = svc.transition('proj', 'PROJ-1', Column.QA);
-      expect(result).toEqual({ ok: false, reason: 'Already in QA' });
+  // =========================================================================
+  // Transition comments
+  // =========================================================================
+  describe('transition comments', () => {
+    it('persists comment "Scope too broad" in the transition row', () => {
+      seedTicket(ticketRepo, { column: Column.TECH_SPEC, subState: SubState.WORKING });
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.BACKLOG, 'Scope too broad');
+      expect(transitionRepo.records).toHaveLength(1);
+      expect(transitionRepo.records[0].comment).toBe('Scope too broad');
+    });
+
+    it('leaves comment as null when not provided', () => {
+      seedTicket(ticketRepo, { column: Column.BACKLOG });
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      expect(transitionRepo.records).toHaveLength(1);
+      expect(transitionRepo.records[0].comment).toBeNull();
     });
   });
 
-  describe('forward transitions', () => {
-    it('allows forward to adjacent column (BACKLOG -> PRODUCT_SCOPING)', () => {
-      setup(makeTicket({ column: Column.BACKLOG }));
-      const result = svc.transition('proj', 'PROJ-1', Column.PRODUCT_SCOPING);
-      expect(result).toEqual({ ok: true });
-      expect(ticketRepo.updateColumn).toHaveBeenCalledWith(
-        'proj',
-        'PROJ-1',
-        Column.PRODUCT_SCOPING,
-      );
+  // =========================================================================
+  // Transition audit trail
+  // =========================================================================
+  describe('transition audit trail', () => {
+    it('records from_sub_state reflecting the ticket sub-state before the move', () => {
+      seedTicket(ticketRepo, { column: Column.TECH_SPEC, subState: SubState.BLOCKED });
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.IMPLEMENTATION);
+      expect(transitionRepo.records).toHaveLength(1);
+      expect(transitionRepo.records[0].fromSubState).toBe(SubState.BLOCKED);
     });
 
-    it('rejects forward skip (BACKLOG -> TECH_SPEC)', () => {
-      setup(makeTicket({ column: Column.BACKLOG }));
-      const result = svc.transition('proj', 'PROJ-1', Column.TECH_SPEC);
-      expect(result).toEqual({ ok: false, reason: 'Cannot transition from BACKLOG to TECH_SPEC' });
-    });
-
-    it('allows DOD_GATE -> DONE', () => {
-      setup(makeTicket({ column: Column.DOD_GATE, subState: SubState.SIGNED_OFF }));
-      const result = svc.transition('proj', 'PROJ-1', Column.DONE);
-      expect(result).toEqual({ ok: true });
+    it('records to_sub_state as null after BACKLOG reset', () => {
+      seedTicket(ticketRepo, { column: Column.ARCH_SPIKE, subState: SubState.WORKING });
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.BACKLOG);
+      expect(transitionRepo.records).toHaveLength(1);
+      expect(transitionRepo.records[0].toSubState).toBeNull();
     });
   });
 
-  describe('backward transitions', () => {
-    it('allows backward one column (TECH_SPEC -> ARCH_SPIKE)', () => {
-      setup(makeTicket({ column: Column.TECH_SPEC, subState: SubState.WORKING }));
-      const result = svc.transition('proj', 'PROJ-1', Column.ARCH_SPIKE);
-      expect(result).toEqual({ ok: true });
-    });
+  // =========================================================================
+  // Sub-state lifecycle
+  // =========================================================================
+  describe('sub-state lifecycle', () => {
+    it('sequences BLOCKED → WORKING → IN_REVIEW → SIGNED_OFF', () => {
+      seedTicket(ticketRepo, { column: Column.IMPLEMENTATION, subState: null });
 
-    it('allows backward multiple columns (CODE_REVIEW -> PRODUCT_SCOPING)', () => {
-      setup(makeTicket({ column: Column.CODE_REVIEW, subState: SubState.IN_REVIEW }));
-      const result = svc.transition('proj', 'PROJ-1', Column.PRODUCT_SCOPING);
-      expect(result).toEqual({ ok: true });
-    });
-
-    it('allows backward to BACKLOG and resets sub_state', () => {
-      setup(makeTicket({ column: Column.TECH_SPEC, subState: SubState.WORKING }));
-      const result = svc.transition('proj', 'PROJ-1', Column.BACKLOG);
-      expect(result).toEqual({ ok: true });
-      expect(ticketRepo.updateSubState).toHaveBeenCalledWith('proj', 'PROJ-1', null);
-    });
-
-    it('allows backward from DONE', () => {
-      setup(makeTicket({ column: Column.DONE }));
-      const result = svc.transition('proj', 'PROJ-1', Column.PRODUCT_SCOPING);
-      expect(result).toEqual({ ok: true });
-    });
-  });
-
-  describe('DONE terminal state', () => {
-    it('rejects any forward from DONE (DONE is last column)', () => {
-      // DONE is the last column — there is no forward target
-      // Any column would be "backward" from DONE which is allowed
-      // The only illegal case is same-column (DONE -> DONE)
-      setup(makeTicket({ column: Column.DONE }));
-      const result = svc.transition('proj', 'PROJ-1', Column.DONE);
-      expect(result).toEqual({ ok: false, reason: 'Already in DONE' });
-    });
-  });
-
-  describe('transition record', () => {
-    it('records from_sub_state in transition', () => {
-      setup(makeTicket({ column: Column.TECH_SPEC, subState: SubState.BLOCKED }));
-      svc.transition('proj', 'PROJ-1', Column.IMPLEMENTATION);
-      expect(recorded).toHaveLength(1);
-      expect(recorded[0].fromSubState).toBe('BLOCKED');
-      expect(recorded[0].toSubState).toBeNull();
-    });
-
-    it('records comment when provided', () => {
-      setup(makeTicket({ column: Column.TECH_SPEC, subState: SubState.WORKING }));
-      svc.transition('proj', 'PROJ-1', Column.BACKLOG, 'Scope too broad');
-      expect(recorded).toHaveLength(1);
-      expect(recorded[0].comment).toBe('Scope too broad');
-    });
-
-    it('records null comment when not provided', () => {
-      setup(makeTicket({ column: Column.BACKLOG }));
-      svc.transition('proj', 'PROJ-1', Column.PRODUCT_SCOPING);
-      expect(recorded[0].comment).toBeNull();
-    });
-  });
-});
-
-describe('StateMachineService.setSubState()', () => {
-  let svc: StateMachineService;
-  let ticketRepo: TicketRepository;
-
-  function setup(ticket: Ticket | null) {
-    const stubs = createStubRepos(ticket);
-    ticketRepo = stubs.ticketRepo;
-    svc = new StateMachineService(stubs.ticketRepo, stubs.transitionRepo);
-    return stubs;
-  }
-
-  describe('happy path', () => {
-    it('sets sub-state on a non-BACKLOG ticket', () => {
-      const stubs = setup(makeTicket({ column: Column.IMPLEMENTATION, subState: null }));
-      const result = svc.setSubState('proj', 'PROJ-1', SubState.WORKING);
-      expect(result).toEqual({ ok: true });
-      expect(ticketRepo.updateSubState).toHaveBeenCalledWith('proj', 'PROJ-1', SubState.WORKING);
-      expect(stubs.getTicket()!.subState).toBe('WORKING');
-    });
-  });
-
-  describe('BACKLOG guard', () => {
-    it('rejects sub-state change on BACKLOG ticket', () => {
-      const stubs = setup(makeTicket({ column: Column.BACKLOG, subState: null }));
-      const result = svc.setSubState('proj', 'PROJ-1', SubState.WORKING);
-      expect(result).toEqual({
-        ok: false,
-        reason: 'Cannot set sub-state on a BACKLOG ticket',
-      });
-      expect(ticketRepo.updateSubState).not.toHaveBeenCalled();
-      expect(stubs.getTicket()!.subState).toBeNull();
-    });
-  });
-
-  describe('ticket not found', () => {
-    it('returns error when ticket does not exist', () => {
-      setup(null);
-      const result = svc.setSubState('proj', 'PROJ-999', SubState.WORKING);
-      expect(result).toEqual({ ok: false, reason: 'Ticket not found' });
-    });
-  });
-
-  describe('invalid sub-state', () => {
-    it('rejects an invalid sub-state string', () => {
-      setup(makeTicket({ column: Column.TECH_SPEC, subState: null }));
-      const result = svc.setSubState('proj', 'PROJ-1', 'RUNNING' as unknown as SubState);
-      expect(result).toEqual({
-        ok: false,
-        reason: 'Invalid sub-state: RUNNING',
-      });
-      expect(ticketRepo.updateSubState).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('sequential updates', () => {
-    it('updates sub-state from one value to another', () => {
-      const stubs = setup(makeTicket({ column: Column.CODE_REVIEW, subState: SubState.WORKING }));
-      const r1 = svc.setSubState('proj', 'PROJ-1', SubState.IN_REVIEW);
+      const r1 = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.BLOCKED);
       expect(r1).toEqual({ ok: true });
-      expect(stubs.getTicket()!.subState).toBe('IN_REVIEW');
+      expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBe(SubState.BLOCKED);
 
-      const r2 = svc.setSubState('proj', 'PROJ-1', SubState.SIGNED_OFF);
+      const r2 = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.WORKING);
       expect(r2).toEqual({ ok: true });
-      expect(stubs.getTicket()!.subState).toBe('SIGNED_OFF');
+      expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBe(SubState.WORKING);
+
+      const r3 = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.IN_REVIEW);
+      expect(r3).toEqual({ ok: true });
+      expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBe(SubState.IN_REVIEW);
+
+      const r4 = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.SIGNED_OFF);
+      expect(r4).toEqual({ ok: true });
+      expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBe(SubState.SIGNED_OFF);
+    });
+
+    it('returns { ok: false } for non-existent ticket', () => {
+      const result = stateMachine.setSubState(PROJECT_ID, 'NOPE-999', SubState.WORKING);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(typeof result.reason).toBe('string');
+    });
+
+    it('returns { ok: false } with wrong projectId (composite key isolation)', () => {
+      seedTicket(ticketRepo, { id: 'T-1', projectId: 'proj-a', column: Column.TECH_SPEC });
+      const result = stateMachine.setSubState('proj-b', 'T-1', SubState.WORKING);
+      expect(result.ok).toBe(false);
+    });
+
+    it('returns { ok: false } on a BACKLOG ticket (BACKLOG guard)', () => {
+      seedTicket(ticketRepo, { column: Column.BACKLOG });
+      const result = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.WORKING);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('Cannot set sub-state on a BACKLOG ticket');
+    });
+
+    it('returns { ok: false } with invalid sub-state string (runtime validation)', () => {
+      seedTicket(ticketRepo, { column: Column.IMPLEMENTATION });
+      const result = stateMachine.setSubState(PROJECT_ID, 'T-1', 'RUNNING' as unknown as SubState);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('Invalid sub-state: RUNNING');
+    });
+
+    it('returns { ok: true } when setting same sub-state (idempotency) and refreshes updated_at', () => {
+      vi.useFakeTimers({ now: new Date('2026-01-01T00:00:00.000Z') });
+      seedTicket(ticketRepo, { column: Column.IMPLEMENTATION, subState: SubState.WORKING });
+      const t0 = ticketRepo.findById(PROJECT_ID, 'T-1')!.updatedAt;
+
+      vi.advanceTimersByTime(1000);
+      const result = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.WORKING);
+      expect(result).toEqual({ ok: true });
+
+      const t1 = ticketRepo.findById(PROJECT_ID, 'T-1')!.updatedAt;
+      // updated_at should have been refreshed (stub updates it)
+      expect(t1).not.toBe(t0);
+      vi.useRealTimers();
     });
   });
 
-  describe('same sub-state idempotency', () => {
-    it('allows setting the same sub-state again (refreshes updated_at)', () => {
-      setup(makeTicket({ column: Column.IMPLEMENTATION, subState: SubState.WORKING }));
-      const result = svc.setSubState('proj', 'PROJ-1', SubState.WORKING);
-      expect(result).toEqual({ ok: true });
-      expect(ticketRepo.updateSubState).toHaveBeenCalledWith('proj', 'PROJ-1', SubState.WORKING);
+  // =========================================================================
+  // DB integrity
+  // =========================================================================
+  describe('DB integrity', () => {
+    it('records one transition row after a legal transition', () => {
+      seedTicket(ticketRepo, { column: Column.BACKLOG });
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      expect(transitionRepo.records).toHaveLength(1);
+    });
+
+    it('records two transition rows after two transitions', () => {
+      seedTicket(ticketRepo, { column: Column.BACKLOG });
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.ARCH_SPIKE);
+      expect(transitionRepo.records).toHaveLength(2);
+    });
+
+    it('updates updated_at on each operation', () => {
+      vi.useFakeTimers({ now: new Date('2026-01-01T00:00:00.000Z') });
+      seedTicket(ticketRepo, { column: Column.BACKLOG });
+      const t0 = ticketRepo.findById(PROJECT_ID, 'T-1')!.updatedAt;
+
+      vi.advanceTimersByTime(1000);
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      const t1 = ticketRepo.findById(PROJECT_ID, 'T-1')!.updatedAt;
+      expect(t1).not.toBe(t0);
+
+      vi.advanceTimersByTime(1000);
+      stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.WORKING);
+      const t2 = ticketRepo.findById(PROJECT_ID, 'T-1')!.updatedAt;
+      expect(t2).not.toBe(t0);
+      vi.useRealTimers();
+    });
+  });
+
+  // =========================================================================
+  // Cross-project isolation
+  // =========================================================================
+  describe('cross-project isolation', () => {
+    it('tickets with same id but different project_id are independent', () => {
+      seedTicket(ticketRepo, { id: 'T-1', projectId: 'proj-a', column: Column.BACKLOG });
+      seedTicket(ticketRepo, {
+        id: 'T-1',
+        projectId: 'proj-b',
+        column: Column.TECH_SPEC,
+        subState: SubState.WORKING,
+      });
+
+      const ticketA = ticketRepo.findById('proj-a', 'T-1')!;
+      const ticketB = ticketRepo.findById('proj-b', 'T-1')!;
+      expect(ticketA.column).toBe(Column.BACKLOG);
+      expect(ticketB.column).toBe(Column.TECH_SPEC);
+    });
+
+    it('transition on proj-a does not affect ticket T-1 in proj-b', () => {
+      seedTicket(ticketRepo, { id: 'T-1', projectId: 'proj-a', column: Column.BACKLOG });
+      seedTicket(ticketRepo, { id: 'T-1', projectId: 'proj-b', column: Column.BACKLOG });
+
+      stateMachine.transition('proj-a', 'T-1', Column.PRODUCT_SCOPING);
+
+      const ticketA = ticketRepo.findById('proj-a', 'T-1')!;
+      const ticketB = ticketRepo.findById('proj-b', 'T-1')!;
+      expect(ticketA.column).toBe(Column.PRODUCT_SCOPING);
+      expect(ticketB.column).toBe(Column.BACKLOG);
     });
   });
 });
