@@ -30,10 +30,10 @@ Add the following scripts to `package.json`:
   - `npm run typecheck` → exits 0
 
 ## Acceptance Criteria
-- [ ] Given the repo root, when running `npm run build`, then `dist/` is produced and exit code is 0
-- [ ] Given the repo root, when running `npm test`, then exit code is 0
-- [ ] Given the repo root, when running `npm run lint`, then exit code is 0
-- [ ] Given the repo root, when running `npm run typecheck`, then exit code is 0
+- [x] Given the repo root, when running `npm run build`, then `dist/` is produced and exit code is 0
+- [x] Given the repo root, when running `npm test`, then exit code is 0
+- [x] Given the repo root, when running `npm run lint`, then exit code is 0
+- [x] Given the repo root, when running `npm run typecheck`, then exit code is 0
 
 ## Out of Scope
 - `prepublish` or release scripts (M7)
@@ -50,5 +50,5 @@ Add the following scripts to `package.json`:
 - M0-004: Vitest configured
 
 ## Definition of Done
-- [ ] All four core scripts (`build`, `test`, `lint`, `typecheck`) run without error
+- [x] All four core scripts (`build`, `test`, `lint`, `typecheck`) run without error
 - [ ] `package.json` committed and code reviewed

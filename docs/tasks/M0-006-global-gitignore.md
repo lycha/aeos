@@ -30,10 +30,10 @@ Prevents `.aeos/` from ever appearing in `git status` of any project. This is a 
    `.aeos/` directory, run `git status`, confirm it is not listed, then **remove the directory**.
 
 ## Acceptance Criteria
-- [ ] Given the active global gitignore file (determined in step 1), when inspecting the file, then `.aeos/` is listed as an entry
-- [ ] Given `git config --global core.excludesfile`, when running this command, then it returns a valid path to an existing file
-- [ ] Given a temporary `.aeos/` directory created inside the `aeos` dev repo, when running `git status`, then `.aeos/` does not appear in the output
-- [ ] Given the verification above, when it passes, then the temporary `.aeos/` directory has been removed
+- [x] Given the active global gitignore file (determined in step 1), when inspecting the file, then `.aeos/` is listed as an entry
+- [x] Given `git config --global core.excludesfile`, when running this command, then it returns a valid path to an existing file
+- [x] Given a temporary `.aeos/` directory created inside the `aeos` dev repo, when running `git status`, then `.aeos/` does not appear in the output
+- [x] Given the verification above, when it passes, then the temporary `.aeos/` directory has been removed
 
 ## Out of Scope
 - Per-repo `.gitignore` entries for `.aeos/` (the global rule is intentional — users should not need per-repo config)
@@ -47,6 +47,6 @@ Prevents `.aeos/` from ever appearing in `git status` of any project. This is a 
 - M0-001: Repo cloned locally
 
 ## Definition of Done
-- [ ] Active global gitignore file contains `.aeos/`
-- [ ] `git config --global core.excludesfile` confirms the file is registered (no duplicate config)
-- [ ] Verification test (temp `.aeos/` + `git status`) passes and temp directory removed
+- [x] Active global gitignore file contains `.aeos/`
+- [x] `git config --global core.excludesfile` confirms the file is registered (no duplicate config)
+- [x] Verification test (temp `.aeos/` + `git status`) passes and temp directory removed

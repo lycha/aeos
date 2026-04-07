@@ -23,9 +23,9 @@ Establishes the testing baseline. All state machine and helper unit tests in M1 
 - Confirm `npx vitest run` exits 0 and reports 1 test passed
 
 ## Acceptance Criteria
-- [ ] Given the repo, when running `npx vitest run`, then exit code is 0 and 1 test passes
-- [ ] Given `vitest.config.ts`, when inspecting `test.include`, then only `src/**/*.test.ts` files are picked up
-- [ ] Given `npx vitest run --coverage`, then a coverage report is produced in `coverage/`
+- [x] Given the repo, when running `npx vitest run`, then exit code is 0 and 1 test passes
+- [x] Given `vitest.config.ts`, when inspecting `test.include`, then only `src/**/*.test.ts` files are picked up
+- [x] Given `npx vitest run --coverage`, then a coverage report is produced in `coverage/`
 
 ## Out of Scope
 - Integration or end-to-end test setup
@@ -39,6 +39,6 @@ Establishes the testing baseline. All state machine and helper unit tests in M1 
 - M0-002: TypeScript initialized
 
 ## Definition of Done
-- [ ] `vitest.config.ts` and smoke test committed
-- [ ] `npx vitest run` exits 0
+- [x] `vitest.config.ts` and smoke test committed
+- [x] `npx vitest run` exits 0
 - [ ] Code reviewed and approved

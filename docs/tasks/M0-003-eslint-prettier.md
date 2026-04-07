@@ -37,10 +37,10 @@ Enforces consistent code style and catches common errors before they reach CI. M
 - Confirm `npx prettier --check src/` exits 0
 
 ## Acceptance Criteria
-- [ ] Given `src/index.ts`, when running `npx eslint 'src/**/*.ts'`, then exit code is 0
-- [ ] Given `src/index.ts`, when running `npx prettier --check src/`, then exit code is 0
-- [ ] Given a file using `any` type explicitly, when running ESLint, then an error is reported
-- [ ] Given misformatted code, when running `npx prettier --check`, then exit code is non-zero
+- [x] Given `src/index.ts`, when running `npx eslint 'src/**/*.ts'`, then exit code is 0
+- [x] Given `src/index.ts`, when running `npx prettier --check src/`, then exit code is 0
+- [x] Given a file using `any` type explicitly, when running ESLint, then an error is reported
+- [x] Given misformatted code, when running `npx prettier --check`, then exit code is non-zero
 
 ## Out of Scope
 - IDE plugin configuration (developer choice)
@@ -57,6 +57,6 @@ Enforces consistent code style and catches common errors before they reach CI. M
 - M0-002: TypeScript initialized
 
 ## Definition of Done
-- [ ] `.prettierrc`, `.prettierignore`, `eslint.config.js` committed
-- [ ] `npx eslint 'src/**/*.ts'` and `npx prettier --check src/` both pass
+- [x] `.prettierrc`, `.prettierignore`, `eslint.config.js` committed
+- [x] `npx eslint 'src/**/*.ts'` and `npx prettier --check src/` both pass
 - [ ] Code reviewed and approved

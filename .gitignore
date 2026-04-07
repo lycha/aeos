@@ -4,3 +4,6 @@ coverage/
 *.js.map
 .env
 .env.local
+
+# IDE
+.idea/

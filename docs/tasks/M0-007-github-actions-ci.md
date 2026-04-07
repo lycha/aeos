@@ -50,6 +50,6 @@ Provides automated quality gates on every push and pull request. Must reference 
 - M0-005: `package.json` scripts defined
 
 ## Definition of Done
-- [ ] `.github/workflows/ci.yml` committed and pushed
+- [x] `.github/workflows/ci.yml` committed and pushed
 - [ ] GitHub Actions shows a green run on the push
 - [ ] All four steps (typecheck, lint, build, test) are individually visible in the Actions log

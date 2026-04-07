@@ -4,18 +4,28 @@
   "description": "",
   "type": "module",
   "engines": {
-    "node": ">=20"
-  },
-  "directories": {
-    "doc": "docs"
+    "node": ">=22"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc --project tsconfig.json",
+    "dev": "tsc --watch --project tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint 'src/**/*.ts' && prettier --check src/",
+    "lint:fix": "eslint 'src/**/*.ts' --fix && prettier --write src/",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "typescript": "^6.0.2"
+    "@vitest/coverage-v8": "^4.1.3",
+    "eslint": "^10.2.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.58.0",
+    "vitest": "^4.1.3"
   }
 }
