@@ -124,3 +124,54 @@ describe('SimpleGitGateway.commitFiles', () => {
     expect(files).toContain('file2.md');
   });
 });
+
+describe('SimpleGitGateway.diff', () => {
+  let tmpDir: string;
+  let gateway: SimpleGitGateway;
+  const originalCwd = process.cwd();
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-git-diff-test-'));
+
+    // Initialise a git repo
+    execFileSync('git', ['init'], { cwd: tmpDir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], {
+      cwd: tmpDir,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['config', 'user.name', 'Test'], {
+      cwd: tmpDir,
+      stdio: 'ignore',
+    });
+
+    // Create an initial commit so HEAD exists
+    const filePath = path.join(tmpDir, 'initial.md');
+    fs.writeFileSync(filePath, 'initial content\n');
+    execFileSync('git', ['add', '.'], { cwd: tmpDir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmpDir, stdio: 'ignore' });
+
+    gateway = new SimpleGitGateway();
+    process.chdir(tmpDir);
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns empty string when there are no changes', () => {
+    const result = gateway.diff(tmpDir);
+
+    expect(result).toBe('');
+  });
+
+  it('returns diff content when files have been modified', () => {
+    // Modify the tracked file
+    fs.writeFileSync(path.join(tmpDir, 'initial.md'), 'modified content\n');
+
+    const result = gateway.diff(tmpDir);
+
+    expect(result).toContain('diff --git');
+    expect(result).toContain('modified content');
+  });
+});

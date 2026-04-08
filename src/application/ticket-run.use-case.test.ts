@@ -45,7 +45,12 @@ function createMockArtifactStore(): ArtifactStore {
 }
 
 function createMockGitGateway(): GitGateway {
-  return { init: vi.fn(), commit: vi.fn(), commitFiles: vi.fn() };
+  return {
+    init: vi.fn(),
+    commit: vi.fn(),
+    commitFiles: vi.fn(),
+    diff: vi.fn().mockReturnValue(''),
+  };
 }
 
 function createMockStateMachine() {
@@ -127,7 +132,7 @@ function defaultAgentSpec(): AgentSpec {
 }
 
 function defaultContext(): AssembledContext {
-  return { ticketContent: 'ticket content', priorArtifacts: [], constraints: null };
+  return { ticketContent: 'ticket content', priorArtifacts: [], constraints: null, codeDiff: null };
 }
 
 function runnableTicket(overrides: Partial<Ticket> = {}): Ticket {

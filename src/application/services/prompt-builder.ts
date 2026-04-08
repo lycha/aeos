@@ -51,6 +51,11 @@ function buildContextSection(context: AssembledContext): string {
     parts.push(`## Prior Artifacts\n${artifactParts}`);
   }
 
+  // Code Diff — omit section entirely if null
+  if (context.codeDiff !== null) {
+    parts.push(`## Code Diff\n${context.codeDiff}`);
+  }
+
   // Constraints
   parts.push(`## Constraints\n${context.constraints ?? '(none)'}`);
 

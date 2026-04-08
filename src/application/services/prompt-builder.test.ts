@@ -20,6 +20,7 @@ function createContext(overrides: Partial<AssembledContext> = {}): AssembledCont
     ticketContent: '# AEOS-1\nImplement feature X',
     priorArtifacts: [],
     constraints: null,
+    codeDiff: null,
     ...overrides,
   };
 }
@@ -151,5 +152,29 @@ describe('buildPrompt', () => {
     expect(result).toContain('[TASK]\n');
     expect(result).toContain('[OUTPUT FORMAT]\n');
     expect(result).toContain('## Ticket\n');
+  });
+
+  it('renders ## Code Diff section when codeDiff is present', () => {
+    const context = createContext({ codeDiff: 'diff --git a/foo.ts b/foo.ts\n+hello' });
+    const result = buildPrompt(context, createAgentSpec());
+
+    expect(result).toContain('## Code Diff\ndiff --git a/foo.ts b/foo.ts\n+hello');
+  });
+
+  it('omits ## Code Diff section when codeDiff is null', () => {
+    const context = createContext({ codeDiff: null });
+    const result = buildPrompt(context, createAgentSpec());
+
+    expect(result).not.toContain('## Code Diff');
+  });
+
+  it('renders codeDiff with truncation warning when present', () => {
+    const codeDiff =
+      'x'.repeat(100) + '\n\n[DIFF TRUNCATED — showing first 50,000 characters of 60000 total]';
+    const context = createContext({ codeDiff });
+    const result = buildPrompt(context, createAgentSpec());
+
+    expect(result).toContain('## Code Diff');
+    expect(result).toContain('[DIFF TRUNCATED');
   });
 });

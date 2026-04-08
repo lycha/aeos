@@ -121,7 +121,11 @@ export class TicketRunUseCase implements TicketRunPort {
     }
 
     // 5. Assemble context
-    const assembledContext = await this.contextAssembler.assemble(ticketId, projectPath);
+    const assembledContext = await this.contextAssembler.assemble(
+      ticketId,
+      projectPath,
+      columnSpec.column,
+    );
 
     // 6. Build prompt
     const prompt = this.buildPromptFn(assembledContext, workerAgentSpec);
@@ -185,7 +189,11 @@ export class TicketRunUseCase implements TicketRunPort {
     }
 
     // 11b. Re-assemble context (now includes the newly written artifact)
-    const reviewContext = await this.contextAssembler.assemble(ticketId, projectPath);
+    const reviewContext = await this.contextAssembler.assemble(
+      ticketId,
+      projectPath,
+      columnSpec.column,
+    );
 
     // 11c. Include rubric content in prior artifacts (immutable spread — m4)
     const enrichedContext =

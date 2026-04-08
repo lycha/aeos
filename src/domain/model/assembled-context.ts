@@ -9,4 +9,5 @@ export interface AssembledContext {
   ticketContent: string;
   priorArtifacts: PriorArtifact[];
   constraints: string | null;
+  codeDiff: string | null;
 }

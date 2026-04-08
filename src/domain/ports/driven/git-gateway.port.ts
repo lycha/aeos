@@ -12,4 +12,7 @@ export interface GitGateway {
    * All files must be inside `dir`. Silently skips if nothing to commit.
    */
   commitFiles(dir: string, files: string[], message: string): void;
+
+  /** Return the output of `git diff HEAD` in the given directory. */
+  diff(dir: string): string;
 }

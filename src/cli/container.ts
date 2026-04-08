@@ -91,7 +91,7 @@ export function createContainer(): Container {
     },
     get ticketRun() {
       const executor = createExecutor();
-      const contextAssembler = new ContextAssembler(artifactStore, projectRepo);
+      const contextAssembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
       const columnSpecLoader = new YamlColumnSpecLoader();
       const agentSpecLoader = new YamlAgentSpecLoader();
       const rubricLoader = new FsRubricLoader();

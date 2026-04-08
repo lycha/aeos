@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ContextAssembler } from './context-assembler.js';
+import { ContextAssembler, MAX_DIFF_CHARS } from './context-assembler.js';
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import type { GitGateway } from '../../domain/ports/driven/git-gateway.port.js';
+import { Column } from '../../domain/model/column.js';
 
 function createMockArtifactStore(): ArtifactStore {
   return {
@@ -26,25 +28,37 @@ function createMockProjectRepo(): ProjectRepository {
   };
 }
 
+function createMockGitGateway(): GitGateway {
+  return {
+    init: vi.fn(),
+    commit: vi.fn(),
+    commitFiles: vi.fn(),
+    diff: vi.fn().mockReturnValue(''),
+  };
+}
+
 describe('ContextAssembler', () => {
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let projectRepo: ReturnType<typeof createMockProjectRepo>;
+  let gitGateway: ReturnType<typeof createMockGitGateway>;
   let assembler: ContextAssembler;
 
   const TICKET_ID = 'AEOS-1';
   const PROJECT_ROOT = '/projects/test';
+  const NON_REVIEW_COLUMN = Column.IMPLEMENTATION;
 
   beforeEach(() => {
     artifactStore = createMockArtifactStore();
     projectRepo = createMockProjectRepo();
-    assembler = new ContextAssembler(artifactStore, projectRepo);
+    gitGateway = createMockGitGateway();
+    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
   });
 
   it('reads ticket content via readArtifact', async () => {
     (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket content');
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
 
     expect(artifactStore.readArtifact).toHaveBeenCalledWith(
       PROJECT_ROOT,
@@ -63,14 +77,13 @@ describe('ContextAssembler', () => {
         return '';
       },
     );
-    // listArtifacts returns sorted filenames (port contract)
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue([
       'AEOS-1-prd.md',
       'AEOS-1-tech-spec.md',
       'AEOS-1-ticket.md',
     ]);
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
 
     expect(result.priorArtifacts).toHaveLength(2);
     expect(result.priorArtifacts[0]).toEqual({ name: 'AEOS-1-prd.md', content: '# PRD content' });
@@ -87,7 +100,7 @@ describe('ContextAssembler', () => {
       'AEOS-1-ticket.md',
     ]);
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
 
     const names = result.priorArtifacts.map((a) => a.name);
     expect(names).not.toContain('AEOS-1-ticket.md');
@@ -98,7 +111,7 @@ describe('ContextAssembler', () => {
     (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket');
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
 
     expect(result.priorArtifacts).toEqual([]);
   });
@@ -108,7 +121,7 @@ describe('ContextAssembler', () => {
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
     (projectRepo.readConstraints as ReturnType<typeof vi.fn>).mockReturnValue(null);
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
 
     expect(result.constraints).toBeNull();
   });
@@ -120,7 +133,7 @@ describe('ContextAssembler', () => {
       '# Project Constraints\n- Use TypeScript',
     );
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
 
     expect(result.constraints).toBe('# Project Constraints\n- Use TypeScript');
     expect(projectRepo.readConstraints).toHaveBeenCalledWith(PROJECT_ROOT);
@@ -130,8 +143,68 @@ describe('ContextAssembler', () => {
     (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket');
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue([]);
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
 
     expect(result.priorArtifacts).toEqual([]);
+  });
+
+  // --- Diff injection tests ---
+
+  it('returns codeDiff as null for non-CODE_REVIEW columns', async () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket');
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
+
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.IMPLEMENTATION);
+
+    expect(result.codeDiff).toBeNull();
+    expect(gitGateway.diff).not.toHaveBeenCalled();
+  });
+
+  it('injects git diff when column is CODE_REVIEW', async () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket');
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue(
+      'diff --git a/foo.ts b/foo.ts\n+hello',
+    );
+
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.CODE_REVIEW);
+
+    expect(gitGateway.diff).toHaveBeenCalledWith(PROJECT_ROOT);
+    expect(result.codeDiff).toBe('diff --git a/foo.ts b/foo.ts\n+hello');
+  });
+
+  it('returns "No changes detected" when diff is empty in CODE_REVIEW', async () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket');
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('');
+
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.CODE_REVIEW);
+
+    expect(result.codeDiff).toBe('No changes detected');
+  });
+
+  it('returns "No changes detected" when diff is whitespace-only in CODE_REVIEW', async () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket');
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('  \n  \n');
+
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.CODE_REVIEW);
+
+    expect(result.codeDiff).toBe('No changes detected');
+  });
+
+  it('truncates large diffs at MAX_DIFF_CHARS with warning', async () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket');
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
+    const largeDiff = 'x'.repeat(MAX_DIFF_CHARS + 5000);
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue(largeDiff);
+
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.CODE_REVIEW);
+
+    expect(result.codeDiff).toContain('[DIFF TRUNCATED');
+    expect(result.codeDiff).toContain(`of ${largeDiff.length} total`);
+    // The content before truncation marker should be MAX_DIFF_CHARS long
+    const truncatedContent = result.codeDiff!.split('\n\n[DIFF TRUNCATED')[0];
+    expect(truncatedContent).toHaveLength(MAX_DIFF_CHARS);
   });
 });

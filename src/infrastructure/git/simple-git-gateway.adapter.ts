@@ -46,4 +46,8 @@ export class SimpleGitGateway implements GitGateway {
       // nothing to commit — safe to ignore
     }
   }
+
+  diff(dir: string): string {
+    return execFileSync('git', ['diff', 'HEAD'], { cwd: dir, encoding: 'utf-8' });
+  }
 }
