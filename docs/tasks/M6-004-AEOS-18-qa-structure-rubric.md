@@ -16,7 +16,7 @@ Produces `qa-report-structure.md` — the reviewer rubric for the QA column. App
 3. Run: `aeos ticket run AEOS-18`
 4. Review: test against a hypothetical QA report that says "READY FOR DOD" despite listing 3 critical gaps
 5. `aeos ticket approve AEOS-18`
-6. Add to `QA.yaml` column spec `reviewerRubrics`
+6. Add to `qa.yaml` column spec `reviewerRubrics`
 
 ## Acceptance Criteria
 - [ ] Given `aeos ticket run AEOS-18`, when complete, then `AEOS-18-qa-report-structure.md` exists
@@ -33,5 +33,5 @@ Produces `qa-report-structure.md` — the reviewer rubric for the QA column. App
 ## Definition of Done
 - [ ] AEOS-18 reaches DONE
 - [ ] `qa-report-structure.md` committed with ≥ 5 criteria
-- [ ] Added to `QA.yaml` column spec `reviewerRubrics`
+- [ ] Added to `qa.yaml` column spec `reviewerRubrics`
 - [ ] Reviewer conclusion: APPROVED or APPROVED_WITH_WARNINGS

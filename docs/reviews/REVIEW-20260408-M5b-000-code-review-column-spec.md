@@ -17,7 +17,7 @@
 
 This task creates `.aeos/column-specs/code-review.yaml`, the column spec file for the CODE_REVIEW column (BUILD phase). It is a manual bootstrapping prerequisite — no pipeline ticket runs in the CODE_REVIEW column without this file. The task follows the same pattern as all five sibling column-spec tasks (M3-000, M4-000a, M4-000b, M5a-000, M6-000).
 
-**Overall verdict:** ✅ PASS with 2 medium findings, 1 minor finding, and 3 informational notes.
+**Overall verdict:** ✅ PASS — F-2, F-3, I-3 resolved in commit. F-1 (worker agent ambiguity) remains open as a design clarification item.
 
 ---
 
@@ -91,7 +91,7 @@ The task's note acknowledges the choice may change ("Adjust if a dedicated code-
 
 **Recommendation:** Add a design clarification note to the task, or raise an OD (open decision) in the system design doc. If the intent is that the engineer agent runs the code review pass (producing `code-review.md`) and the reviewer agent then signs off (producing `code-review-signoff.md`), this should be stated explicitly in §2.1.
 
-### ⚠️ MEDIUM (F-2): Missing preflight acceptance criteria
+### ~~⚠️ MEDIUM (F-2): Missing preflight acceptance criteria~~ ✅ RESOLVED in commit
 
 The YAML includes `preflight.enabled: true` and `preflight.questionsArtifact: questions.md`, but the acceptance criteria do not verify these fields. The earlier sibling tasks M3-000 and M4-000a/b include:
 > Parsed spec has `preflight.enabled: true` and `preflight.questionsArtifact: questions.md`
@@ -100,7 +100,7 @@ The updated M5a-000 (post-review) also includes this AC. M6-000 similarly omits 
 
 **Recommendation:** Add AC: "Parsed spec has `preflight.enabled: true` and `preflight.questionsArtifact: questions.md`" for consistency with M3-000 and M4-000a/b.
 
-### ✅ MINOR (F-3): Sibling M5b-001 references `CODE_REVIEW.yaml` (uppercase)
+### ~~✅ MINOR (F-3): Sibling M5b-001 references `CODE_REVIEW.yaml` (uppercase)~~ ✅ RESOLVED in commit
 
 M5b-001 (AEOS-13) Definition of Done states:
 > Added to `CODE_REVIEW.yaml` column spec `reviewerRubrics`
@@ -125,7 +125,7 @@ reviewerRubrics:
 
 System design §5.3 lists `code-structure.md` under `structure/`. M5b-001 (AEOS-13) produces this file. The `intent-drift.md` rubric is produced by AEOS-4 (M3-004). Both paths are consistent with the system design and the producing tasks.
 
-### ℹ️ INFO (I-3): Diff injection dependency correctly documented
+### ~~ℹ️ INFO (I-3): Diff injection dependency correctly documented~~ ✅ RESOLVED in commit (stale paths corrected in M5b-002)
 
 The task notes: "This column requires diff injection (AEOS-14) to function fully — the code diff must be available in context." M5b-002 (AEOS-14) specifies that `ContextAssembler` and `PromptBuilder` must be extended. However, M5b-002 internally references stale paths (`src/prompt/context-assembler.ts` and `src/prompt/prompt-builder.ts`). The actual paths are `src/application/services/context-assembler.ts` and `src/application/services/prompt-builder.ts`. This is a finding for M5b-002's review, not M5b-000.
 
@@ -181,8 +181,8 @@ All referenced source paths exist and are consistent with the hexagonal architec
 | Structure | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | YAML field names | camelCase | camelCase | camelCase | camelCase | camelCase | camelCase |
 | Placeholder agent note | ✅ | ✅ | N/A (reuses) | ✅ (post-review) | N/A (reuses eng-agent) | — |
-| Preflight AC | ✅ | ✅ | ✅ | ✅ (post-review) | ❌ **missing** | ❌ missing |
-| Runtime smoke AC | ✅ | — | — | ✅ (post-review) | ❌ missing | — |
+| Preflight AC | ✅ | ✅ | ✅ | ✅ (post-review) | ✅ (post-review) | ❌ missing |
+| Runtime smoke AC | ✅ | — | — | ✅ (post-review) | ✅ (post-review) | — |
 | Rubric future path | ✅ | ✅ | ✅ | ✅ (post-review) | ✅ | ✅ |
 | Dependencies (3) | ✅ | ✅ | ✅ +2 extra | ✅ | ✅ | ✅ |
 

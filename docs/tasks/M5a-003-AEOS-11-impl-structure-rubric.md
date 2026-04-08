@@ -16,7 +16,7 @@ Produces the reviewer pass-1 rubric for the IMPLEMENTATION column. The reviewer 
 3. Run: `aeos ticket run AEOS-11`
 4. Review: test against a vague implementation note to confirm it would FAIL
 5. `aeos ticket approve AEOS-11`
-6. Add to `IMPLEMENTATION.yaml` column spec `reviewerRubrics`
+6. Add to `implementation.yaml` column spec `reviewerRubrics`
 
 ## Acceptance Criteria
 - [ ] Given `aeos ticket run AEOS-11`, when complete, then `AEOS-11-implementation-structure.md` exists
@@ -33,5 +33,5 @@ Produces the reviewer pass-1 rubric for the IMPLEMENTATION column. The reviewer 
 ## Definition of Done
 - [ ] AEOS-11 reaches DONE
 - [ ] `implementation-structure.md` committed with ≥ 5 criteria
-- [ ] Added to `IMPLEMENTATION.yaml` column spec
+- [ ] Added to `implementation.yaml` column spec
 - [ ] Reviewer conclusion: APPROVED or APPROVED_WITH_WARNINGS

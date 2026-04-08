@@ -16,7 +16,7 @@ Produces `dod-evaluation.md` — the rubric the DoD Gate uses to confirm a ticke
 3. Run: `aeos ticket run AEOS-19`
 4. Review
 5. `aeos ticket approve AEOS-19`
-6. Add to `DOD_GATE.yaml` column spec `reviewerRubrics`
+6. Add to `dod-gate.yaml` column spec `reviewerRubrics`
 
 ## Acceptance Criteria
 - [ ] Given `aeos ticket run AEOS-19`, when complete, then `AEOS-19-dod-evaluation.md` exists
@@ -33,5 +33,5 @@ Produces `dod-evaluation.md` — the rubric the DoD Gate uses to confirm a ticke
 ## Definition of Done
 - [ ] AEOS-19 reaches DONE
 - [ ] `dod-evaluation.md` committed with ≥ 5 binary criteria
-- [ ] Added to `DOD_GATE.yaml` column spec `reviewerRubrics`
+- [ ] Added to `dod-gate.yaml` column spec `reviewerRubrics`
 - [ ] Reviewer conclusion: APPROVED or APPROVED_WITH_WARNINGS

@@ -10,7 +10,7 @@
 
 This task creates `.aeos/column-specs/implementation.yaml`, the column spec file for the IMPLEMENTATION column (BUILD phase). It is a manual bootstrapping prerequisite — no pipeline ticket runs in the IMPLEMENTATION column without this file. The task follows the same pattern as the five sibling column-spec tasks (M3-000, M4-000a, M4-000b, M5b-000, M6-000).
 
-**Overall verdict:** ✅ PASS with 2 medium findings and 3 minor findings.
+**Overall verdict:** ✅ PASS — all findings resolved in commit.
 
 ---
 
@@ -67,7 +67,7 @@ The `column` field is `z.string().min(1)` — accepts `"IMPLEMENTATION"` without
 
 ## 3. Findings
 
-### ⚠️ MEDIUM (F-1): Rubric filename mismatch between M5a-000 and M5a-003
+### ~~⚠️ MEDIUM (F-1): Rubric filename mismatch between M5a-000 and M5a-003~~ ✅ RESOLVED in commit
 
 The Notes section of M5a-000 states the future rubric path will be:
 ```yaml
@@ -84,7 +84,7 @@ System design §5.3 lists `code-structure.md` for code review but does not defin
 
 **Recommendation:** Align on one name. Since M5a-003 is the producing task, update M5a-000 Notes to use `rubrics/structure/implementation-structure.md`.
 
-### ⚠️ MEDIUM (F-2): No mention of placeholder `engineer-agent.yaml`
+### ~~⚠️ MEDIUM (F-2): No mention of placeholder `engineer-agent.yaml`~~ ✅ RESOLVED in commit
 
 The sibling task M3-000 explicitly notes:
 > Create `.aeos/agents/pm-agent.yaml` as a minimal placeholder (stub executor) before running AEOS-1.
@@ -96,7 +96,7 @@ M5a-000 makes no mention of creating a placeholder for `engineer-agent.yaml`. Th
 
 **Recommendation:** Add a note: "Create `.aeos/agents/engineer-agent.yaml` as a minimal placeholder before AEOS-9 runs the IMPLEMENTATION column."
 
-### ✅ MINOR (F-3): Missing preflight acceptance criteria
+### ~~✅ MINOR (F-3): Missing preflight acceptance criteria~~ ✅ RESOLVED in commit
 
 The YAML includes `preflight.enabled: true` and `preflight.questionsArtifact: questions.md`, but the acceptance criteria do not verify these fields. Sibling tasks M3-000 and M4-000a/b include:
 > Parsed spec has `preflight.enabled: true` and `preflight.questionsArtifact: questions.md`
@@ -105,7 +105,7 @@ M5b-000 and M6-000 also omit this AC, so this is an inconsistency across the lat
 
 **Recommendation:** Add AC: "Parsed spec has `preflight.enabled: true` and `preflight.questionsArtifact: questions.md`" for completeness, or document that preflight verification is covered by the schema defaults.
 
-### ✅ MINOR (F-4): Missing `aeos ticket run` smoke AC
+### ~~✅ MINOR (F-4): Missing `aeos ticket run` smoke AC~~ ✅ RESOLVED in commit
 
 M3-000 includes:
 > `aeos ticket run` no longer fails with `ColumnSpecNotFoundError` for PRODUCT_SCOPING

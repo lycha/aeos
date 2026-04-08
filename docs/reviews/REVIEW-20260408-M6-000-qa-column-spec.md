@@ -17,7 +17,7 @@
 
 This task creates `.aeos/column-specs/qa.yaml`, the column spec file for the QA column (DEPLOY phase). It is a manual bootstrapping prerequisite — no ticket runs in the QA column without this file. The task follows the same pattern as all five sibling column-spec tasks (M3-000, M4-000a, M4-000b, M5a-000, M5b-000).
 
-**Overall verdict:** ✅ PASS with 3 medium findings, 1 minor finding, and 4 informational notes.
+**Overall verdict:** ✅ PASS — F-1, F-2 resolved in commit. F-3 (transitive block) and F-4 (uppercase filename) remain open.
 
 ---
 
@@ -75,7 +75,7 @@ The `column` field is `z.string().min(1)` — accepts `"QA"` without restriction
 
 ## 3. Findings
 
-### ⚠️ MEDIUM (F-1): Missing preflight acceptance criteria
+### ~~⚠️ MEDIUM (F-1): Missing preflight acceptance criteria~~ ✅ RESOLVED in commit
 
 The YAML includes `preflight.enabled: true` and `preflight.questionsArtifact: questions.md`, but the acceptance criteria do not verify these fields. Sibling tasks M3-000, M4-000a, M4-000b, and M5a-000 (post-review) all include:
 > Parsed spec has `preflight.enabled: true` and `preflight.questionsArtifact: questions.md`
@@ -84,7 +84,7 @@ M5b-000 has the same omission (flagged as F-2 in its review). This is a recurrin
 
 **Recommendation:** Add AC: "Parsed spec has `preflight.enabled: true` and `preflight.questionsArtifact: questions.md`" for consistency.
 
-### ⚠️ MEDIUM (F-2): Missing placeholder agent note for `qa-agent.yaml`
+### ~~⚠️ MEDIUM (F-2): Missing placeholder agent note for `qa-agent.yaml`~~ ✅ RESOLVED in commit
 
 Sibling tasks M3-000 (pm-agent), M4-000a (architect-agent), and M5a-000 (engineer-agent) all include explicit instructions to create a minimal placeholder agent YAML file before the first pipeline ticket runs in that column. For example, M3-000 states:
 > Create `.aeos/agents/pm-agent.yaml` as a minimal placeholder (stub executor) before running AEOS-1.
