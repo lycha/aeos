@@ -27,7 +27,23 @@ export { registerTicketApproveCommand } from './commands/ticket-approve.command.
 
 export function buildProgram(): Command {
   const program = new Command();
-  program.name('aeos').version('0.1.0');
+  program
+    .name('aeos')
+    .version('0.1.0')
+    .description(
+      'AI-Engineered Operating System — an AI-assisted development pipeline\n' +
+        'that takes a ticket from idea to code review using specialised LLM agents.\n\n' +
+        'Each pipeline column has a dedicated agent, a reviewer with rubrics,\n' +
+        'and a human approval gate.\n\n' +
+        'Getting started:\n' +
+        '  aeos install                              One-time global setup\n' +
+        '  aeos project init --name "Name" --key XY  Initialise project\n' +
+        '  aeos ticket create "Title"                Create a ticket\n' +
+        '  aeos ticket run <id>                      Run the pipeline column\n' +
+        '  aeos ticket approve <id>                  Advance to next column\n\n' +
+        'Environment variables:\n' +
+        '  AEOS_EXECUTOR=stub    Use stub executor (default: claude CLI)',
+    );
 
   const container = createContainer();
   registerInstallCommand(program, container.install);

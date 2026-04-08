@@ -81,9 +81,9 @@ describe('TicketApproveUseCase', () => {
     expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'ARCH_SPIKE');
   });
 
-  it('should set sub-state to BLOCKED after advancing', () => {
+  it('should set sub-state to READY after advancing', () => {
     useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
-    expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'BLOCKED');
+    expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'READY');
   });
 
   it('should commit approval to git with correct message', () => {
@@ -112,19 +112,20 @@ describe('TicketApproveUseCase', () => {
     expect(result).toEqual({
       status: 'error',
       ticketId: TICKET_ID,
-      error: `Ticket ${TICKET_ID} is not signed off (current state: WORKING). Only signed-off tickets can be approved.`,
+      error: `Ticket ${TICKET_ID} is not signed off (current state: WORKING). Run 'aeos ticket run ${TICKET_ID}' first.`,
     });
   });
 
-  it('should return error with "no sub-state" for BACKLOG ticket with null sub-state', () => {
+  it('should allow advancing BACKLOG ticket with null sub-state (no sign-off needed)', () => {
     const ticket = signedOffTicket('BACKLOG');
     ticket.subState = null;
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(ticket);
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
     expect(result).toEqual({
-      status: 'error',
+      status: 'advanced',
       ticketId: TICKET_ID,
-      error: `Ticket ${TICKET_ID} is not signed off (current state: BACKLOG (no sub-state)). Only signed-off tickets can be approved.`,
+      fromColumn: 'BACKLOG',
+      toColumn: 'PRODUCT_SCOPING',
     });
   });
 
@@ -167,7 +168,7 @@ describe('TicketApproveUseCase', () => {
     expect(result).toEqual({
       status: 'error',
       ticketId: TICKET_ID,
-      error: 'Failed to set BLOCKED state: Cannot set sub-state on a BACKLOG ticket',
+      error: 'Failed to set READY state: Cannot set sub-state on a BACKLOG ticket',
     });
   });
 

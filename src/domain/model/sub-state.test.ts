@@ -7,10 +7,10 @@ describe('SubState', () => {
     expect(SubState.WORKING).toBe('WORKING');
   });
 
-  it('all 6 sub-state values are distinct strings', () => {
+  it('all 7 sub-state values are distinct strings', () => {
     const values = Object.values(SubState);
-    expect(values).toHaveLength(6);
-    expect(new Set(values).size).toBe(6);
+    expect(values).toHaveLength(7);
+    expect(new Set(values).size).toBe(7);
   });
 });
 

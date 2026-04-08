@@ -17,6 +17,7 @@ import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
 import type { TicketRunPort, TicketRunResult } from '../domain/ports/driving/ticket-run.port.js';
 import { Column } from '../domain/model/column.js';
+import { SubState } from '../domain/model/sub-state.js';
 import { validateOutput } from '../domain/services/output-validation.js';
 import { isValidColumn } from '../domain/model/column.js';
 
@@ -47,26 +48,34 @@ export class TicketRunUseCase implements TicketRunPort {
       return { status: 'failed', ticketId, error: `Ticket ${ticketId} not found` };
     }
 
-    if (ticket.column === Column.BACKLOG || ticket.column === Column.DONE) {
+    if (ticket.column === Column.BACKLOG) {
       return {
         status: 'failed',
         ticketId,
-        error: `Cannot run ticket in ${ticket.column} — no column spec`,
+        error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to PRODUCT_SCOPING first.`,
+      };
+    }
+    if (ticket.column === Column.DONE) {
+      return {
+        status: 'failed',
+        ticketId,
+        error: `Ticket ${ticketId} is already DONE.`,
       };
     }
     if (ticket.column === Column.DOD_GATE) {
       return { status: 'failed', ticketId, error: 'DoD gate is human-only' };
     }
-    if (ticket.subState === 'WORKING') {
+    if (ticket.subState === SubState.WORKING) {
       return { status: 'failed', ticketId, error: 'Ticket is already running' };
     }
-    if (ticket.subState === 'BLOCKED') {
+    if (ticket.subState === SubState.BLOCKED) {
       return {
         status: 'blocked',
         ticketId,
         blockers: ['Ticket is blocked — run `aeos ticket answer` first'],
       };
     }
+    // READY tickets proceed to preflight (set by `ticket approve` on column advance)
 
     // 2. Load column spec and agent specs
     const columnSpec = this.columnSpecLoader.load(ticket.column, projectPath);
@@ -102,7 +111,7 @@ export class TicketRunUseCase implements TicketRunPort {
     }
 
     // 4. Set sub-state to WORKING
-    const workingResult = this.stateMachine.setSubState(projectId, ticketId, 'WORKING');
+    const workingResult = this.stateMachine.setSubState(projectId, ticketId, SubState.WORKING);
     if (!workingResult.ok) {
       return {
         status: 'failed',
@@ -136,7 +145,7 @@ export class TicketRunUseCase implements TicketRunPort {
     // 9. Handle executor failure
     if (!executorResult.ok) {
       this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
-      this.stateMachine.setSubState(projectId, ticketId, 'FAILED');
+      this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
       return { status: 'failed', ticketId, error: `Executor failed: ${executorResult.reason}` };
     }
 
@@ -146,7 +155,7 @@ export class TicketRunUseCase implements TicketRunPort {
     const validation = validateOutput(content, columnSpec);
     if (!validation.passed) {
       this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
-      this.stateMachine.setSubState(projectId, ticketId, 'FAILED');
+      this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
       return {
         status: 'failed',
         ticketId,
@@ -222,7 +231,7 @@ export class TicketRunUseCase implements TicketRunPort {
         (reviewContent2.includes('FAIL') && !reviewContent2.includes('APPROVED'));
 
       if (isRejected) {
-        this.stateMachine.setSubState(projectId, ticketId, 'FAILED');
+        this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
         return {
           status: 'failed',
           ticketId,
@@ -233,10 +242,10 @@ export class TicketRunUseCase implements TicketRunPort {
     }
 
     // 13. Set sub-state to IN_REVIEW
-    this.stateMachine.setSubState(projectId, ticketId, 'IN_REVIEW');
+    this.stateMachine.setSubState(projectId, ticketId, SubState.IN_REVIEW);
 
     // 14. Sign-off
-    this.stateMachine.setSubState(projectId, ticketId, 'SIGNED_OFF');
+    this.stateMachine.setSubState(projectId, ticketId, SubState.SIGNED_OFF);
 
     // 15. Return success
     return {

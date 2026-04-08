@@ -1,6 +1,7 @@
-// Value Object — SubState enum (6 sub-states)
+// Value Object — SubState enum (7 sub-states)
 
 export const SubState = {
+  READY: 'READY',
   BLOCKED: 'BLOCKED',
   WORKING: 'WORKING',
   INTERRUPTED: 'INTERRUPTED',

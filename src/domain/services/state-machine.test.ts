@@ -299,6 +299,26 @@ describe('StateMachineService', () => {
       expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBe(SubState.SIGNED_OFF);
     });
 
+    it('sequences READY → WORKING → IN_REVIEW → SIGNED_OFF', () => {
+      seedTicket(ticketRepo, { column: Column.IMPLEMENTATION, subState: null });
+
+      const r1 = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.READY);
+      expect(r1).toEqual({ ok: true });
+      expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBe(SubState.READY);
+
+      const r2 = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.WORKING);
+      expect(r2).toEqual({ ok: true });
+      expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBe(SubState.WORKING);
+
+      const r3 = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.IN_REVIEW);
+      expect(r3).toEqual({ ok: true });
+      expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBe(SubState.IN_REVIEW);
+
+      const r4 = stateMachine.setSubState(PROJECT_ID, 'T-1', SubState.SIGNED_OFF);
+      expect(r4).toEqual({ ok: true });
+      expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBe(SubState.SIGNED_OFF);
+    });
+
     it('returns { ok: false } for non-existent ticket', () => {
       const result = stateMachine.setSubState(PROJECT_ID, 'NOPE-999', SubState.WORKING);
       expect(result.ok).toBe(false);

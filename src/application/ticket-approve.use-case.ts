@@ -2,6 +2,7 @@
 
 import * as path from 'node:path';
 import { Column, COLUMN_ORDER } from '../domain/model/column.js';
+import { SubState } from '../domain/model/sub-state.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
@@ -24,14 +25,17 @@ export class TicketApproveUseCase implements TicketApprovePort {
       return { status: 'error', ticketId, error: `Ticket ${ticketId} not found` };
     }
 
-    // 2. Verify sub-state is SIGNED_OFF
-    if (ticket.subState !== 'SIGNED_OFF') {
+    // 2. Verify sub-state
+    // BACKLOG tickets can advance without sign-off (no agent pipeline in BACKLOG).
+    // All other columns require SIGNED_OFF from the agent pipeline.
+    const isBacklog = ticket.column === Column.BACKLOG;
+    if (!isBacklog && ticket.subState !== SubState.SIGNED_OFF) {
       const stateDescription =
         ticket.subState === null ? `${ticket.column} (no sub-state)` : ticket.subState;
       return {
         status: 'error',
         ticketId,
-        error: `Ticket ${ticketId} is not signed off (current state: ${stateDescription}). Only signed-off tickets can be approved.`,
+        error: `Ticket ${ticketId} is not signed off (current state: ${stateDescription}). Run 'aeos ticket run ${ticketId}' first.`,
       };
     }
 
@@ -52,13 +56,13 @@ export class TicketApproveUseCase implements TicketApprovePort {
       return { status: 'error', ticketId, error: transitionResult.reason };
     }
 
-    // 6. Set sub-state to BLOCKED (new column starts blocked until run)
-    const subStateResult = this.stateMachine.setSubState(projectId, ticketId, 'BLOCKED');
+    // 6. Set sub-state to READY (new column awaits its first `ticket run`)
+    const subStateResult = this.stateMachine.setSubState(projectId, ticketId, SubState.READY);
     if (!subStateResult.ok) {
       return {
         status: 'error',
         ticketId,
-        error: `Failed to set BLOCKED state: ${subStateResult.reason}`,
+        error: `Failed to set READY state: ${subStateResult.reason}`,
       };
     }
 
@@ -72,7 +76,9 @@ export class TicketApproveUseCase implements TicketApprovePort {
     } catch (err) {
       // Compensate: revert column and sub-state
       this.stateMachine.transition(projectId, ticketId, currentColumn);
-      this.stateMachine.setSubState(projectId, ticketId, 'SIGNED_OFF');
+      if (!isBacklog) {
+        this.stateMachine.setSubState(projectId, ticketId, SubState.SIGNED_OFF);
+      }
       throw err;
     }
 

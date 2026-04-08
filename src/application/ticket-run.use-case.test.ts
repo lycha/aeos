@@ -297,6 +297,19 @@ describe('TicketRunUseCase', () => {
     expect(result.status).toBe('blocked');
   });
 
+  // --- Guard clause: READY proceeds to preflight ---
+
+  it('should proceed to preflight when ticket is READY (set by approve)', async () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      runnableTicket({ subState: 'READY' }),
+    );
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result.status).toBe('success');
+    expect(preflight.run).toHaveBeenCalledOnce();
+  });
+
   // --- Preflight blocked ---
 
   it('should return blocked when preflight blocks', async () => {
