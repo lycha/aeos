@@ -5,10 +5,12 @@ import type { AgentSpec } from '../../domain/model/agent-spec.js';
 
 function createAgentSpec(overrides: Partial<AgentSpec> = {}): AgentSpec {
   return {
+    name: 'test-agent',
     systemPrompt: 'You are an expert software architect.',
     taskInstruction: 'Produce a technical design document.',
     outputFormat: 'Markdown with H2 sections.',
     selfVerificationChecklist: ['All requirements addressed', 'No TODOs remain'],
+    executor: { type: 'stub', timeoutSeconds: 300 },
     ...overrides,
   };
 }

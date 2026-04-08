@@ -1,16 +1,19 @@
 // Value Object — AgentSpec (loaded from YAML: system prompt, task instruction, output format, executor config)
 
-/** Agent specification loaded from YAML configuration files. */
-export interface AgentSpec {
-  /** The system prompt defining the agent's role and persona. */
-  readonly systemPrompt: string;
+import { z } from 'zod';
 
-  /** The task instruction describing what the agent should do. */
-  readonly taskInstruction: string;
+export const AgentSpecSchema = z.object({
+  name: z.string().min(1),
+  role: z.enum(['worker', 'reviewer']).optional(),
+  systemPrompt: z.string().min(1),
+  taskInstruction: z.string().min(1),
+  outputFormat: z.string().min(1),
+  selfVerificationChecklist: z.array(z.string()).default([]),
+  executor: z.object({
+    type: z.enum(['claude-cli', 'stub']),
+    model: z.string().optional(),
+    timeoutSeconds: z.number().int().positive().default(300),
+  }),
+});
 
-  /** The expected output format specification. */
-  readonly outputFormat: string;
-
-  /** Pre-defined checklist items for self-verification. Empty array means no self-verification section. */
-  readonly selfVerificationChecklist: readonly string[];
-}
+export type AgentSpec = Readonly<z.infer<typeof AgentSpecSchema>>;

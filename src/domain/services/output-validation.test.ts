@@ -12,7 +12,20 @@ function words(n: number): string {
 }
 
 function specWith(overrides: Partial<ColumnSpec> = {}): ColumnSpec {
-  return { minWordCount: 50, requiredSections: [], ...overrides };
+  return {
+    column: 'test-column',
+    workerAgentFile: 'agents/test-worker.yaml',
+    reviewerAgentFile: 'agents/test-reviewer.yaml',
+    outputArtifact: 'output.md',
+    minWordCount: 50,
+    requiredSections: [],
+    reviewerRubrics: [],
+    maxIterations: 3,
+    escalation: 'escalate_to_human',
+    advanceMode: 'manual',
+    preflight: { enabled: true, questionsArtifact: 'questions.md' },
+    ...overrides,
+  };
 }
 
 // ---------------------------------------------------------------------------
