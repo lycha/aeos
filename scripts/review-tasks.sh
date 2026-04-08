@@ -25,12 +25,9 @@ DRY_RUN=false
 # Edit this array to control which tasks are reviewed.
 # Prefix with # to skip a task.
 TASKS=(
-  "M3-000-product-scoping-column-spec.md"
-  "M4-000a-architecture-spike-column-spec.md"
-  "M4-000b-tech-spec-column-spec.md"
-  "M5a-000-implementation-column-spec.md"
-  "M5b-000-code-review-column-spec.md"
-  "M6-000-qa-column-spec.md"
+  "M2-014-scaffold-agents-on-init.md"
+  "M2-015-scaffold-column-specs-on-init.md"
+  "M2-016-ci-project-init-before-tests.md"
 )
 
 # ── Argument parsing ─────────────────────────────────────────────
