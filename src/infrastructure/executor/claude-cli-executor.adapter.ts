@@ -70,7 +70,7 @@ export class ClaudeCodeCliExecutor implements Executor {
           await fs.mkdir(path.dirname(invocation.outputPath), { recursive: true });
           await fs.writeFile(invocation.outputPath, stdout, 'utf8');
           // TODO(M2-007): Parse usage from Claude CLI JSON output mode when available
-          resolve({ ok: true, artifactPath: invocation.outputPath });
+          resolve({ ok: true, artifactPath: invocation.outputPath, content: stdout });
         } catch (writeErr) {
           resolve({
             ok: false,

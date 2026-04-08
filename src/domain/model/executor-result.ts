@@ -13,6 +13,8 @@ interface ExecutorSuccess {
   readonly ok: true;
   /** Absolute path of the written artifact */
   readonly artifactPath: string;
+  /** Raw output text (used by preflight for NO_BLOCKERS check) */
+  readonly content?: string;
   /** Token usage if available from the model API */
   readonly usage?: TokenUsage;
 }

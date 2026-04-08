@@ -26,6 +26,7 @@ export class StubExecutor implements Executor {
     return {
       ok: true,
       artifactPath: invocation.outputPath,
+      content,
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
     };
   }
