@@ -20,3 +20,17 @@ export class ProjectConfigCorruptError extends Error {
     this.name = 'ProjectConfigCorruptError';
   }
 }
+
+export class ColumnSpecNotFoundError extends Error {
+  constructor(message?: string) {
+    super(message ?? 'Column spec not found');
+    this.name = 'ColumnSpecNotFoundError';
+  }
+}
+
+export class AgentSpecNotFoundError extends Error {
+  constructor(message?: string) {
+    super(message ?? 'Agent spec not found');
+    this.name = 'AgentSpecNotFoundError';
+  }
+}
