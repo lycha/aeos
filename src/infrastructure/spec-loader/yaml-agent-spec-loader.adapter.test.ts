@@ -179,3 +179,137 @@ describe('reviewer-agent.yaml integration', () => {
     expect(result.executor.timeoutSeconds).toBe(180);
   });
 });
+
+describe('architect-agent.yaml integration', () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  let loader: YamlAgentSpecLoader;
+
+  beforeEach(() => {
+    loader = new YamlAgentSpecLoader();
+  });
+
+  /**
+   * Integration test: loads the actual .aeos/agents/architect-agent.yaml from the repo root
+   * and validates it against AgentSpecSchema (M4-001 / AEOS-5 acceptance criteria).
+   */
+  it('parses architect-agent.yaml without ZodError', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+
+    // AC: AgentSpecSchema.parse() does not throw
+    expect(result).toBeDefined();
+    expect(result.name).toBe('architect-agent');
+  });
+
+  it('has role set to worker', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    expect(result.role).toBe('worker');
+  });
+
+  it('systemPrompt describes reasoning about architecture tradeoffs', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    expect(result.systemPrompt).toContain('tradeoff');
+    expect(result.systemPrompt).toContain('scalab');
+    expect(result.systemPrompt).toContain('testability');
+  });
+
+  it('taskInstruction contains guidance for both ARCH_SPIKE and TECH_SPEC columns', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    expect(result.taskInstruction).toContain('### When running in ARCH_SPIKE');
+    expect(result.taskInstruction).toContain('### When running in TECH_SPEC');
+  });
+
+  it('outputFormat contains inline template content for both columns', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    expect(result.outputFormat).toContain('### ARCH_SPIKE output');
+    expect(result.outputFormat).toContain('### TECH_SPEC output');
+  });
+
+  it('selfVerificationChecklist contains at least 3 items', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    expect(result.selfVerificationChecklist.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('selfVerificationChecklist covers technical correctness and constraint adherence', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    const joined = result.selfVerificationChecklist.join(' ');
+    expect(joined).toContain('constraint');
+    expect(joined).toContain('tradeoff');
+  });
+
+  it('executor.type is claude-cli', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    expect(result.executor.type).toBe('claude-cli');
+  });
+
+  it('executor.model is claude-sonnet-4-20250514', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    expect(result.executor.model).toBe('claude-sonnet-4-20250514');
+  });
+});
+
+describe('engineer-agent.yaml integration', () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  let loader: YamlAgentSpecLoader;
+
+  beforeEach(() => {
+    loader = new YamlAgentSpecLoader();
+  });
+
+  /**
+   * Integration test: loads the actual .aeos/agents/engineer-agent.yaml from the repo root
+   * and validates it against AgentSpecSchema (M5a-001 / AEOS-9 acceptance criteria).
+   */
+  it('parses engineer-agent.yaml without ZodError', () => {
+    const result = loader.load('agents/engineer-agent.yaml', repoRoot);
+
+    // AC: AgentSpecSchema.parse() does not throw
+    expect(result).toBeDefined();
+    expect(result.name).toBe('engineer-agent');
+  });
+
+  it('has role set to worker', () => {
+    const result = loader.load('agents/engineer-agent.yaml', repoRoot);
+    expect(result.role).toBe('worker');
+  });
+
+  it('systemPrompt describes reasoning about implementation tradeoffs', () => {
+    const result = loader.load('agents/engineer-agent.yaml', repoRoot);
+    expect(result.systemPrompt).toContain('tradeoff');
+    expect(result.systemPrompt).toContain('test');
+    expect(result.systemPrompt.toLowerCase()).toContain('incremental');
+  });
+
+  it('taskInstruction contains guidance for both IMPLEMENTATION and CODE_REVIEW columns', () => {
+    const result = loader.load('agents/engineer-agent.yaml', repoRoot);
+    expect(result.taskInstruction).toContain('### When running in IMPLEMENTATION');
+    expect(result.taskInstruction).toContain('### When running in CODE_REVIEW');
+  });
+
+  it('outputFormat contains inline template content for both columns', () => {
+    const result = loader.load('agents/engineer-agent.yaml', repoRoot);
+    expect(result.outputFormat).toContain('### IMPLEMENTATION output');
+    expect(result.outputFormat).toContain('### CODE_REVIEW output');
+  });
+
+  it('selfVerificationChecklist contains at least 3 items', () => {
+    const result = loader.load('agents/engineer-agent.yaml', repoRoot);
+    expect(result.selfVerificationChecklist.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('selfVerificationChecklist covers plan completeness and spec alignment', () => {
+    const result = loader.load('agents/engineer-agent.yaml', repoRoot);
+    const joined = result.selfVerificationChecklist.join(' ');
+    expect(joined).toContain('tech spec');
+    expect(joined).toContain('test');
+  });
+
+  it('executor.type is claude-cli', () => {
+    const result = loader.load('agents/engineer-agent.yaml', repoRoot);
+    expect(result.executor.type).toBe('claude-cli');
+  });
+
+  it('executor.model is claude-sonnet-4-20250514', () => {
+    const result = loader.load('agents/engineer-agent.yaml', repoRoot);
+    expect(result.executor.model).toBe('claude-sonnet-4-20250514');
+  });
+});

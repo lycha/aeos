@@ -9,6 +9,7 @@ import {
   ProjectConfigNotFoundError,
   ProjectConfigCorruptError,
 } from '../../shared/errors.js';
+import { CONSTRAINTS_PLACEHOLDER } from './defaults/constraints-placeholder.js';
 
 const AEOS_DIR = '.aeos';
 const PROJECT_JSON = 'project.json';
@@ -110,6 +111,13 @@ export class FsProjectRepository implements ProjectRepository {
       return fs.readFileSync(filePath, 'utf-8');
     } catch {
       return null;
+    }
+  }
+
+  writeConstraintsPlaceholder(projectPath: string): void {
+    const filePath = path.join(projectPath, AEOS_DIR, 'CONSTRAINTS.md');
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, CONSTRAINTS_PLACEHOLDER, 'utf-8');
     }
   }
 }

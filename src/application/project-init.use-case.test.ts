@@ -13,6 +13,7 @@ function createMockProjectRepo(): ProjectRepository {
     ensureColumnSpecsDir: vi.fn(),
     findRoot: vi.fn().mockReturnValue(null),
     readConstraints: vi.fn().mockReturnValue(null),
+    writeConstraintsPlaceholder: vi.fn(),
   };
 }
 
@@ -74,6 +75,11 @@ describe('ProjectInitUseCase', () => {
     expect(projectRepo.ensureColumnSpecsDir).toHaveBeenCalledWith('/tmp/test');
   });
 
+  it('should write CONSTRAINTS.md placeholder on fresh init', () => {
+    useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test' });
+    expect(projectRepo.writeConstraintsPlaceholder).toHaveBeenCalledWith('/tmp/test');
+  });
+
   it('should register project in global registry', () => {
     useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test' });
 
@@ -104,6 +110,8 @@ describe('ProjectInitUseCase', () => {
     expect(result).toEqual({ name: 'Existing', key: 'EXST' });
     expect(projectRepo.writeProject).not.toHaveBeenCalled();
     expect(gitGateway.init).not.toHaveBeenCalled();
+    // writeConstraintsPlaceholder IS called on re-init (idempotent — skips if file exists)
+    expect(projectRepo.writeConstraintsPlaceholder).toHaveBeenCalledWith('/tmp/existing');
   });
 
   it('should not duplicate registry entry on re-run', () => {
@@ -147,6 +155,9 @@ describe('ProjectInitUseCase', () => {
     (projectRepo.ensureColumnSpecsDir as ReturnType<typeof vi.fn>).mockImplementation(() =>
       callOrder.push('ensureColumnSpecsDir'),
     );
+    (projectRepo.writeConstraintsPlaceholder as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      callOrder.push('writeConstraintsPlaceholder'),
+    );
     (configStore.readRegistry as ReturnType<typeof vi.fn>).mockReturnValue([]);
     (configStore.writeRegistry as ReturnType<typeof vi.fn>).mockImplementation(() =>
       callOrder.push('writeRegistry'),
@@ -154,7 +165,13 @@ describe('ProjectInitUseCase', () => {
 
     useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test' });
 
-    expect(callOrder).toEqual(['writeProject', 'gitInit', 'ensureColumnSpecsDir', 'writeRegistry']);
+    expect(callOrder).toEqual([
+      'writeProject',
+      'gitInit',
+      'ensureColumnSpecsDir',
+      'writeConstraintsPlaceholder',
+      'writeRegistry',
+    ]);
   });
 
   it('should derive slug correctly for names with special characters', () => {

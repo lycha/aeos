@@ -37,6 +37,8 @@ export class ProjectInitUseCase implements ProjectInitPort {
       this.ensureRegistered(existing, cwd);
       // Ensure column-specs dir exists
       this.projectRepo.ensureColumnSpecsDir(cwd);
+      // Ensure CONSTRAINTS.md placeholder exists
+      this.projectRepo.writeConstraintsPlaceholder(cwd);
       return { name: existing.name, key: existing.key };
     }
 
@@ -61,7 +63,10 @@ export class ProjectInitUseCase implements ProjectInitPort {
     // 3. Create column-specs/ directory
     this.projectRepo.ensureColumnSpecsDir(cwd);
 
-    // 4. Register in global registry
+    // 4. Write CONSTRAINTS.md placeholder
+    this.projectRepo.writeConstraintsPlaceholder(cwd);
+
+    // 5. Register in global registry
     this.ensureRegistered(project, cwd);
 
     return { name, key };

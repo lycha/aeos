@@ -15,4 +15,6 @@ export interface ProjectRepository {
   findRoot(startDir: string): string | null;
   /** Reads CONSTRAINTS.md from .aeos/ directory. Returns null if not present. */
   readConstraints(projectPath: string): string | null;
+  /** Writes a placeholder CONSTRAINTS.md into .aeos/ if one does not already exist. */
+  writeConstraintsPlaceholder(projectPath: string): void;
 }

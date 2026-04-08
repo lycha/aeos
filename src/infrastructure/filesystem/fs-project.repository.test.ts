@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { projectRoot, aeosDir, readProjectConfig } from './fs-project.repository.js';
+import {
+  projectRoot,
+  aeosDir,
+  readProjectConfig,
+  FsProjectRepository,
+} from './fs-project.repository.js';
+import { CONSTRAINTS_PLACEHOLDER } from './defaults/constraints-placeholder.js';
 import {
   ProjectRootNotFoundError,
   ProjectConfigNotFoundError,
@@ -99,5 +105,37 @@ describe('readProjectConfig()', () => {
     fs.mkdirSync(aeosPath, { recursive: true });
     fs.writeFileSync(path.join(aeosPath, 'project.json'), 'not valid json {{{', 'utf-8');
     expect(() => readProjectConfig(tmpDir)).toThrow(ProjectConfigCorruptError);
+  });
+});
+
+describe('FsProjectRepository.writeConstraintsPlaceholder()', () => {
+  const repo = new FsProjectRepository();
+
+  it('creates CONSTRAINTS.md with placeholder content when file does not exist', () => {
+    const aeosPath = path.join(tmpDir, '.aeos');
+    fs.mkdirSync(aeosPath, { recursive: true });
+
+    repo.writeConstraintsPlaceholder(tmpDir);
+
+    const filePath = path.join(aeosPath, 'CONSTRAINTS.md');
+    expect(fs.existsSync(filePath)).toBe(true);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toBe(CONSTRAINTS_PLACEHOLDER);
+    expect(content).toContain('## Architecture');
+    expect(content).toContain('## Code Standards');
+    expect(content).toContain('## Security');
+  });
+
+  it('does NOT overwrite existing CONSTRAINTS.md (idempotent)', () => {
+    const aeosPath = path.join(tmpDir, '.aeos');
+    fs.mkdirSync(aeosPath, { recursive: true });
+
+    const customContent = '# My Custom Constraints\n\nDo not touch this.\n';
+    fs.writeFileSync(path.join(aeosPath, 'CONSTRAINTS.md'), customContent, 'utf-8');
+
+    repo.writeConstraintsPlaceholder(tmpDir);
+
+    const content = fs.readFileSync(path.join(aeosPath, 'CONSTRAINTS.md'), 'utf-8');
+    expect(content).toBe(customContent);
   });
 });
