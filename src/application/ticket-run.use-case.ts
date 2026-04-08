@@ -144,7 +144,7 @@ export class TicketRunUseCase implements TicketRunPort {
     });
 
     // 8. Record cost (regardless of success/failure)
-    this.recordCost(projectId, ticketId, column, executorResult);
+    this.recordCost(projectId, ticketId, column, workerAgentSpec.name, workerAgentSpec.executor.type, executorResult);
 
     // 9. Handle executor failure
     if (!executorResult.ok) {
@@ -219,7 +219,7 @@ export class TicketRunUseCase implements TicketRunPort {
     });
 
     // Record reviewer cost
-    this.recordCost(projectId, ticketId, column, reviewResult);
+    this.recordCost(projectId, ticketId, column, reviewerAgentSpec.name, reviewerAgentSpec.executor.type, reviewResult);
 
     if (reviewResult.ok) {
       const reviewContent = reviewResult.content ?? '';
@@ -275,6 +275,8 @@ export class TicketRunUseCase implements TicketRunPort {
     projectId: string,
     ticketId: string,
     column: string,
+    agent: string,
+    executor: string,
     result: ExecutorResult,
   ): void {
     const usage = result.ok ? result.usage : undefined;
@@ -282,6 +284,8 @@ export class TicketRunUseCase implements TicketRunPort {
       ticketId,
       projectId,
       column,
+      agent,
+      executor,
       model: 'claude',
       inputTokens: usage?.inputTokens ?? 0,
       outputTokens: usage?.outputTokens ?? 0,

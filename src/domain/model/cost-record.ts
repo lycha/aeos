@@ -4,6 +4,8 @@ export interface CostRecord {
   readonly ticketId: string;
   readonly projectId: string;
   readonly column: string;
+  readonly agent: string;
+  readonly executor: string;
   readonly model: string;
   readonly inputTokens: number;
   readonly outputTokens: number;

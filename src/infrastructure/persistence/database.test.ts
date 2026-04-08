@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { getDb, resetDb, initSchema } from './database.js';
+import { getDb, resetDb, initSchema, _testing } from './database.js';
 
 let tmpDir: string;
 let originalAeosHome: string | undefined;
@@ -47,7 +47,7 @@ describe('database', () => {
   });
 
   describe('initSchema', () => {
-    it('should create tickets, transitions, and cost_records tables', () => {
+    it('should create tickets, transitions, cost_records, and schema_version tables', () => {
       const db = getDb();
       const tables = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -56,6 +56,7 @@ describe('database', () => {
       expect(tableNames).toContain('tickets');
       expect(tableNames).toContain('transitions');
       expect(tableNames).toContain('cost_records');
+      expect(tableNames).toContain('schema_version');
     });
 
     it('should enable WAL journal mode', () => {
@@ -128,6 +129,45 @@ describe('database', () => {
       expect(row.to_column).toBe('BACKLOG');
       expect(row.comment).toBe('Initial creation');
       expect(row.id).toBeGreaterThan(0);
+    });
+  });
+
+  describe('migrations', () => {
+    it('should track schema version after migrations run', () => {
+      const db = getDb();
+      const version = _testing.getCurrentVersion(db);
+      expect(version).toBe(_testing.MIGRATIONS.length);
+    });
+
+    it('should record each migration with description and timestamp', () => {
+      const db = getDb();
+      const rows = db
+        .prepare('SELECT version, description, applied_at FROM schema_version ORDER BY version')
+        .all() as { version: number; description: string; applied_at: string }[];
+      expect(rows.length).toBe(_testing.MIGRATIONS.length);
+      expect(rows[0].version).toBe(1);
+      expect(rows[0].description).toBe('Initial schema: tickets, transitions, cost_records');
+      expect(rows[0].applied_at).toBeTruthy();
+    });
+
+    it('should detect legacy databases without schema_version table', () => {
+      const db = getDb();
+      // After initSchema, schema_version exists so detectLegacyDb should be false
+      expect(_testing.detectLegacyDb(db)).toBe(false);
+    });
+
+    it('should handle legacy database upgrade — stamp at version 1', () => {
+      // Simulate a legacy DB: create tables without schema_version
+      const db = getDb();
+      db.exec('DROP TABLE IF EXISTS schema_version');
+      // Now detectLegacyDb should return true (tickets exists, schema_version does not)
+      expect(_testing.detectLegacyDb(db)).toBe(true);
+      // Re-run initSchema — should stamp version 1 without re-creating tables
+      resetDb();
+      process.env.AEOS_HOME = tmpDir;
+      const db2 = getDb();
+      const version = _testing.getCurrentVersion(db2);
+      expect(version).toBeGreaterThanOrEqual(1);
     });
   });
 

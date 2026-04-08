@@ -4,6 +4,12 @@
 // All projects share this database, isolated by project_id composite keys.
 // This simplifies cross-project queries (dashboard, costs) and avoids
 // per-project DB lifecycle management. See ADR in code-review/REVIEW-20260407-M1-milestone.md.
+//
+// Migration strategy:
+// - schema_version table tracks the current version number
+// - MIGRATIONS array contains ordered, idempotent migration functions
+// - On startup, initSchema() runs all migrations above the current version
+// - Migrations run inside a transaction for atomicity
 
 import Database from 'better-sqlite3';
 import type BetterSqlite3 from 'better-sqlite3';
@@ -12,7 +18,23 @@ import { aeosDbPath } from '../../shared/config.js';
 let instance: BetterSqlite3.Database | null = null;
 let schemaApplied = false;
 
-const DDL = `
+// ── Migration definitions ─────────────────────────────────────────
+// Each migration has a version number and an apply function.
+// Migrations MUST be idempotent and ordered by version.
+// Never modify an existing migration — always append a new one.
+
+interface Migration {
+  readonly version: number;
+  readonly description: string;
+  readonly apply: (db: BetterSqlite3.Database) => void;
+}
+
+const MIGRATIONS: readonly Migration[] = [
+  {
+    version: 1,
+    description: 'Initial schema: tickets, transitions, cost_records',
+    apply: (db) => {
+      db.exec(`
 CREATE TABLE IF NOT EXISTS tickets (
   id          TEXT NOT NULL,
   project_id  TEXT NOT NULL,
@@ -51,12 +73,82 @@ CREATE TABLE IF NOT EXISTS cost_records (
   recorded_at   TEXT NOT NULL,
   FOREIGN KEY (project_id, ticket_id) REFERENCES tickets(project_id, id)
 );
-`;
+      `);
+    },
+  },
+  // ── Future migrations go here ──────────────────────────────────
+  // {
+  //   version: 2,
+  //   description: 'Add foo column to tickets',
+  //   apply: (db) => {
+  //     db.exec(`ALTER TABLE tickets ADD COLUMN foo TEXT DEFAULT NULL`);
+  //   },
+  // },
+];
+
+// ── Schema version tracking ──────────────────────────────────────
+
+function ensureVersionTable(db: BetterSqlite3.Database): void {
+  db.exec(`
+CREATE TABLE IF NOT EXISTS schema_version (
+  version     INTEGER NOT NULL,
+  description TEXT NOT NULL,
+  applied_at  TEXT NOT NULL
+);
+  `);
+}
+
+function getCurrentVersion(db: BetterSqlite3.Database): number {
+  const row = db
+    .prepare('SELECT MAX(version) AS v FROM schema_version')
+    .get() as { v: number | null } | undefined;
+  return row?.v ?? 0;
+}
+
+function recordVersion(db: BetterSqlite3.Database, migration: Migration): void {
+  db.prepare(
+    'INSERT INTO schema_version (version, description, applied_at) VALUES (?, ?, ?)',
+  ).run(migration.version, migration.description, new Date().toISOString());
+}
+
+/** Detects pre-migration databases (tables exist but no schema_version) */
+function detectLegacyDb(db: BetterSqlite3.Database): boolean {
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tickets'")
+    .all();
+  const hasVersionTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'")
+    .all();
+  return tables.length > 0 && hasVersionTable.length === 0;
+}
+
+// ── Public API ────────────────────────────────────────────────────
 
 export function initSchema(db: BetterSqlite3.Database): void {
   if (schemaApplied) return;
+
   db.pragma('journal_mode = WAL');
-  db.exec(DDL);
+
+  ensureVersionTable(db);
+
+  // Handle legacy databases created before the migration system existed.
+  // These have tables but no schema_version — stamp them at version 1.
+  if (detectLegacyDb(db)) {
+    recordVersion(db, MIGRATIONS[0]);
+  }
+
+  const currentVersion = getCurrentVersion(db);
+
+  for (const migration of MIGRATIONS) {
+    if (migration.version <= currentVersion) continue;
+
+    const runMigration = db.transaction(() => {
+      migration.apply(db);
+      recordVersion(db, migration);
+    });
+    runMigration();
+  }
+
   schemaApplied = true;
 }
 
@@ -78,3 +170,6 @@ export function resetDb(): void {
   }
   schemaApplied = false;
 }
+
+/** Exported for testing only */
+export const _testing = { MIGRATIONS, getCurrentVersion, detectLegacyDb };
