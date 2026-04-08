@@ -115,6 +115,7 @@ describe('YamlColumnSpecLoader', () => {
       [Column.IMPLEMENTATION, 'implementation'],
       [Column.CODE_REVIEW, 'code-review'],
       [Column.QA, 'qa'],
+      [Column.DOD_GATE, 'dod-gate'],
     ];
 
     for (const [column, filename] of mappings) {

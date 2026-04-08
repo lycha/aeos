@@ -18,6 +18,7 @@ const COLUMN_SPEC_FILENAMES: Partial<Record<Column, string>> = {
   [Column.IMPLEMENTATION]: 'implementation',
   [Column.CODE_REVIEW]: 'code-review',
   [Column.QA]: 'qa',
+  [Column.DOD_GATE]: 'dod-gate',
 };
 
 export class YamlColumnSpecLoader implements ColumnSpecLoader {
