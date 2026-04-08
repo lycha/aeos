@@ -5,7 +5,9 @@ import type { ProjectRepository } from '../../domain/ports/driven/project-reposi
 
 function createMockArtifactStore(): ArtifactStore {
   return {
+    artifactExists: vi.fn().mockReturnValue(false),
     readArtifact: vi.fn().mockReturnValue(''),
+    getArtifactMtime: vi.fn().mockReturnValue(null),
     writeArtifact: vi.fn(),
     removeArtifact: vi.fn(),
     listArtifacts: vi.fn().mockReturnValue([]),

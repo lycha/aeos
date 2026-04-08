@@ -73,6 +73,32 @@ export function listArtifacts(ticketId: string, root?: string): string[] {
 }
 
 export class FsArtifactStore implements ArtifactStore {
+  artifactExists(projectPath: string, ticketId: string, filename: string): boolean {
+    FsArtifactStore.validatePathComponent(ticketId, 'ticketId');
+    FsArtifactStore.validatePathComponent(filename, 'filename');
+    const filePath = path.join(projectPath, AEOS_DIR, TICKETS_DIR, ticketId, filename);
+    return fs.existsSync(filePath);
+  }
+
+  getArtifactMtime(projectPath: string, ticketId: string, filename: string): Date | null {
+    FsArtifactStore.validatePathComponent(ticketId, 'ticketId');
+    FsArtifactStore.validatePathComponent(filename, 'filename');
+    const filePath = path.join(projectPath, AEOS_DIR, TICKETS_DIR, ticketId, filename);
+    try {
+      const stat = fs.statSync(filePath);
+      return stat.mtime;
+    } catch (err: unknown) {
+      if (
+        err instanceof Error &&
+        'code' in err &&
+        (err as NodeJS.ErrnoException).code === 'ENOENT'
+      ) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
   readArtifact(projectPath: string, ticketId: string, filename: string): string {
     FsArtifactStore.validatePathComponent(ticketId, 'ticketId');
     FsArtifactStore.validatePathComponent(filename, 'filename');

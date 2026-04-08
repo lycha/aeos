@@ -5,6 +5,7 @@ import type { ProjectInitPort } from '../domain/ports/driving/project-init.port.
 import type { TicketCreatePort } from '../domain/ports/driving/ticket-create.port.js';
 import type { TicketListPort } from '../domain/ports/driving/ticket-list.port.js';
 import type { TicketShowPort } from '../domain/ports/driving/ticket-show.port.js';
+import type { TicketAnswerPort } from '../domain/ports/driving/ticket-answer.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import { FsConfigStore } from '../infrastructure/filesystem/fs-config.adapter.js';
 import { FsProjectRepository } from '../infrastructure/filesystem/fs-project.repository.js';
@@ -17,6 +18,9 @@ import { ProjectInitUseCase } from '../application/project-init.use-case.js';
 import { TicketCreateUseCase } from '../application/ticket-create.use-case.js';
 import { TicketListUseCase } from '../application/ticket-list.use-case.js';
 import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
+import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
+import { StateMachineService } from '../domain/services/state-machine.js';
+import { SqliteTransitionRepository } from '../infrastructure/persistence/sqlite-transition.repository.js';
 
 export interface Container {
   install: InstallPort;
@@ -24,6 +28,7 @@ export interface Container {
   ticketCreate: TicketCreatePort;
   ticketList: TicketListPort;
   ticketShow: TicketShowPort;
+  ticketAnswer: TicketAnswerPort;
   projectRepo: ProjectRepository;
 }
 
@@ -54,6 +59,11 @@ export function createContainer(): Container {
     },
     get ticketShow() {
       return new TicketShowUseCase(getTicketRepo(), artifactStore);
+    },
+    get ticketAnswer() {
+      const transitionRepo = new SqliteTransitionRepository(getDb());
+      const stateMachine = new StateMachineService(getTicketRepo(), transitionRepo);
+      return new TicketAnswerUseCase(getTicketRepo(), artifactStore, stateMachine, gitGateway);
     },
     projectRepo,
   };
