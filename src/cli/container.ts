@@ -8,7 +8,10 @@ import type { TicketShowPort } from '../domain/ports/driving/ticket-show.port.js
 import type { TicketAnswerPort } from '../domain/ports/driving/ticket-answer.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
+import type { TicketDodApprovePort } from '../domain/ports/driving/ticket-dod-approve.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
+import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js';
+import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import { FsConfigStore } from '../infrastructure/filesystem/fs-config.adapter.js';
 import { FsProjectRepository } from '../infrastructure/filesystem/fs-project.repository.js';
 import { FsArtifactStore } from '../infrastructure/filesystem/fs-artifact-store.adapter.js';
@@ -23,6 +26,7 @@ import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
 import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
 import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
+import { TicketDodApproveUseCase } from '../application/ticket-dod-approve.use-case.js';
 import { StateMachineService } from '../domain/services/state-machine.js';
 import { SqliteTransitionRepository } from '../infrastructure/persistence/sqlite-transition.repository.js';
 import { ContextAssembler } from '../application/services/context-assembler.js';
@@ -44,7 +48,10 @@ export interface Container {
   ticketAnswer: TicketAnswerPort;
   ticketRun: TicketRunPort;
   ticketApprove: TicketApprovePort;
+  ticketDodApprove: TicketDodApprovePort;
   projectRepo: ProjectRepository;
+  rubricLoader: RubricLoader;
+  artifactStore: ArtifactStore;
 }
 
 export function createContainer(): Container {
@@ -114,6 +121,16 @@ export function createContainer(): Container {
     get ticketApprove() {
       return new TicketApproveUseCase(getTicketRepo(), getStateMachine(), gitGateway);
     },
+    get ticketDodApprove() {
+      return new TicketDodApproveUseCase(
+        getTicketRepo(),
+        getStateMachine(),
+        gitGateway,
+        getCostRepo(),
+      );
+    },
     projectRepo,
+    rubricLoader: new FsRubricLoader(),
+    artifactStore,
   };
 }
