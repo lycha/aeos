@@ -28,10 +28,12 @@ import { SqliteTransitionRepository } from '../infrastructure/persistence/sqlite
 import { ContextAssembler } from '../application/services/context-assembler.js';
 import { buildPrompt } from '../application/services/prompt-builder.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
+import { ClaudeCodeCliExecutor } from '../infrastructure/executor/claude-cli-executor.adapter.js';
 import { YamlColumnSpecLoader } from '../infrastructure/spec-loader/yaml-column-spec-loader.adapter.js';
 import { YamlAgentSpecLoader } from '../infrastructure/spec-loader/yaml-agent-spec-loader.adapter.js';
 import { FsRubricLoader } from '../infrastructure/filesystem/fs-rubric-loader.adapter.js';
 import { PreflightService } from '../application/services/preflight.js';
+import { SqliteCostRepository } from '../infrastructure/persistence/sqlite-cost.repository.js';
 
 export interface Container {
   install: InstallPort;
@@ -51,15 +53,26 @@ export function createContainer(): Container {
   const gitGateway = new SimpleGitGateway();
   const artifactStore = new FsArtifactStore();
 
-  // Lazy DB + ticket repo — only resolved when a command that needs the DB runs.
+  // Lazy singletons — only resolved when a command that needs the DB runs.
   // `install` and `project-init` do NOT need the DB (they create ~/.aeos/ first).
   let ticketRepo: SqliteTicketRepository | null = null;
-  const getTicketRepo = (): SqliteTicketRepository => {
-    if (!ticketRepo) {
-      ticketRepo = new SqliteTicketRepository(getDb());
-    }
-    return ticketRepo;
-  };
+  const getTicketRepo = (): SqliteTicketRepository =>
+    (ticketRepo ??= new SqliteTicketRepository(getDb()));
+
+  let transitionRepo: SqliteTransitionRepository | null = null;
+  const getTransitionRepo = (): SqliteTransitionRepository =>
+    (transitionRepo ??= new SqliteTransitionRepository(getDb()));
+
+  let costRepo: SqliteCostRepository | null = null;
+  const getCostRepo = (): SqliteCostRepository => (costRepo ??= new SqliteCostRepository(getDb()));
+
+  let stateMachine: StateMachineService | null = null;
+  const getStateMachine = (): StateMachineService =>
+    (stateMachine ??= new StateMachineService(getTicketRepo(), getTransitionRepo()));
+
+  // Executor selection: AEOS_EXECUTOR=stub for testing, otherwise real Claude CLI
+  const createExecutor = () =>
+    process.env.AEOS_EXECUTOR === 'stub' ? new StubExecutor() : new ClaudeCodeCliExecutor();
 
   return {
     install: new InstallUseCase(configStore),
@@ -74,22 +87,18 @@ export function createContainer(): Container {
       return new TicketShowUseCase(getTicketRepo(), artifactStore);
     },
     get ticketAnswer() {
-      const transitionRepo = new SqliteTransitionRepository(getDb());
-      const stateMachine = new StateMachineService(getTicketRepo(), transitionRepo);
-      return new TicketAnswerUseCase(getTicketRepo(), artifactStore, stateMachine, gitGateway);
+      return new TicketAnswerUseCase(getTicketRepo(), artifactStore, getStateMachine(), gitGateway);
     },
     get ticketRun() {
-      const transitionRepo = new SqliteTransitionRepository(getDb());
-      const stateMachine = new StateMachineService(getTicketRepo(), transitionRepo);
+      const executor = createExecutor();
       const contextAssembler = new ContextAssembler(artifactStore, projectRepo);
-      const executor = new StubExecutor();
       const columnSpecLoader = new YamlColumnSpecLoader();
       const agentSpecLoader = new YamlAgentSpecLoader();
       const rubricLoader = new FsRubricLoader();
-      const preflight = new PreflightService(executor, artifactStore, stateMachine);
+      const preflight = new PreflightService(executor, artifactStore, getStateMachine());
       return new TicketRunUseCase(
         getTicketRepo(),
-        stateMachine,
+        getStateMachine(),
         contextAssembler,
         buildPrompt,
         executor,
@@ -99,12 +108,11 @@ export function createContainer(): Container {
         agentSpecLoader,
         rubricLoader,
         preflight,
+        getCostRepo(),
       );
     },
     get ticketApprove() {
-      const transitionRepo = new SqliteTransitionRepository(getDb());
-      const stateMachine = new StateMachineService(getTicketRepo(), transitionRepo);
-      return new TicketApproveUseCase(getTicketRepo(), stateMachine, gitGateway);
+      return new TicketApproveUseCase(getTicketRepo(), getStateMachine(), gitGateway);
     },
     projectRepo,
   };

@@ -3,7 +3,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { AgentSpecSchema, type AgentSpec } from '../../domain/model/agent-spec.js';
+import type { AgentSpec } from '../../domain/model/agent-spec.js';
+import { AgentSpecSchema } from './schemas.js';
 import type { AgentSpecLoader } from '../../domain/ports/driven/agent-spec-loader.port.js';
 import { AgentSpecNotFoundError } from '../../shared/errors.js';
 import { aeosDir } from '../filesystem/fs-project.repository.js';

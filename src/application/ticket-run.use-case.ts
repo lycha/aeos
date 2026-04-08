@@ -8,6 +8,8 @@ import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
 import type { AgentSpecLoader } from '../domain/ports/driven/agent-spec-loader.port.js';
 import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js';
+import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
+import type { ExecutorResult } from '../domain/model/executor-result.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { ContextAssembler } from './services/context-assembler.js';
 import type { PreflightService } from './services/preflight.js';
@@ -31,6 +33,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly agentSpecLoader: AgentSpecLoader,
     private readonly rubricLoader: RubricLoader,
     private readonly preflight: PreflightService,
+    private readonly costRepo: CostRepository,
   ) {}
 
   async execute(
@@ -127,7 +130,10 @@ export class TicketRunUseCase implements TicketRunPort {
       column,
     });
 
-    // 8. Handle executor failure
+    // 8. Record cost (regardless of success/failure)
+    this.recordCost(projectId, ticketId, column, executorResult);
+
+    // 9. Handle executor failure
     if (!executorResult.ok) {
       this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
       this.stateMachine.setSubState(projectId, ticketId, 'FAILED');
@@ -195,6 +201,9 @@ export class TicketRunUseCase implements TicketRunPort {
       column,
     });
 
+    // Record reviewer cost
+    this.recordCost(projectId, ticketId, column, reviewResult);
+
     if (reviewResult.ok) {
       const reviewContent = reviewResult.content ?? '';
       // 11g. Write review artifact
@@ -205,15 +214,31 @@ export class TicketRunUseCase implements TicketRunPort {
         [reviewAbsPath],
         `[${ticketId}][REVIEW][v1][reviewer-agent][create]`,
       );
+
+      // 12. Check reviewer conclusion — block sign-off on rejection
+      const reviewContent2 = reviewContent.toUpperCase();
+      const isRejected =
+        reviewContent2.includes('REJECTED') ||
+        (reviewContent2.includes('FAIL') && !reviewContent2.includes('APPROVED'));
+
+      if (isRejected) {
+        this.stateMachine.setSubState(projectId, ticketId, 'FAILED');
+        return {
+          status: 'failed',
+          ticketId,
+          error: 'Reviewer rejected the artifact. See review for details.',
+          reviewPath: reviewAbsPath,
+        };
+      }
     }
 
-    // 12. Set sub-state to IN_REVIEW
+    // 13. Set sub-state to IN_REVIEW
     this.stateMachine.setSubState(projectId, ticketId, 'IN_REVIEW');
 
-    // 13. Auto sign-off (v1)
+    // 14. Sign-off
     this.stateMachine.setSubState(projectId, ticketId, 'SIGNED_OFF');
 
-    // 14. Return success
+    // 15. Return success
     return {
       status: 'success',
       ticketId,
@@ -227,5 +252,24 @@ export class TicketRunUseCase implements TicketRunPort {
       return columnString;
     }
     return null;
+  }
+
+  private recordCost(
+    projectId: string,
+    ticketId: string,
+    column: string,
+    result: ExecutorResult,
+  ): void {
+    const usage = result.ok ? result.usage : undefined;
+    this.costRepo.record({
+      ticketId,
+      projectId,
+      column,
+      model: 'claude',
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+      costUsd: usage?.costUsd ?? 0,
+      recordedAt: new Date().toISOString(),
+    });
   }
 }

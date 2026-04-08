@@ -9,6 +9,7 @@ import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
 import type { AgentSpecLoader } from '../domain/ports/driven/agent-spec-loader.port.js';
 import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js';
+import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { ContextAssembler } from './services/context-assembler.js';
 import type { PreflightService } from './services/preflight.js';
@@ -90,6 +91,14 @@ function createMockPreflight(): PreflightService {
   } as unknown as PreflightService;
 }
 
+function createMockCostRepo(): CostRepository {
+  return {
+    record: vi.fn(),
+    findByProject: vi.fn().mockReturnValue([]),
+    findByTicket: vi.fn().mockReturnValue([]),
+  };
+}
+
 function defaultColumnSpec(): ColumnSpec {
   return {
     column: 'IMPLEMENTATION',
@@ -151,6 +160,7 @@ describe('TicketRunUseCase', () => {
   let agentSpecLoader: ReturnType<typeof createMockAgentSpecLoader>;
   let rubricLoader: ReturnType<typeof createMockRubricLoader>;
   let preflight: ReturnType<typeof createMockPreflight>;
+  let costRepo: ReturnType<typeof createMockCostRepo>;
   let buildPromptFn: (context: AssembledContext, agentSpec: AgentSpec) => string;
   let useCase: TicketRunUseCase;
 
@@ -165,6 +175,7 @@ describe('TicketRunUseCase', () => {
     agentSpecLoader = createMockAgentSpecLoader();
     rubricLoader = createMockRubricLoader();
     preflight = createMockPreflight();
+    costRepo = createMockCostRepo();
     buildPromptFn = vi.fn().mockReturnValue('assembled prompt') as unknown as (
       context: AssembledContext,
       agentSpec: AgentSpec,
@@ -184,6 +195,7 @@ describe('TicketRunUseCase', () => {
       agentSpecLoader,
       rubricLoader,
       preflight,
+      costRepo,
     );
   });
 

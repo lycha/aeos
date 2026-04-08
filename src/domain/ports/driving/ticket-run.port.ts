@@ -2,7 +2,7 @@
 
 export type TicketRunResult =
   | { status: 'success'; ticketId: string; artifactPath: string; reviewPath: string }
-  | { status: 'failed'; ticketId: string; error: string }
+  | { status: 'failed'; ticketId: string; error: string; reviewPath?: string }
   | { status: 'blocked'; ticketId: string; blockers: string[] };
 
 export interface TicketRunPort {
