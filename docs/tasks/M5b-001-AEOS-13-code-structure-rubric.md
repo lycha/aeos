@@ -16,7 +16,7 @@ Produces `code-structure.md` — the reviewer rubric for the CODE_REVIEW column.
 3. Run: `aeos ticket run AEOS-13`
 4. Review: test mentally against a diff that skips error handling
 5. `aeos ticket approve AEOS-13`
-6. Add to `CODE_REVIEW.yaml` column spec `reviewerRubrics`
+6. Add to `code-review.yaml` column spec `reviewerRubrics`
 
 ## Acceptance Criteria
 - [ ] Given `aeos ticket run AEOS-13`, when complete, then `AEOS-13-code-structure.md` exists
@@ -35,5 +35,5 @@ Produces `code-structure.md` — the reviewer rubric for the CODE_REVIEW column.
 ## Definition of Done
 - [ ] AEOS-13 reaches DONE
 - [ ] `code-structure.md` committed with ≥ 6 criteria
-- [ ] Added to `CODE_REVIEW.yaml` column spec `reviewerRubrics`
+- [ ] Added to `code-review.yaml` column spec `reviewerRubrics`
 - [ ] Reviewer conclusion: APPROVED or APPROVED_WITH_WARNINGS

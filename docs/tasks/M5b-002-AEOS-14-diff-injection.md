@@ -30,7 +30,7 @@ The CODE_REVIEW column is fundamentally different from all prior columns: the re
 - DoD gate (M6)
 
 ## Technical Notes / Hints
-- Sub-task: after AEOS-14 is approved, implement diff injection in `src/prompt/context-assembler.ts` and `src/prompt/prompt-builder.ts`
+- Sub-task: after AEOS-14 is approved, implement diff injection in `src/application/services/context-assembler.ts` and `src/application/services/prompt-builder.ts`
 - `git diff HEAD~1 HEAD` or `git diff --staged` depending on when the diff is captured in the run lifecycle
 
 ## Dependencies
