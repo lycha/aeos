@@ -11,6 +11,7 @@ import { registerTicketCreateCommand } from './commands/ticket-create.command.js
 import { registerTicketListCommand } from './commands/ticket-list.command.js';
 import { registerTicketShowCommand } from './commands/ticket-show.command.js';
 import { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
+import { registerTicketRunCommand } from './commands/ticket-run.command.js';
 
 export { createContainer } from './container.js';
 export type { Container } from './container.js';
@@ -20,6 +21,7 @@ export { registerTicketCreateCommand } from './commands/ticket-create.command.js
 export { registerTicketListCommand } from './commands/ticket-list.command.js';
 export { registerTicketShowCommand } from './commands/ticket-show.command.js';
 export { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
+export { registerTicketRunCommand } from './commands/ticket-run.command.js';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -36,6 +38,7 @@ export function buildProgram(): Command {
   registerTicketListCommand(program, () => container.ticketList, container.projectRepo);
   registerTicketShowCommand(program, () => container.ticketShow, container.projectRepo);
   registerTicketAnswerCommand(program, () => container.ticketAnswer, container.projectRepo);
+  registerTicketRunCommand(program, () => container.ticketRun, container.projectRepo);
 
   return program;
 }

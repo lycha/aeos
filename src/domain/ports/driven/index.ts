@@ -9,3 +9,4 @@ export * from './git-gateway.port.js';
 export * from './column-spec-loader.port.js';
 export * from './agent-spec-loader.port.js';
 export * from './config-store.port.js';
+export * from './rubric-loader.port.js';

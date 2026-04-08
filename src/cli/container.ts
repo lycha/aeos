@@ -6,6 +6,7 @@ import type { TicketCreatePort } from '../domain/ports/driving/ticket-create.por
 import type { TicketListPort } from '../domain/ports/driving/ticket-list.port.js';
 import type { TicketShowPort } from '../domain/ports/driving/ticket-show.port.js';
 import type { TicketAnswerPort } from '../domain/ports/driving/ticket-answer.port.js';
+import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import { FsConfigStore } from '../infrastructure/filesystem/fs-config.adapter.js';
 import { FsProjectRepository } from '../infrastructure/filesystem/fs-project.repository.js';
@@ -19,8 +20,16 @@ import { TicketCreateUseCase } from '../application/ticket-create.use-case.js';
 import { TicketListUseCase } from '../application/ticket-list.use-case.js';
 import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
 import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
+import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
 import { StateMachineService } from '../domain/services/state-machine.js';
 import { SqliteTransitionRepository } from '../infrastructure/persistence/sqlite-transition.repository.js';
+import { ContextAssembler } from '../application/services/context-assembler.js';
+import { buildPrompt } from '../application/services/prompt-builder.js';
+import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
+import { YamlColumnSpecLoader } from '../infrastructure/spec-loader/yaml-column-spec-loader.adapter.js';
+import { YamlAgentSpecLoader } from '../infrastructure/spec-loader/yaml-agent-spec-loader.adapter.js';
+import { FsRubricLoader } from '../infrastructure/filesystem/fs-rubric-loader.adapter.js';
+import { PreflightService } from '../application/services/preflight.js';
 
 export interface Container {
   install: InstallPort;
@@ -29,6 +38,7 @@ export interface Container {
   ticketList: TicketListPort;
   ticketShow: TicketShowPort;
   ticketAnswer: TicketAnswerPort;
+  ticketRun: TicketRunPort;
   projectRepo: ProjectRepository;
 }
 
@@ -64,6 +74,29 @@ export function createContainer(): Container {
       const transitionRepo = new SqliteTransitionRepository(getDb());
       const stateMachine = new StateMachineService(getTicketRepo(), transitionRepo);
       return new TicketAnswerUseCase(getTicketRepo(), artifactStore, stateMachine, gitGateway);
+    },
+    get ticketRun() {
+      const transitionRepo = new SqliteTransitionRepository(getDb());
+      const stateMachine = new StateMachineService(getTicketRepo(), transitionRepo);
+      const contextAssembler = new ContextAssembler(artifactStore, projectRepo);
+      const executor = new StubExecutor();
+      const columnSpecLoader = new YamlColumnSpecLoader();
+      const agentSpecLoader = new YamlAgentSpecLoader();
+      const rubricLoader = new FsRubricLoader();
+      const preflight = new PreflightService(executor, artifactStore, stateMachine);
+      return new TicketRunUseCase(
+        getTicketRepo(),
+        stateMachine,
+        contextAssembler,
+        buildPrompt,
+        executor,
+        artifactStore,
+        gitGateway,
+        columnSpecLoader,
+        agentSpecLoader,
+        rubricLoader,
+        preflight,
+      );
     },
     projectRepo,
   };
