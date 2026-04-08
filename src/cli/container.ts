@@ -7,6 +7,7 @@ import type { TicketListPort } from '../domain/ports/driving/ticket-list.port.js
 import type { TicketShowPort } from '../domain/ports/driving/ticket-show.port.js';
 import type { TicketAnswerPort } from '../domain/ports/driving/ticket-answer.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
+import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import { FsConfigStore } from '../infrastructure/filesystem/fs-config.adapter.js';
 import { FsProjectRepository } from '../infrastructure/filesystem/fs-project.repository.js';
@@ -21,6 +22,7 @@ import { TicketListUseCase } from '../application/ticket-list.use-case.js';
 import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
 import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
+import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
 import { StateMachineService } from '../domain/services/state-machine.js';
 import { SqliteTransitionRepository } from '../infrastructure/persistence/sqlite-transition.repository.js';
 import { ContextAssembler } from '../application/services/context-assembler.js';
@@ -39,6 +41,7 @@ export interface Container {
   ticketShow: TicketShowPort;
   ticketAnswer: TicketAnswerPort;
   ticketRun: TicketRunPort;
+  ticketApprove: TicketApprovePort;
   projectRepo: ProjectRepository;
 }
 
@@ -97,6 +100,11 @@ export function createContainer(): Container {
         rubricLoader,
         preflight,
       );
+    },
+    get ticketApprove() {
+      const transitionRepo = new SqliteTransitionRepository(getDb());
+      const stateMachine = new StateMachineService(getTicketRepo(), transitionRepo);
+      return new TicketApproveUseCase(getTicketRepo(), stateMachine, gitGateway);
     },
     projectRepo,
   };
