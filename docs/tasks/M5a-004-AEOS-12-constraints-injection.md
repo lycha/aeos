@@ -1,39 +1,51 @@
-# Task: Run AEOS-12 — `CONSTRAINTS.md` Injection into Engineer Agent Context
+# Task: Implement AEOS-12 — Scaffold CONSTRAINTS.md on Project Init
 
 **Milestone:** M5a — Engineer Agent (Implementation Column)
-**Agent:** — (dogfood pipeline ticket)
+**Agent:** typescript-pro
 **Method:** Dogfood — run through AEOS pipeline
 
 ## Context
-Produces the spec and initial `CONSTRAINTS.md` for the AEOS project itself. `CONSTRAINTS.md` is the project-level guardrails file (tech stack, coding conventions, forbidden patterns) that is injected into every engineer agent prompt. Without it, the agent has no project-specific guidance.
+The system design (§3.3) shows `.aeos/CONSTRAINTS.md` as part of the per-project layout.
+The `ContextAssembler` and `PromptBuilder` already load and render CONSTRAINTS.md content
+(implemented in M2-004 and M2-005). The full chain is already in place:
+
+- **Port:** `ProjectRepository.readConstraints(projectPath): string | null`
+- **Adapter:** `FsProjectRepository.readConstraints()` — reads `{projectPath}/.aeos/CONSTRAINTS.md`, returns `null` on ENOENT
+- **Assembler:** `ContextAssembler.assemble()` — calls `this.projectRepo.readConstraints(projectRoot)` and includes result in `AssembledContext.constraints`
+- **Domain model:** `AssembledContext.constraints: string | null`
+- **Prompt builder:** `PromptBuilder.buildContextSection()` — renders constraints as `## Constraints` sub-section inside the `[CONTEXT]` block, or `(none)` when absent
+
+However, no task creates the placeholder file during `aeos project init`. Without it, the
+operator must manually create the file to use constraints. This task adds the missing
+scaffolding step, following the pattern established by M2-014 (agents) and M2-015 (column-specs).
 
 ## What needs to be done
-1. Create ticket: `aeos ticket create "CONSTRAINTS.md injection into engineer-agent context"` → AEOS-12
-2. Fill in `.aeos/AEOS-12-ticket.md`:
-   - Goal: produce an initial `CONSTRAINTS.md` for the AEOS project and confirm `ContextAssembler` reads it correctly
-   - `CONSTRAINTS.md` content should include: language (TypeScript strict ESM), forbidden patterns (`any`, `console.log` in production, sync file I/O in hot paths), test requirements, naming conventions
-   - Verify `ContextAssembler` (M2-004) already handles `CONSTRAINTS.md` — if not, update it
-3. Run: `aeos ticket run AEOS-12`
-4. Review: does the produced `CONSTRAINTS.md` give clear, actionable constraints?
-5. `aeos ticket approve AEOS-12`
+1. Add a `writeConstraintsPlaceholder(projectPath: string): void` method to `ProjectRepository` port
+2. Implement in `FsProjectRepository`: write a placeholder `CONSTRAINTS.md` with example content
+   matching system design §8.2 (Architecture, Code Standards, Security sections)
+3. Call the new method from `ProjectInitUseCase.execute()` after directory creation
+4. Update `ProjectInitUseCase` tests to verify CONSTRAINTS.md is created on init
+5. Update `FsProjectRepository` tests to cover the new method
+6. Ensure idempotent: re-running `aeos project init` does NOT overwrite an existing CONSTRAINTS.md
 
 ## Acceptance Criteria
-- [ ] Given `aeos ticket run AEOS-12`, when complete, then `AEOS-12-artifact.md` and review exist
-- [ ] Given produced `CONSTRAINTS.md`, when reading, then it contains: language constraints, forbidden patterns, test requirements
-- [ ] Given `ContextAssembler.assembleContext()` with a project that has `CONSTRAINTS.md`, when calling it, then `constraints` field is non-null
-- [ ] Given `buildPrompt()` with non-null constraints, when inspecting the prompt, then `## Constraints` section contains the file content
-- [ ] Given reviewer output, then APPROVED or APPROVED_WITH_WARNINGS
+- [ ] `aeos project init` creates `.aeos/CONSTRAINTS.md` with placeholder content
+- [ ] Placeholder content includes Architecture, Code Standards, and Security sections
+- [ ] Re-running init does NOT overwrite existing CONSTRAINTS.md
+- [ ] Unit tests cover: fresh init creates file, re-init preserves existing file
 
 ## Out of Scope
-- Per-column constraints (v2 concern)
-- Code structure rubric (AEOS-13)
+- Phase-scoping constraints injection (known gap — PLAN phase receives constraints
+  even though system design §8.1 excludes it; deferred)
+- Enforcing constraints at review time (constraints are informational to the agent, not enforced by rubrics)
 
 ## Dependencies
-- M5a-001 through M5a-003 complete
-- M2-004: `ContextAssembler` already reads `CONSTRAINTS.md`
+- M2-004: ContextAssembler (✅ complete — already loads constraints)
+- M2-005: PromptBuilder (✅ complete — already renders constraints)
+- M2-014: Scaffolding pattern established (agents directory)
+- M2-015: Scaffolding pattern established (column-specs directory)
 
 ## Definition of Done
-- [ ] AEOS-12 reaches DONE
-- [ ] `CONSTRAINTS.md` created at project root
-- [ ] `ContextAssembler` confirmed to inject constraints into assembled context
-- [ ] Exit criteria for M5a: a ticket runs through IMPLEMENTATION producing real `implementation-notes.md` that passes reviewer
+- [ ] CONSTRAINTS.md placeholder created on `aeos project init`
+- [ ] Tests pass covering creation and idempotency
+- [ ] Existing ContextAssembler → PromptBuilder chain verified end-to-end with placeholder content

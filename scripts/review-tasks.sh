@@ -25,9 +25,25 @@ DRY_RUN=false
 # Edit this array to control which tasks are reviewed.
 # Prefix with # to skip a task.
 TASKS=(
-  "M2-014-scaffold-agents-on-init.md"
-  "M2-015-scaffold-column-specs-on-init.md"
-  "M2-016-ci-project-init-before-tests.md"
+  "M3-002-AEOS-2-prd-structure-rubric.md"
+  "M3-003-AEOS-3-prd-template.md"
+  "M3-004-AEOS-4-intent-drift-rubric.md"
+  "M4-001-AEOS-5-architect-agent-spec.md"
+  "M4-002-AEOS-6-spike-template.md"
+  "M4-003-AEOS-7-tech-spec-rubric.md"
+  "M4-004-AEOS-8-tech-spec-template.md"
+  "M5a-001-AEOS-9-engineer-agent-spec.md"
+  "M5a-002-AEOS-10-impl-notes-template.md"
+  "M5a-003-AEOS-11-impl-structure-rubric.md"
+  "M5a-004-AEOS-12-constraints-injection.md"
+  "M5b-001-AEOS-13-code-structure-rubric.md"
+  "M5b-002-AEOS-14-diff-injection.md"
+  "M6-001-AEOS-15-deploy-column-design.md"
+  "M6-002-AEOS-16-qa-agent-spec.md"
+  "M6-003-AEOS-17-qa-report-template.md"
+  "M6-004-AEOS-18-qa-structure-rubric.md"
+  "M6-005-AEOS-19-dod-evaluation-rubric.md"
+  "M6-006-AEOS-20-dod-gate-cli.md"
 )
 
 # ── Argument parsing ─────────────────────────────────────────────

@@ -1,36 +1,34 @@
-# Task: Run AEOS-7 — Tech Spec Structure Rubric (`tech-spec-structure.md`)
+# Task: Implement AEOS-7 — Tech Spec Structure Rubric (`tech-spec-structure.md`)
 
 **Milestone:** M4 — Architect Agent (Architecture Spike + Tech Spec Columns)
-**Agent:** — (dogfood pipeline ticket)
+**Agent:** prompt-engineering
 **Method:** Dogfood — run through AEOS pipeline
 
 ## Context
-Produces `tech-spec-structure.md` — the reviewer rubric for the TECH_SPEC column. A tech spec that passes this rubric should give an engineer agent enough to implement without ambiguity. This is the handoff quality gate between PREPARE and DEPLOY columns.
+Produces `tech-spec-structure.md` — the reviewer rubric for the TECH_SPEC column. Applied to evaluate tech spec artifacts before advancement to IMPLEMENTATION. Must ensure technical specs are implementable and complete.
 
 ## What needs to be done
-1. Create ticket: `aeos ticket create "Tech spec structure rubric"` → AEOS-7
-2. Fill in `.aeos/AEOS-7-ticket.md`:
-   - Goal: produce `tech-spec-structure.md` with rubric criteria covering: API contract completeness, data model definition, error handling specification, testability (can a QA agent write tests from this spec?), implementation sequencing clarity
-   - Format: named criteria with PASS/WARN/FAIL definitions
-3. Run: `aeos ticket run AEOS-7`
-4. Review: test against a hypothetical incomplete tech spec
-5. `aeos ticket approve AEOS-7`
-6. Add rubric path to `TECH_SPEC.yaml` column spec `reviewerRubrics`
+1. Ensure `.aeos/rubrics/structure/` directory exists (create it if it does not)
+2. Create `.aeos/rubrics/structure/tech-spec-structure.md` — a rubric the reviewer uses to evaluate tech specs
+3. The rubric must cover: component diagram or module list, API contracts (endpoints, schemas), data model changes, error handling strategy, dependency declarations, test strategy outline
+4. Format: named criteria with PASS/WARN/FAIL definitions
+5. Validate against a hypothetical vague tech spec to confirm it catches gaps
+6. Add rubric path to `tech-spec.yaml` column spec under `reviewerRubrics`
 
 ## Acceptance Criteria
-- [ ] Given `aeos ticket run AEOS-7`, when complete, then `AEOS-7-tech-spec-structure.md` exists
-- [ ] Given rubric, when reviewing, then ≥ 5 criteria covering API, data model, error handling, testability, sequencing
-- [ ] Given reviewer output, then APPROVED or APPROVED_WITH_WARNINGS
+- [ ] `tech-spec-structure.md` exists at `.aeos/rubrics/structure/tech-spec-structure.md`
+- [ ] It contains ≥ 5 named rubric criteria
+- [ ] Each criterion has PASS/WARN/FAIL definitions
+- [ ] Rubric path added to `tech-spec.yaml` column spec under `reviewerRubrics`
+- [ ] Validated against a hypothetical vague tech spec — at least one criterion triggers WARN or FAIL
 
 ## Out of Scope
-- Tech spec template (AEOS-8)
-- Implementation rubric (AEOS-11)
+- Tech spec template (AEOS-8) — separate task
+- ADR coverage — handled by ARCH_SPIKE column (spike template decisions); tech spec rubric covers implementation-level concerns
 
 ## Dependencies
-- M4-001: AEOS-5 complete
+- M4-000b: `tech-spec.yaml` column spec exists (provides `reviewerRubrics` array to update)
 
 ## Definition of Done
-- [ ] AEOS-7 reaches DONE
 - [ ] `tech-spec-structure.md` committed with ≥ 5 criteria
-- [ ] Added to `TECH_SPEC.yaml` column spec `reviewerRubrics`
-- [ ] Reviewer conclusion: APPROVED or APPROVED_WITH_WARNINGS
+- [ ] Rubric path added to `tech-spec.yaml` column spec under `reviewerRubrics`

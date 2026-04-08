@@ -1,37 +1,43 @@
-# Task: Run AEOS-19 — DoD Evaluation Rubric (`dod-evaluation.md`)
+# Task: Implement AEOS-19 — DoD Evaluation Rubric (`dod-evaluation.md`)
 
 **Milestone:** M6 — QA Agent + DoD Gate
-**Agent:** — (dogfood pipeline ticket)
+**Agent:** prompt-engineering
 **Method:** Dogfood — run through AEOS pipeline
 
 ## Context
 Produces `dod-evaluation.md` — the rubric the DoD Gate uses to confirm a ticket is truly DONE. Unlike column rubrics which evaluate individual artifacts, this rubric is holistic: it checks that the entire pipeline run has produced a coherent, complete body of work. This is the final automated quality check before human approval.
 
 ## What needs to be done
-1. Create ticket: `aeos ticket create "DoD evaluation rubric"` → AEOS-19
-2. Fill in `.aeos/AEOS-19-ticket.md`:
-   - Goal: produce `dod-evaluation.md` — a holistic DoD rubric
-   - Criteria must cover: all required artifacts present (ticket, prd, spike, tech-spec, impl-notes, code-review, qa-report), all column reviewers approved (no unresolved FAILs), QA recommendation is READY FOR DOD, no open questions in any artifact, implementation matches original ticket intent
-   - Format: named criteria with PASS/FAIL (no WARN at DoD — it's binary)
-3. Run: `aeos ticket run AEOS-19`
-4. Review
-5. `aeos ticket approve AEOS-19`
-6. Add to `dod-gate.yaml` column spec `reviewerRubrics`
+0. Ensure `.aeos/rubrics/dod/` directory exists (create it if it does not)
+1. Create `.aeos/rubrics/dod/dod-evaluation.md` — a holistic DoD rubric
+2. The rubric must cover: all required worker artifacts present (ticket, prd, spike, tech-spec, implementation-notes, code-review, qa-report); optionally verify reviewer sign-off artifacts exist for each column, all column reviewers approved (no unresolved FAILs), QA recommendation is READY FOR DOD, no open questions in any artifact, implementation matches original ticket intent
+3. Format: named criteria with PASS/FAIL definitions only (no WARN — DoD is binary)
+4. Validate against a hypothetical incomplete pipeline run to confirm it catches the gap
+5. Add rubric path to `dod-gate.yaml` column spec under `reviewerRubrics`
 
 ## Acceptance Criteria
-- [ ] Given `aeos ticket run AEOS-19`, when complete, then `AEOS-19-dod-evaluation.md` exists
-- [ ] Given rubric, when reviewing, then ≥ 5 criteria including artifact completeness check
-- [ ] Given rubric, when reviewing, then all criteria are binary PASS/FAIL (no WARN)
-- [ ] Given reviewer output, then APPROVED or APPROVED_WITH_WARNINGS
+- [ ] `.aeos/rubrics/dod/` directory exists
+- [ ] `dod-evaluation.md` exists at `.aeos/rubrics/dod/dod-evaluation.md`
+- [ ] It contains ≥ 5 criteria including artifact completeness check
+- [ ] All criteria are binary PASS/FAIL (no WARN)
+- [ ] Rubric path added to `dod-gate.yaml` column spec under `reviewerRubrics`
+- [ ] Validated against a hypothetical incomplete pipeline run (e.g. missing QA report, unresolved reviewer FAIL) — at least one criterion triggers FAIL
 
 ## Out of Scope
 - DoD Gate CLI command (AEOS-20)
+- DOD_GATE workflow design is owned by AEOS-15. This task produces the rubric content only.
 
 ## Dependencies
-- M6-004: AEOS-18 complete
+- M6-000b: `dod-gate.yaml` column spec exists (provides `reviewerRubrics` array to update)
+- M6-001: AEOS-15 complete (confirms DOD_GATE rubric consumption pattern)
+
+## Technical Notes / Hints
+- Confirm with AEOS-15 design output how `ticket-dod-approve` (M6-006) locates the DoD rubric —
+  via `dod-gate.yaml` `reviewerRubrics` or via a dedicated configuration path.
+- The `dod-gate.yaml` column spec is a placeholder for the human-controlled DOD_GATE column.
+  `workerAgentFile` and `reviewerAgentFile` are required by `ColumnSpecSchema` but are not
+  used by the human-approval flow.
 
 ## Definition of Done
-- [ ] AEOS-19 reaches DONE
 - [ ] `dod-evaluation.md` committed with ≥ 5 binary criteria
-- [ ] Added to `dod-gate.yaml` column spec `reviewerRubrics`
-- [ ] Reviewer conclusion: APPROVED or APPROVED_WITH_WARNINGS
+- [ ] Rubric path added to `dod-gate.yaml` column spec under `reviewerRubrics`

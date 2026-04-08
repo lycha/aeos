@@ -1,39 +1,49 @@
-# Task: Run AEOS-8 — Tech Spec Artifact Template (`tech-spec-template.md`)
+# Task: Implement AEOS-8 — Tech Spec Template (`tech-spec-template.md`)
 
 **Milestone:** M4 — Architect Agent (Architecture Spike + Tech Spec Columns)
-**Agent:** — (dogfood pipeline ticket)
+**Agent:** prompt-engineering
 **Method:** Dogfood — run through AEOS pipeline
 
 ## Context
-Produces `tech-spec-template.md` — the output format template for the TECH_SPEC column. Must align with the rubric criteria in `tech-spec-structure.md` (AEOS-7). The template is injected into the architect agent's `[OUTPUT FORMAT]` section for the TECH_SPEC column.
+Produces `tech-spec-template.md` — the output format template for the TECH_SPEC column. Injected into the architect agent's `[OUTPUT FORMAT]` section when running in the TECH_SPEC column. Must produce output that gives engineers everything they need to start coding.
+
+> **⚠️ Implementation note — `outputFormat` resolution gap:**
+> The current `PromptBuilder` treats the `outputFormat` field as inline text, not a file path.
+> There is no template file loading mechanism in the codebase. The full tech-spec template
+> content must be inlined as a multi-line YAML string in `architect-agent.yaml` `outputFormat`
+> field under a `### TECH_SPEC output` section header (the field is shared with AEOS-6's
+> spike template via concatenation under `### ARCH_SPIKE output`).
 
 ## What needs to be done
-1. Create ticket: `aeos ticket create "Tech spec artifact template"` → AEOS-8
-2. Fill in `.aeos/AEOS-8-ticket.md`:
-   - Goal: produce `tech-spec-template.md` with sections matching `tech-spec-structure.md` criteria
-   - Required sections: Overview, API Contract (endpoints/signatures), Data Model, Error Handling, Implementation Sequence, Open Questions
-   - Placeholders must be specific enough to guide the architect agent without being over-prescriptive
-3. Run: `aeos ticket run AEOS-8`
-4. Review: compare template sections against rubric criteria — every criterion must have a corresponding template section
-5. `aeos ticket approve AEOS-8`
-6. Update `architect-agent.yaml` `outputFormat` for TECH_SPEC column to reference this template
+1. Create `.aeos/rubrics/templates/tech-spec-template.md` with sections: Overview, Component Architecture, API Contracts, Data Model, Error Handling, Dependencies, Test Strategy, Migration Plan
+2. Each section should have descriptive placeholder text
+3. Verify the template aligns with all criteria in `tech-spec-structure.md` (AEOS-7)
+4. Update `architect-agent.yaml` `outputFormat`: inline the full tech-spec template content as a
+   multi-line YAML string under a `### TECH_SPEC output` section header. The `AgentSpecSchema`
+   has one `outputFormat` field; AEOS-6 has already added spike template content under
+   `### ARCH_SPIKE output`. Append the tech-spec template — do NOT replace the existing content.
 
 ## Acceptance Criteria
-- [ ] Given `aeos ticket run AEOS-8`, when complete, then `AEOS-8-tech-spec-template.md` exists
-- [ ] Given template, when comparing with `tech-spec-structure.md`, then every rubric criterion maps to a template section
-- [ ] Given reviewer output, then APPROVED or APPROVED_WITH_WARNINGS
-- [ ] Given `architect-agent.yaml`, when updated, then `outputFormat` references `tech-spec-template.md` for TECH_SPEC
+- [ ] `tech-spec-template.md` exists at `.aeos/rubrics/templates/tech-spec-template.md`
+- [ ] All sections match the criteria in `tech-spec-structure.md`
+- [ ] Placeholders are descriptive (not generic)
+- [ ] `architect-agent.yaml` updated to reference template for TECH_SPEC
+- [ ] Every criterion in `tech-spec-structure.md` (AEOS-7) has a corresponding template section
 
 ## Out of Scope
-- Engineer agent spec (AEOS-9)
-- Implementation notes template (AEOS-10)
+- IMPLEMENTATION column templates (AEOS-10)
 
 ## Dependencies
 - M4-003: AEOS-7 complete (`tech-spec-structure.md` rubric exists)
+- M4-001: AEOS-5 complete (`architect-agent.yaml` exists — step 4 updates this file)
+- M4-002: AEOS-6 complete (spike template already in `outputFormat` — step 4 must append, not replace)
+- M4-000b: `tech-spec.yaml` column spec (context for how template is consumed)
+- Prerequisite (not yet scheduled): template file resolution mechanism — until built,
+  template content must be inlined in agent YAML
+- Note: `.aeos/rubrics/templates/` directory not scaffolded by any existing task; create if needed
 
 ## Definition of Done
-- [ ] AEOS-8 reaches DONE
-- [ ] `tech-spec-template.md` committed with all required sections
-- [ ] `architect-agent.yaml` updated for TECH_SPEC column output format
-- [ ] Reviewer conclusion: APPROVED or APPROVED_WITH_WARNINGS
-- [ ] Exit criteria for M4 verified: a ticket can flow BACKLOG → PRODUCT_SCOPING → ARCH_SPIKE → TECH_SPEC with real artifacts
+- [ ] `tech-spec-template.md` committed at `.aeos/rubrics/templates/tech-spec-template.md` with all required sections
+- [ ] `architect-agent.yaml` `outputFormat` contains the tech-spec template content inlined
+      under a `### TECH_SPEC output` section header (appended to existing ARCH_SPIKE content)
+- [ ] All acceptance criteria met
