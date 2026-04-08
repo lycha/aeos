@@ -36,6 +36,7 @@ function createMockProjectRepo(): ProjectRepository {
     writeProject: vi.fn(),
     ensureColumnSpecsDir: vi.fn(),
     findRoot: vi.fn().mockReturnValue('/test'),
+    readConstraints: vi.fn().mockReturnValue(null),
   };
 }
 

@@ -103,4 +103,13 @@ export class FsProjectRepository implements ProjectRepository {
 
     return null;
   }
+
+  readConstraints(projectPath: string): string | null {
+    const filePath = path.join(projectPath, AEOS_DIR, 'CONSTRAINTS.md');
+    try {
+      return fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
 }

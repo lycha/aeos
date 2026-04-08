@@ -19,6 +19,7 @@ function createMockTicketRepo(): TicketRepository {
 
 function createMockArtifactStore(): ArtifactStore {
   return {
+    readArtifact: vi.fn().mockReturnValue(''),
     writeArtifact: vi.fn(),
     removeArtifact: vi.fn(),
     listArtifacts: vi.fn().mockReturnValue([]),

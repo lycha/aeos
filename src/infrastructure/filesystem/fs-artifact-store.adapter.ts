@@ -73,6 +73,13 @@ export function listArtifacts(ticketId: string, root?: string): string[] {
 }
 
 export class FsArtifactStore implements ArtifactStore {
+  readArtifact(projectPath: string, ticketId: string, filename: string): string {
+    FsArtifactStore.validatePathComponent(ticketId, 'ticketId');
+    FsArtifactStore.validatePathComponent(filename, 'filename');
+    const filePath = path.join(projectPath, AEOS_DIR, TICKETS_DIR, ticketId, filename);
+    return fs.readFileSync(filePath, 'utf-8');
+  }
+
   writeArtifact(projectPath: string, ticketId: string, filename: string, content: string): void {
     FsArtifactStore.validatePathComponent(ticketId, 'ticketId');
     FsArtifactStore.validatePathComponent(filename, 'filename');
