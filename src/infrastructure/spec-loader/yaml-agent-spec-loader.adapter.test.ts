@@ -2,12 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { YamlAgentSpecLoader } from './yaml-agent-spec-loader.adapter.js';
 import { AgentSpecNotFoundError } from '../../shared/errors.js';
-
-let tmpDir: string;
-let loader: YamlAgentSpecLoader;
 
 /** Minimal valid agent spec YAML content. */
 function validAgentSpecYaml(overrides: Record<string, unknown> = {}): string {
@@ -35,17 +33,19 @@ function validAgentSpecYaml(overrides: Record<string, unknown> = {}): string {
   return lines.join('\n');
 }
 
-beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-agentspec-test-'));
-  fs.mkdirSync(path.join(tmpDir, '.aeos', 'agents'), { recursive: true });
-  loader = new YamlAgentSpecLoader();
-});
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-});
-
 describe('YamlAgentSpecLoader', () => {
+  let tmpDir: string;
+  let loader: YamlAgentSpecLoader;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-agentspec-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.aeos', 'agents'), { recursive: true });
+    loader = new YamlAgentSpecLoader();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
   it('loads and returns a valid agent spec', () => {
     const specPath = path.join(tmpDir, '.aeos', 'agents', 'pm-agent.yaml');
     fs.writeFileSync(specPath, validAgentSpecYaml(), 'utf-8');
@@ -116,5 +116,66 @@ describe('YamlAgentSpecLoader', () => {
     expect(result.role).toBe('reviewer');
     expect(result.executor.type).toBe('claude-cli');
     expect(result.executor.model).toBe('claude-opus-4-6');
+  });
+});
+
+describe('reviewer-agent.yaml integration', () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  let loader: YamlAgentSpecLoader;
+
+  beforeEach(() => {
+    loader = new YamlAgentSpecLoader();
+  });
+
+  /**
+   * Integration test: loads the actual .aeos/agents/reviewer-agent.yaml from the repo root
+   * and validates it against AgentSpecSchema (M2-013 acceptance criteria).
+   */
+  it('parses reviewer-agent.yaml without ZodError', () => {
+    const result = loader.load('agents/reviewer-agent.yaml', repoRoot);
+
+    // AC: AgentSpecSchema.parse() does not throw
+    expect(result).toBeDefined();
+    expect(result.name).toBe('reviewer-agent');
+  });
+
+  it('has role set to reviewer', () => {
+    const result = loader.load('agents/reviewer-agent.yaml', repoRoot);
+    expect(result.role).toBe('reviewer');
+  });
+
+  it('systemPrompt defines "evaluate, don\'t fix" behaviour', () => {
+    const result = loader.load('agents/reviewer-agent.yaml', repoRoot);
+    expect(result.systemPrompt).toContain('evaluate');
+    expect(result.systemPrompt).toContain('You do not rewrite or fix the artifact');
+  });
+
+  it('outputFormat includes severity-grouped findings and conclusion', () => {
+    const result = loader.load('agents/reviewer-agent.yaml', repoRoot);
+    expect(result.outputFormat).toContain('BLOCKER');
+    expect(result.outputFormat).toContain('WARNING');
+    expect(result.outputFormat).toContain('INFO');
+    expect(result.outputFormat).toContain('APPROVED');
+    expect(result.outputFormat).toContain('REJECTED');
+  });
+
+  it('selfVerificationChecklist contains at least 3 items', () => {
+    const result = loader.load('agents/reviewer-agent.yaml', repoRoot);
+    expect(result.selfVerificationChecklist.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('executor.type is claude-cli', () => {
+    const result = loader.load('agents/reviewer-agent.yaml', repoRoot);
+    expect(result.executor.type).toBe('claude-cli');
+  });
+
+  it('executor.model is claude-sonnet-4-20250514', () => {
+    const result = loader.load('agents/reviewer-agent.yaml', repoRoot);
+    expect(result.executor.model).toBe('claude-sonnet-4-20250514');
+  });
+
+  it('executor.timeoutSeconds is 180', () => {
+    const result = loader.load('agents/reviewer-agent.yaml', repoRoot);
+    expect(result.executor.timeoutSeconds).toBe(180);
   });
 });
