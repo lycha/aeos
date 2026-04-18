@@ -136,11 +136,11 @@ describe('StateMachineService', () => {
   // Legal forward transitions
   // =========================================================================
   describe('legal forward transitions', () => {
-    const ADJACENT_PAIRS = COLUMN_ORDER.slice(0, -1).map(
-      (col, i) => [col, COLUMN_ORDER[i + 1]] as [Column, Column],
+    const FORWARD_PAIRS = COLUMN_ORDER.flatMap((from, fromIndex) =>
+      COLUMN_ORDER.slice(fromIndex + 1).map((to) => [from, to] as [Column, Column]),
     );
 
-    it.each(ADJACENT_PAIRS)('allows forward %s → %s', (from, to) => {
+    it.each(FORWARD_PAIRS)('allows forward %s → %s', (from, to) => {
       seedTicket(ticketRepo, {
         column: from,
         subState: from === Column.BACKLOG ? null : SubState.WORKING,
@@ -201,20 +201,6 @@ describe('StateMachineService', () => {
   // Illegal transitions
   // =========================================================================
   describe('illegal transitions', () => {
-    it('rejects skip one column forward (BACKLOG → ARCH_SPIKE)', () => {
-      seedTicket(ticketRepo, { column: Column.BACKLOG });
-      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.ARCH_SPIKE);
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(typeof result.reason).toBe('string');
-    });
-
-    it('rejects skip multiple columns forward (BACKLOG → IMPLEMENTATION)', () => {
-      seedTicket(ticketRepo, { column: Column.BACKLOG });
-      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.IMPLEMENTATION);
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(typeof result.reason).toBe('string');
-    });
-
     it('rejects same-column transition', () => {
       seedTicket(ticketRepo, { column: Column.QA, subState: SubState.WORKING });
       const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.QA);

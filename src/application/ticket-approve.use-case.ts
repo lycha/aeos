@@ -3,6 +3,7 @@
 import * as path from 'node:path';
 import { Column, COLUMN_ORDER } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
+import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
@@ -10,10 +11,12 @@ import type {
   TicketApprovePort,
   TicketApproveResult,
 } from '../domain/ports/driving/ticket-approve.port.js';
+import { syncTicketDocument } from './services/ticket-document.js';
 
 export class TicketApproveUseCase implements TicketApprovePort {
   constructor(
     private readonly ticketRepo: TicketRepository,
+    private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
     private readonly gitGateway: GitGateway,
   ) {}
@@ -68,6 +71,11 @@ export class TicketApproveUseCase implements TicketApprovePort {
 
     // 7. Commit approval to git
     const aeosDir = path.join(projectPath, '.aeos');
+    syncTicketDocument(this.artifactStore, projectPath, {
+      ...ticket,
+      column: nextColumn,
+      subState: SubState.READY,
+    });
     try {
       this.gitGateway.commit(
         aeosDir,
@@ -79,6 +87,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
       if (!isBacklog) {
         this.stateMachine.setSubState(projectId, ticketId, SubState.SIGNED_OFF);
       }
+      syncTicketDocument(this.artifactStore, projectPath, ticket);
       throw err;
     }
 

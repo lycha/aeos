@@ -151,6 +151,13 @@ function runnableTicket(overrides: Partial<Ticket> = {}): Ticket {
 const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
 const TICKET_ID = 'AEOS-1';
+const TICKET_FILE_PATH = path.join(
+  PROJECT_PATH,
+  '.aeos',
+  'tickets',
+  TICKET_ID,
+  `${TICKET_ID}-ticket.md`,
+);
 
 // --- Test suite ---
 
@@ -223,8 +230,8 @@ describe('TicketRunUseCase', () => {
     expect(preflight.run).toHaveBeenCalledOnce();
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'WORKING');
     expect(executor.run).toHaveBeenCalledTimes(2); // worker + reviewer
-    expect(artifactStore.writeArtifact).toHaveBeenCalledTimes(2); // worker artifact + review artifact
-    expect(gitGateway.commitFiles).toHaveBeenCalledTimes(2);
+    expect(artifactStore.writeArtifact).toHaveBeenCalledTimes(5); // 3 state mirrors + worker + review
+    expect(gitGateway.commitFiles).toHaveBeenCalledTimes(5);
   });
 
   it('should set sub-state to SIGNED_OFF on success', async () => {
@@ -234,6 +241,29 @@ describe('TicketRunUseCase', () => {
     const subStates = calls.map((c: unknown[]) => c[2]);
     expect(subStates).toContain('IN_REVIEW');
     expect(subStates).toContain('SIGNED_OFF');
+  });
+
+  it('should mirror WORKING, IN_REVIEW, and SIGNED_OFF into git history on success', async () => {
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(gitGateway.commitFiles).toHaveBeenNthCalledWith(
+      1,
+      path.join(PROJECT_PATH, '.aeos'),
+      [TICKET_FILE_PATH],
+      `[${TICKET_ID}][STATE][v1][sub-state: WORKING]`,
+    );
+    expect(gitGateway.commitFiles).toHaveBeenNthCalledWith(
+      4,
+      path.join(PROJECT_PATH, '.aeos'),
+      [TICKET_FILE_PATH],
+      `[${TICKET_ID}][STATE][v1][sub-state: IN_REVIEW]`,
+    );
+    expect(gitGateway.commitFiles).toHaveBeenNthCalledWith(
+      5,
+      path.join(PROJECT_PATH, '.aeos'),
+      [TICKET_FILE_PATH],
+      `[${TICKET_ID}][STATE][v1][sub-state: SIGNED_OFF]`,
+    );
   });
 
   // --- Guard clause: ticket not found ---
@@ -329,6 +359,14 @@ describe('TicketRunUseCase', () => {
     if (result.status === 'blocked') {
       expect(result.blockers[0]).toContain('Preflight questions');
     }
+    expect(gitGateway.commitFiles).toHaveBeenCalledWith(
+      path.join(PROJECT_PATH, '.aeos'),
+      [
+        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, 'AEOS-1-questions.md'),
+        TICKET_FILE_PATH,
+      ],
+      `[${TICKET_ID}][QUESTIONS][v1][preflight][blocked]`,
+    );
   });
 
   // --- Executor failure ---
@@ -347,6 +385,11 @@ describe('TicketRunUseCase', () => {
     }
     expect(artifactStore.removeArtifact).toHaveBeenCalled();
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'FAILED');
+    expect(gitGateway.commitFiles).toHaveBeenLastCalledWith(
+      path.join(PROJECT_PATH, '.aeos'),
+      [TICKET_FILE_PATH],
+      `[${TICKET_ID}][STATE][v1][sub-state: FAILED]`,
+    );
   });
 
   // --- Validation failure ---
@@ -367,6 +410,11 @@ describe('TicketRunUseCase', () => {
     }
     expect(artifactStore.removeArtifact).toHaveBeenCalled();
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'FAILED');
+    expect(gitGateway.commitFiles).toHaveBeenLastCalledWith(
+      path.join(PROJECT_PATH, '.aeos'),
+      [TICKET_FILE_PATH],
+      `[${TICKET_ID}][STATE][v1][sub-state: FAILED]`,
+    );
   });
 
   // --- Reviewer failure is best-effort ---
@@ -384,8 +432,32 @@ describe('TicketRunUseCase', () => {
     const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
     expect(result.status).toBe('success');
-    // Only worker artifact was written (reviewer failed)
-    expect(artifactStore.writeArtifact).toHaveBeenCalledTimes(1);
+    // WORKING + worker artifact + IN_REVIEW + SIGNED_OFF
+    expect(artifactStore.writeArtifact).toHaveBeenCalledTimes(4);
+  });
+
+  it('should mirror FAILED when reviewer rejects the artifact', async () => {
+    let callCount = 0;
+    (executor.run as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return { ok: true, artifactPath: '/tmp/out', content: 'A '.repeat(60) };
+      }
+      return {
+        ok: true,
+        artifactPath: '/tmp/review',
+        content: 'REJECTED: missing acceptance criteria',
+      };
+    });
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result.status).toBe('failed');
+    expect(gitGateway.commitFiles).toHaveBeenLastCalledWith(
+      path.join(PROJECT_PATH, '.aeos'),
+      [TICKET_FILE_PATH],
+      `[${TICKET_ID}][STATE][v1][sub-state: FAILED]`,
+    );
   });
 
   // --- Invalid column value in column spec ---

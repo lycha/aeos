@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { TicketDodApproveUseCase } from './ticket-dod-approve.use-case.js';
+import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
@@ -27,6 +28,17 @@ function createMockGitGateway(): GitGateway {
     commit: vi.fn(),
     commitFiles: vi.fn(),
     diff: vi.fn().mockReturnValue(''),
+  };
+}
+
+function createMockArtifactStore(): ArtifactStore {
+  return {
+    artifactExists: vi.fn().mockReturnValue(true),
+    readArtifact: vi.fn().mockReturnValue('# Ticket: AEOS-1\n\n## Title\nTest ticket'),
+    getArtifactMtime: vi.fn().mockReturnValue(null),
+    writeArtifact: vi.fn(),
+    removeArtifact: vi.fn(),
+    listArtifacts: vi.fn().mockReturnValue([]),
   };
 }
 
@@ -64,6 +76,7 @@ function dodGateTicket(): Ticket {
 
 describe('TicketDodApproveUseCase', () => {
   let ticketRepo: ReturnType<typeof createMockTicketRepo>;
+  let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let gitGateway: ReturnType<typeof createMockGitGateway>;
   let stateMachine: ReturnType<typeof createMockStateMachine>;
   let costRepo: ReturnType<typeof createMockCostRepo>;
@@ -71,10 +84,17 @@ describe('TicketDodApproveUseCase', () => {
 
   beforeEach(() => {
     ticketRepo = createMockTicketRepo();
+    artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
     costRepo = createMockCostRepo();
-    useCase = new TicketDodApproveUseCase(ticketRepo, stateMachine, gitGateway, costRepo);
+    useCase = new TicketDodApproveUseCase(
+      ticketRepo,
+      artifactStore,
+      stateMachine,
+      gitGateway,
+      costRepo,
+    );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(dodGateTicket());
   });
 
@@ -99,6 +119,22 @@ describe('TicketDodApproveUseCase', () => {
   it('should set sub-state to null (terminal) on approval', () => {
     useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true);
     expect(ticketRepo.updateSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, null);
+  });
+
+  it('should update the ticket document metadata to DONE before commit', () => {
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true);
+    expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      TICKET_ID,
+      `${TICKET_ID}-ticket.md`,
+      expect.stringContaining('- Column: DONE'),
+    );
+    expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      TICKET_ID,
+      `${TICKET_ID}-ticket.md`,
+      expect.stringContaining('- Sub-state: NONE'),
+    );
   });
 
   it('should commit approval to git with correct message', () => {

@@ -8,6 +8,7 @@ import type { TicketShowPort } from '../domain/ports/driving/ticket-show.port.js
 import type { TicketAnswerPort } from '../domain/ports/driving/ticket-answer.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
+import type { TicketMovePort } from '../domain/ports/driving/ticket-move.port.js';
 import type { TicketDodApprovePort } from '../domain/ports/driving/ticket-dod-approve.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js';
@@ -26,6 +27,7 @@ import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
 import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
 import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
+import { TicketMoveUseCase } from '../application/ticket-move.use-case.js';
 import { TicketDodApproveUseCase } from '../application/ticket-dod-approve.use-case.js';
 import { StateMachineService } from '../domain/services/state-machine.js';
 import { SqliteTransitionRepository } from '../infrastructure/persistence/sqlite-transition.repository.js';
@@ -48,6 +50,7 @@ export interface Container {
   ticketAnswer: TicketAnswerPort;
   ticketRun: TicketRunPort;
   ticketApprove: TicketApprovePort;
+  ticketMove: TicketMovePort;
   ticketDodApprove: TicketDodApprovePort;
   projectRepo: ProjectRepository;
   rubricLoader: RubricLoader;
@@ -119,11 +122,20 @@ export function createContainer(): Container {
       );
     },
     get ticketApprove() {
-      return new TicketApproveUseCase(getTicketRepo(), getStateMachine(), gitGateway);
+      return new TicketApproveUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getStateMachine(),
+        gitGateway,
+      );
+    },
+    get ticketMove() {
+      return new TicketMoveUseCase(getTicketRepo(), artifactStore, getStateMachine(), gitGateway);
     },
     get ticketDodApprove() {
       return new TicketDodApproveUseCase(
         getTicketRepo(),
+        artifactStore,
         getStateMachine(),
         gitGateway,
         getCostRepo(),

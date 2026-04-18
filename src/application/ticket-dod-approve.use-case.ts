@@ -2,6 +2,7 @@
 
 import * as path from 'node:path';
 import { Column } from '../domain/model/column.js';
+import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
@@ -10,10 +11,12 @@ import type {
   TicketDodApprovePort,
   TicketDodApproveResult,
 } from '../domain/ports/driving/ticket-dod-approve.port.js';
+import { syncTicketDocument } from './services/ticket-document.js';
 
 export class TicketDodApproveUseCase implements TicketDodApprovePort {
   constructor(
     private readonly ticketRepo: TicketRepository,
+    private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
     private readonly gitGateway: GitGateway,
     private readonly costRepo: CostRepository,
@@ -58,6 +61,11 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
 
     // 6. Commit approval to git
     const aeosDir = path.join(projectPath, '.aeos');
+    syncTicketDocument(this.artifactStore, projectPath, {
+      ...ticket,
+      column: Column.DONE,
+      subState: null,
+    });
     try {
       this.gitGateway.commit(aeosDir, `[${ticketId}][HUMAN][v1][dod-approve: DOD_GATE → DONE]`);
     } catch (err) {
@@ -66,6 +74,7 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
       if (ticket.subState !== null) {
         this.stateMachine.setSubState(projectId, ticketId, ticket.subState);
       }
+      syncTicketDocument(this.artifactStore, projectPath, ticket);
       throw err;
     }
 

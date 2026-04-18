@@ -40,6 +40,9 @@ aeos ticket run MYPRJ-1
 # 5. Approve to advance to the next column
 aeos ticket approve MYPRJ-1
 
+# Optional: move a ticket directly to any workflow status
+aeos ticket move MYPRJ-1 QA
+
 # 6. Repeat steps 4–5 for each column, then final approval
 aeos ticket dod-approve MYPRJ-1
 ```
@@ -61,7 +64,7 @@ Each column follows the same cycle:
 3. **Validation** — rule-based structural checks (non-empty, required sections, word count)
 4. **Review** — reviewer agent evaluates against column-specific rubrics; `REJECTED` reviews set ticket to `FAILED`
 5. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
-6. **Human gate** — operator approves to advance (`aeos ticket approve`)
+6. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
 
 ## Commands
 
@@ -74,6 +77,7 @@ Each column follows the same cycle:
 | `aeos ticket show <id>` | Show ticket details, column, sub-state, and artifacts |
 | `aeos ticket run <id>` | Run the current column: pre-flight → agent → validate → review |
 | `aeos ticket approve <id>` | Advance a SIGNED_OFF ticket to the next column |
+| `aeos ticket move <id> <status>` | Human override — move a ticket directly to any workflow status |
 | `aeos ticket answer <id>` | Unblock a ticket after answering pre-flight questions |
 | `aeos ticket dod-approve <id>` | Final human gate — mark ticket as DONE *(not yet implemented)* |
 | `aeos dashboard` | Cross-project Kanban summary *(not yet implemented)* |

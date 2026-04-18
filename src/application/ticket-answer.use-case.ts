@@ -10,6 +10,7 @@ import type {
   TicketAnswerInput,
   TicketAnswerResult,
 } from '../domain/ports/driving/ticket-answer.port.js';
+import { syncTicketDocument } from './services/ticket-document.js';
 
 export class TicketAnswerUseCase implements TicketAnswerPort {
   constructor(
@@ -65,15 +66,20 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
     // 6. Commit the answered questions file
     const aeosDir = path.join(projectPath, '.aeos');
     const questionsFilePath = path.join(aeosDir, 'tickets', ticketId, questionsFilename);
+    const ticketFilePath = syncTicketDocument(this.artifactStore, projectPath, {
+      ...ticket,
+      subState: 'WORKING',
+    });
     try {
       this.gitGateway.commitFiles(
         aeosDir,
-        [questionsFilePath],
+        [questionsFilePath, ticketFilePath],
         `[${ticketId}][QUESTIONS][v1][human][answered]`,
       );
     } catch (err) {
       // Compensate: revert sub-state back to BLOCKED
       this.stateMachine.setSubState(projectId, ticketId, 'BLOCKED');
+      syncTicketDocument(this.artifactStore, projectPath, ticket);
       throw err;
     }
 

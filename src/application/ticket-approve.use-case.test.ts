@@ -2,6 +2,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TicketApproveUseCase } from './ticket-approve.use-case.js';
+import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
@@ -26,6 +27,17 @@ function createMockGitGateway(): GitGateway {
     commit: vi.fn(),
     commitFiles: vi.fn(),
     diff: vi.fn().mockReturnValue(''),
+  };
+}
+
+function createMockArtifactStore(): ArtifactStore {
+  return {
+    artifactExists: vi.fn().mockReturnValue(true),
+    readArtifact: vi.fn().mockReturnValue('# Ticket: AEOS-1\n\n## Title\nTest ticket'),
+    getArtifactMtime: vi.fn().mockReturnValue(null),
+    writeArtifact: vi.fn(),
+    removeArtifact: vi.fn(),
+    listArtifacts: vi.fn().mockReturnValue([]),
   };
 }
 
@@ -55,15 +67,17 @@ function signedOffTicket(column: Ticket['column'] = 'PRODUCT_SCOPING'): Ticket {
 
 describe('TicketApproveUseCase', () => {
   let ticketRepo: ReturnType<typeof createMockTicketRepo>;
+  let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let gitGateway: ReturnType<typeof createMockGitGateway>;
   let stateMachine: ReturnType<typeof createMockStateMachine>;
   let useCase: TicketApproveUseCase;
 
   beforeEach(() => {
     ticketRepo = createMockTicketRepo();
+    artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
-    useCase = new TicketApproveUseCase(ticketRepo, stateMachine, gitGateway);
+    useCase = new TicketApproveUseCase(ticketRepo, artifactStore, stateMachine, gitGateway);
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket());
   });
 
@@ -85,6 +99,22 @@ describe('TicketApproveUseCase', () => {
   it('should set sub-state to READY after advancing', () => {
     useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'READY');
+  });
+
+  it('should update the ticket document metadata before commit', () => {
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+    expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      TICKET_ID,
+      `${TICKET_ID}-ticket.md`,
+      expect.stringContaining('- Column: ARCH_SPIKE'),
+    );
+    expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      TICKET_ID,
+      `${TICKET_ID}-ticket.md`,
+      expect.stringContaining('- Sub-state: READY'),
+    );
   });
 
   it('should commit approval to git with correct message', () => {

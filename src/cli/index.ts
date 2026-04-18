@@ -13,6 +13,7 @@ import { registerTicketShowCommand } from './commands/ticket-show.command.js';
 import { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
 import { registerTicketRunCommand } from './commands/ticket-run.command.js';
 import { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
+import { registerTicketMoveCommand } from './commands/ticket-move.command.js';
 import { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
 
 export { createContainer } from './container.js';
@@ -25,6 +26,7 @@ export { registerTicketShowCommand } from './commands/ticket-show.command.js';
 export { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
 export { registerTicketRunCommand } from './commands/ticket-run.command.js';
 export { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
+export { registerTicketMoveCommand } from './commands/ticket-move.command.js';
 export { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
 
 export function buildProgram(): Command {
@@ -42,7 +44,8 @@ export function buildProgram(): Command {
         '  aeos project init --name "Name" --key XY  Initialise project\n' +
         '  aeos ticket create "Title"                Create a ticket\n' +
         '  aeos ticket run <id>                      Run the pipeline column\n' +
-        '  aeos ticket approve <id>                  Advance to next column\n\n' +
+        '  aeos ticket approve <id>                  Advance to next column\n' +
+        '  aeos ticket move <id> <status>            Move ticket to any status\n\n' +
         'Environment variables:\n' +
         '  AEOS_EXECUTOR=stub    Use stub executor (default: claude CLI)',
     );
@@ -60,6 +63,7 @@ export function buildProgram(): Command {
   registerTicketAnswerCommand(program, () => container.ticketAnswer, container.projectRepo);
   registerTicketRunCommand(program, () => container.ticketRun, container.projectRepo);
   registerTicketApproveCommand(program, () => container.ticketApprove, container.projectRepo);
+  registerTicketMoveCommand(program, () => container.ticketMove, container.projectRepo);
   registerTicketDodApproveCommand(
     program,
     () => container.ticketDodApprove,

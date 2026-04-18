@@ -9,6 +9,7 @@ import type {
   TicketCreateInput,
   TicketCreateResult,
 } from '../domain/ports/driving/ticket-create.port.js';
+import { buildInitialTicketDocument } from './services/ticket-document.js';
 export class TicketCreateUseCase implements TicketCreatePort {
   constructor(
     private readonly ticketRepo: TicketRepository,
@@ -37,22 +38,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
     const ticketId = ticket.id;
 
     // 2. Build ticket markdown content
-    const content = [
-      `# Ticket: ${ticketId}`,
-      '',
-      '## Title',
-      title,
-      '',
-      '## Description',
-      '<!-- Fill in the ticket description here -->',
-      '',
-      '## Definition of Done',
-      '<!-- Define acceptance criteria — evaluated at DoD Gate -->',
-      '',
-      '## Notes',
-      '<!-- Additional context, links, constraints -->',
-      '',
-    ].join('\n');
+    const content = buildInitialTicketDocument(ticket);
 
     // 4. Write artifact file; compensate on failure
     const filename = `${ticketId}-ticket.md`;

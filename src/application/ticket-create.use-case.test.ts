@@ -96,6 +96,9 @@ describe('TicketCreateUseCase', () => {
       .calls[0][3] as string;
 
     expect(content).toContain('# Ticket: AEOS-1');
+    expect(content).toContain('## AEOS Metadata');
+    expect(content).toContain('- Column: BACKLOG');
+    expect(content).toContain('- Sub-state: NONE');
     expect(content).toContain('## Title');
     expect(content).toContain('Add rate limiting');
     expect(content).toContain('## Description');

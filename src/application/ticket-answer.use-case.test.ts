@@ -95,11 +95,30 @@ describe('TicketAnswerUseCase', () => {
   });
 
   it('should commit the answered questions file', () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
+      '# Ticket: AEOS-1\n\n## Title\nTest',
+    );
     useCase.execute(defaultInput);
     expect(gitGateway.commitFiles).toHaveBeenCalledWith(
       path.join(PROJECT_PATH, '.aeos'),
-      [path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-questions.md`)],
+      [
+        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-questions.md`),
+        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-ticket.md`),
+      ],
       `[${TICKET_ID}][QUESTIONS][v1][human][answered]`,
+    );
+  });
+
+  it('should update the ticket document metadata to WORKING before commit', () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
+      '# Ticket: AEOS-1\n\n## Title\nTest',
+    );
+    useCase.execute(defaultInput);
+    expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      TICKET_ID,
+      `${TICKET_ID}-ticket.md`,
+      expect.stringContaining('- Sub-state: WORKING'),
     );
   });
 

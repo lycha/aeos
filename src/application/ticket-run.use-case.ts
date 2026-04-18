@@ -15,11 +15,13 @@ import type { ContextAssembler } from './services/context-assembler.js';
 import type { PreflightService } from './services/preflight.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
+import type { Ticket } from '../domain/model/ticket.js';
 import type { TicketRunPort, TicketRunResult } from '../domain/ports/driving/ticket-run.port.js';
 import { Column } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { validateOutput } from '../domain/services/output-validation.js';
 import { isValidColumn } from '../domain/model/column.js';
+import { syncTicketDocument } from './services/ticket-document.js';
 
 export class TicketRunUseCase implements TicketRunPort {
   constructor(
@@ -95,6 +97,8 @@ export class TicketRunUseCase implements TicketRunPort {
     // 3. Run pre-flight
     const ticketFilename = `${ticketId}-ticket.md`;
     const ticketContent = this.artifactStore.readArtifact(projectPath, ticketId, ticketFilename);
+    const aeosDir = path.join(projectPath, '.aeos');
+    let mirroredTicket = ticket;
     const preflightResult = await this.preflight.run(
       ticketId,
       projectId,
@@ -103,6 +107,22 @@ export class TicketRunUseCase implements TicketRunPort {
       columnSpec,
     );
     if (preflightResult.blocked) {
+      const questionsAbsPath = path.join(
+        aeosDir,
+        'tickets',
+        ticketId,
+        preflightResult.questionsPath,
+      );
+      const ticketFilePath = this.syncMirroredTicket(projectPath, {
+        ...mirroredTicket,
+        subState: SubState.BLOCKED,
+      });
+      mirroredTicket = { ...mirroredTicket, subState: SubState.BLOCKED };
+      this.gitGateway.commitFiles(
+        aeosDir,
+        [questionsAbsPath, ticketFilePath],
+        `[${ticketId}][QUESTIONS][v1][preflight][blocked]`,
+      );
       return {
         status: 'blocked',
         ticketId,
@@ -119,6 +139,12 @@ export class TicketRunUseCase implements TicketRunPort {
         error: `Failed to set WORKING state: ${workingResult.reason}`,
       };
     }
+    mirroredTicket = { ...mirroredTicket, subState: SubState.WORKING };
+    this.commitMirroredSubState(
+      projectPath,
+      mirroredTicket,
+      `[${ticketId}][STATE][v1][sub-state: WORKING]`,
+    );
 
     // 5. Assemble context
     const assembledContext = await this.contextAssembler.assemble(
@@ -132,7 +158,6 @@ export class TicketRunUseCase implements TicketRunPort {
 
     // Derive artifact filename
     const artifactFilename = `${ticketId}-${columnSpec.outputArtifact}`;
-    const aeosDir = path.join(projectPath, '.aeos');
     const artifactAbsPath = path.join(aeosDir, 'tickets', ticketId, artifactFilename);
 
     // 7. Run executor
@@ -144,12 +169,32 @@ export class TicketRunUseCase implements TicketRunPort {
     });
 
     // 8. Record cost (regardless of success/failure)
-    this.recordCost(projectId, ticketId, column, workerAgentSpec.name, workerAgentSpec.executor.type, executorResult);
+    this.recordCost(
+      projectId,
+      ticketId,
+      column,
+      workerAgentSpec.name,
+      workerAgentSpec.executor.type,
+      executorResult,
+    );
 
     // 9. Handle executor failure
     if (!executorResult.ok) {
       this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
-      this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
+      const failedResult = this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
+      if (!failedResult.ok) {
+        return {
+          status: 'failed',
+          ticketId,
+          error: `Failed to set FAILED state: ${failedResult.reason}`,
+        };
+      }
+      mirroredTicket = { ...mirroredTicket, subState: SubState.FAILED };
+      this.commitMirroredSubState(
+        projectPath,
+        mirroredTicket,
+        `[${ticketId}][STATE][v1][sub-state: FAILED]`,
+      );
       return { status: 'failed', ticketId, error: `Executor failed: ${executorResult.reason}` };
     }
 
@@ -159,7 +204,20 @@ export class TicketRunUseCase implements TicketRunPort {
     const validation = validateOutput(content, columnSpec);
     if (!validation.passed) {
       this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
-      this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
+      const failedResult = this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
+      if (!failedResult.ok) {
+        return {
+          status: 'failed',
+          ticketId,
+          error: `Failed to set FAILED state: ${failedResult.reason}`,
+        };
+      }
+      mirroredTicket = { ...mirroredTicket, subState: SubState.FAILED };
+      this.commitMirroredSubState(
+        projectPath,
+        mirroredTicket,
+        `[${ticketId}][STATE][v1][sub-state: FAILED]`,
+      );
       return {
         status: 'failed',
         ticketId,
@@ -219,7 +277,14 @@ export class TicketRunUseCase implements TicketRunPort {
     });
 
     // Record reviewer cost
-    this.recordCost(projectId, ticketId, column, reviewerAgentSpec.name, reviewerAgentSpec.executor.type, reviewResult);
+    this.recordCost(
+      projectId,
+      ticketId,
+      column,
+      reviewerAgentSpec.name,
+      reviewerAgentSpec.executor.type,
+      reviewResult,
+    );
 
     if (reviewResult.ok) {
       const reviewContent = reviewResult.content ?? '';
@@ -239,7 +304,21 @@ export class TicketRunUseCase implements TicketRunPort {
         (reviewContent2.includes('FAIL') && !reviewContent2.includes('APPROVED'));
 
       if (isRejected) {
-        this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
+        const failedResult = this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
+        if (!failedResult.ok) {
+          return {
+            status: 'failed',
+            ticketId,
+            error: `Failed to set FAILED state: ${failedResult.reason}`,
+            reviewPath: reviewAbsPath,
+          };
+        }
+        mirroredTicket = { ...mirroredTicket, subState: SubState.FAILED };
+        this.commitMirroredSubState(
+          projectPath,
+          mirroredTicket,
+          `[${ticketId}][STATE][v1][sub-state: FAILED]`,
+        );
         return {
           status: 'failed',
           ticketId,
@@ -250,10 +329,36 @@ export class TicketRunUseCase implements TicketRunPort {
     }
 
     // 13. Set sub-state to IN_REVIEW
-    this.stateMachine.setSubState(projectId, ticketId, SubState.IN_REVIEW);
+    const inReviewResult = this.stateMachine.setSubState(projectId, ticketId, SubState.IN_REVIEW);
+    if (!inReviewResult.ok) {
+      return {
+        status: 'failed',
+        ticketId,
+        error: `Failed to set IN_REVIEW state: ${inReviewResult.reason}`,
+      };
+    }
+    mirroredTicket = { ...mirroredTicket, subState: SubState.IN_REVIEW };
+    this.commitMirroredSubState(
+      projectPath,
+      mirroredTicket,
+      `[${ticketId}][STATE][v1][sub-state: IN_REVIEW]`,
+    );
 
     // 14. Sign-off
-    this.stateMachine.setSubState(projectId, ticketId, SubState.SIGNED_OFF);
+    const signedOffResult = this.stateMachine.setSubState(projectId, ticketId, SubState.SIGNED_OFF);
+    if (!signedOffResult.ok) {
+      return {
+        status: 'failed',
+        ticketId,
+        error: `Failed to set SIGNED_OFF state: ${signedOffResult.reason}`,
+      };
+    }
+    mirroredTicket = { ...mirroredTicket, subState: SubState.SIGNED_OFF };
+    this.commitMirroredSubState(
+      projectPath,
+      mirroredTicket,
+      `[${ticketId}][STATE][v1][sub-state: SIGNED_OFF]`,
+    );
 
     // 15. Return success
     return {
@@ -292,5 +397,15 @@ export class TicketRunUseCase implements TicketRunPort {
       costUsd: usage?.costUsd ?? 0,
       recordedAt: new Date().toISOString(),
     });
+  }
+
+  private syncMirroredTicket(projectPath: string, ticket: Ticket): string {
+    return syncTicketDocument(this.artifactStore, projectPath, ticket);
+  }
+
+  private commitMirroredSubState(projectPath: string, ticket: Ticket, message: string): void {
+    const aeosDir = path.join(projectPath, '.aeos');
+    const ticketFilePath = this.syncMirroredTicket(projectPath, ticket);
+    this.gitGateway.commitFiles(aeosDir, [ticketFilePath], message);
   }
 }

@@ -1,10 +1,10 @@
 // Domain service — StateMachineService
 //
-// Enforces forward-only column movement and sub-state transitions.
+// Enforces ticket column and sub-state transitions.
 // Receives TicketRepository and TransitionRepository ports via constructor injection.
 // Does NOT depend on any infrastructure type (no Database, no SQLite).
 
-import { Column, COLUMN_ORDER } from '../model/column.js';
+import { Column } from '../model/column.js';
 import type { SubState } from '../model/sub-state.js';
 import { isValidSubState } from '../model/sub-state.js';
 import type { TicketRepository } from '../ports/driven/ticket-repository.port.js';
@@ -39,22 +39,7 @@ export class StateMachineService {
       return { ok: false, reason: `Already in ${currentColumn}` };
     }
 
-    const currentIndex = COLUMN_ORDER.indexOf(currentColumn);
-    const targetIndex = COLUMN_ORDER.indexOf(targetColumn);
-
-    // 3. Validate transition legality
-    const isForward = targetIndex > currentIndex;
-
-    if (isForward) {
-      // Forward: must be exactly adjacent (next column only)
-      if (targetIndex !== currentIndex + 1) {
-        return {
-          ok: false,
-          reason: `Cannot transition from ${currentColumn} to ${targetColumn}`,
-        };
-      }
-    }
-    // Backward: any prior column is allowed — no additional check needed
+    // 3. Any non-same-column move is legal — callers decide workflow policy.
 
     // 4. Legal transition — execute
     const now = new Date().toISOString();

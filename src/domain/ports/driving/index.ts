@@ -6,6 +6,7 @@ export * from './ticket-list.port.js';
 export * from './ticket-show.port.js';
 export * from './ticket-run.port.js';
 export * from './ticket-approve.port.js';
+export * from './ticket-move.port.js';
 export * from './ticket-answer.port.js';
 export * from './ticket-dod-approve.port.js';
 export * from './dashboard.port.js';
