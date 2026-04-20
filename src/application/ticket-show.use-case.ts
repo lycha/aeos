@@ -2,16 +2,19 @@
 
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
+import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type {
   TicketShowPort,
   TicketShowInput,
   TicketShowResult,
+  TicketExecutionInfo,
 } from '../domain/ports/driving/ticket-show.port.js';
 
 export class TicketShowUseCase implements TicketShowPort {
   constructor(
     private readonly ticketRepo: TicketRepository,
     private readonly artifactStore: ArtifactStore,
+    private readonly costRepo: CostRepository,
   ) {}
 
   execute(input: TicketShowInput): TicketShowResult {
@@ -22,6 +25,16 @@ export class TicketShowUseCase implements TicketShowPort {
 
     const artifacts = this.artifactStore.listArtifacts(input.projectPath, ticket.id);
 
-    return { ok: true, ticket, artifacts };
+    // Fetch execution information from cost records
+    const costRecords = this.costRepo.findByTicket(input.projectId, input.ticketId);
+    const executions: TicketExecutionInfo[] = costRecords.map((record) => ({
+      executor: record.executor,
+      model: record.model,
+      agent: record.agent,
+      column: record.column,
+      recordedAt: record.recordedAt,
+    }));
+
+    return { ok: true, ticket, artifacts, executions };
   }
 }

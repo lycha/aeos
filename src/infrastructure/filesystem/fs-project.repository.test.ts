@@ -6,6 +6,7 @@ import {
   projectRoot,
   aeosDir,
   readProjectConfig,
+  readProjectExecutorConfig,
   FsProjectRepository,
 } from './fs-project.repository.js';
 import { CONSTRAINTS_PLACEHOLDER } from './defaults/constraints-placeholder.js';
@@ -105,6 +106,63 @@ describe('readProjectConfig()', () => {
     fs.mkdirSync(aeosPath, { recursive: true });
     fs.writeFileSync(path.join(aeosPath, 'project.json'), 'not valid json {{{', 'utf-8');
     expect(() => readProjectConfig(tmpDir)).toThrow(ProjectConfigCorruptError);
+  });
+});
+
+describe('readProjectExecutorConfig()', () => {
+  const validConfig = {
+    uuid: '550e8400-e29b-41d4-a716-446655440000',
+    id: 'my-project',
+    name: 'My Project',
+    key: 'MP',
+    path: '/some/path',
+    created_at: '2026-01-01T00:00:00.000Z',
+    executor: { type: 'auggie-cli', model: 'auggie-pro' },
+  };
+
+  it('returns typed executor defaults when present in project.json', () => {
+    const aeosPath = path.join(tmpDir, '.aeos');
+    fs.mkdirSync(aeosPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(aeosPath, 'project.json'),
+      JSON.stringify(validConfig, null, 2),
+      'utf-8',
+    );
+
+    expect(readProjectExecutorConfig(tmpDir)).toEqual(validConfig);
+  });
+});
+
+describe('FsProjectRepository.readExecutorConfig()', () => {
+  const repo = new FsProjectRepository();
+
+  it('returns executor config when project.json exists', () => {
+    const aeosPath = path.join(tmpDir, '.aeos');
+    fs.mkdirSync(aeosPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(aeosPath, 'project.json'),
+      JSON.stringify(
+        {
+          uuid: '550e8400-e29b-41d4-a716-446655440000',
+          id: 'my-project',
+          name: 'My Project',
+          key: 'MP',
+          path: '/some/path',
+          created_at: '2026-01-01T00:00:00.000Z',
+          executor: { type: 'ollama-cli', model: 'llama3.2' },
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
+
+    expect(repo.readExecutorConfig(tmpDir)?.executor?.type).toBe('ollama-cli');
+  });
+
+  it('returns null when project.json is missing', () => {
+    fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+    expect(repo.readExecutorConfig(tmpDir)).toBeNull();
   });
 });
 

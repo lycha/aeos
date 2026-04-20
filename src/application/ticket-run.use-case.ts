@@ -17,7 +17,12 @@ import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { Ticket } from '../domain/model/ticket.js';
-import type { TicketRunPort, TicketRunResult } from '../domain/ports/driving/ticket-run.port.js';
+import type {
+  TicketRunPort,
+  TicketRunResult,
+  ExecutorOverrides,
+} from '../domain/ports/driving/ticket-run.port.js';
+import type { ExecutorConfigResolver } from './services/executor-config-resolver.js';
 import { Column } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { validateOutput } from '../domain/services/output-validation.js';
@@ -38,12 +43,14 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly rubricLoader: RubricLoader,
     private readonly preflight: PreflightService,
     private readonly costRepo: CostRepository,
+    private readonly executorConfigResolver: ExecutorConfigResolver,
   ) {}
 
   async execute(
     projectId: string,
     projectPath: string,
     ticketId: string,
+    executorOverrides?: ExecutorOverrides,
   ): Promise<TicketRunResult> {
     // 1. Load ticket and verify runnable state
     const ticket = this.ticketRepo.findById(projectId, ticketId);
@@ -84,7 +91,13 @@ export class TicketRunUseCase implements TicketRunPort {
     const columnSpec = this.columnSpecLoader.load(ticket.column, projectPath);
     const workerAgentSpec = this.agentSpecLoader.load(columnSpec.workerAgentFile, projectPath);
     const reviewerAgentSpec = this.agentSpecLoader.load(columnSpec.reviewerAgentFile, projectPath);
-    const workerExecutor = this.createExecutor(workerAgentSpec);
+
+    // 2a. Resolve executor configuration with CLI overrides
+    const resolvedWorkerConfig = this.executorConfigResolver.resolveExecutorConfig(
+      projectPath,
+      workerAgentSpec,
+      executorOverrides,
+    );
 
     // 2b. Resolve column early — return typed result on invalid value
     const column = this.resolveColumn(columnSpec.column);
@@ -95,6 +108,31 @@ export class TicketRunUseCase implements TicketRunPort {
         error: `Invalid column value: ${columnSpec.column}`,
       };
     }
+
+    const workerMode = this.resolveWorkerExecutorMode(columnSpec, column);
+    if (
+      workerMode === 'agentic' &&
+      !this.supportsAgenticExecution(resolvedWorkerConfig.executorType)
+    ) {
+      return {
+        status: 'failed',
+        ticketId,
+        error: `Executor '${resolvedWorkerConfig.executorType}' does not support agentic IMPLEMENTATION runs. Use 'claude-cli', 'auggie-cli', or omit --executor.`,
+      };
+    }
+
+    // Create agent spec with resolved configuration for executor creation
+    const resolvedWorkerAgentSpec: AgentSpec = {
+      ...workerAgentSpec,
+      executor: {
+        ...workerAgentSpec.executor,
+        type: resolvedWorkerConfig.executorType,
+        model: resolvedWorkerConfig.model,
+        timeoutSeconds: resolvedWorkerConfig.timeoutMs / 1000,
+      },
+    };
+
+    const workerExecutor = this.createExecutor(resolvedWorkerAgentSpec);
 
     // 3. Assemble context before pre-flight so blocker analysis sees settled decisions too
     const aeosDir = path.join(projectPath, '.aeos');
@@ -162,7 +200,6 @@ export class TicketRunUseCase implements TicketRunPort {
 
     // 7. Run executor
     let executorResult: ExecutorResult;
-    const workerMode = this.resolveWorkerExecutorMode(columnSpec, column);
     try {
       executorResult = await workerExecutor.run({
         prompt,
@@ -187,7 +224,8 @@ export class TicketRunUseCase implements TicketRunPort {
       ticketId,
       column,
       workerAgentSpec.name,
-      workerAgentSpec.executor.type,
+      resolvedWorkerConfig.executorType,
+      resolvedWorkerConfig.model,
       executorResult,
     );
 
@@ -217,7 +255,34 @@ export class TicketRunUseCase implements TicketRunPort {
 
     const content = executorResult.content ?? '';
 
-    // 9. Validate output
+    // 9a. Agentic implementation runs must produce actual repository changes
+    if (workerMode === 'agentic') {
+      const repoDiff = this.gitGateway.diff(projectPath).trim();
+      if (repoDiff.length === 0) {
+        this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
+        const failedResult = this.stateMachine.setSubState(projectId, ticketId, SubState.FAILED);
+        if (!failedResult.ok) {
+          return {
+            status: 'failed',
+            ticketId,
+            error: `Failed to set FAILED state: ${failedResult.reason}`,
+          };
+        }
+        mirroredTicket = { ...mirroredTicket, subState: SubState.FAILED };
+        this.commitMirroredSubState(
+          projectPath,
+          mirroredTicket,
+          `[${ticketId}][STATE][v1][sub-state: FAILED]`,
+        );
+        return {
+          status: 'failed',
+          ticketId,
+          error: 'Agentic implementation produced no repository changes',
+        };
+      }
+    }
+
+    // 9b. Validate output
     const validation = validateOutput(content, columnSpec);
     if (!validation.passed) {
       this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
@@ -282,9 +347,27 @@ export class TicketRunUseCase implements TicketRunPort {
           }
         : reviewContext;
 
-    // 11d. Build reviewer prompt
+    // 11d. Resolve reviewer executor configuration
+    const resolvedReviewerConfig = this.executorConfigResolver.resolveExecutorConfig(
+      projectPath,
+      reviewerAgentSpec,
+      executorOverrides,
+    );
+
+    // Create reviewer agent spec with resolved configuration
+    const resolvedReviewerAgentSpec: AgentSpec = {
+      ...reviewerAgentSpec,
+      executor: {
+        ...reviewerAgentSpec.executor,
+        type: resolvedReviewerConfig.executorType,
+        model: resolvedReviewerConfig.model,
+        timeoutSeconds: resolvedReviewerConfig.timeoutMs / 1000,
+      },
+    };
+
+    // Build reviewer prompt
     const reviewerPrompt = this.buildPromptFn(enrichedContext, reviewerAgentSpec);
-    const reviewerExecutor = this.createExecutor(reviewerAgentSpec);
+    const reviewerExecutor = this.createExecutor(resolvedReviewerAgentSpec);
 
     // 11e. Run reviewer executor
     const reviewResult = await reviewerExecutor.run({
@@ -301,7 +384,8 @@ export class TicketRunUseCase implements TicketRunPort {
       ticketId,
       column,
       reviewerAgentSpec.name,
-      reviewerAgentSpec.executor.type,
+      resolvedReviewerConfig.executorType,
+      resolvedReviewerConfig.model,
       reviewResult,
     );
 
@@ -406,12 +490,19 @@ export class TicketRunUseCase implements TicketRunPort {
     return column === Column.IMPLEMENTATION ? 'agentic' : 'artifact';
   }
 
+  private supportsAgenticExecution(executorType: AgentSpec['executor']['type']): boolean {
+    return (
+      executorType === 'claude-cli' || executorType === 'auggie-cli' || executorType === 'stub'
+    );
+  }
+
   private recordCost(
     projectId: string,
     ticketId: string,
     column: string,
     agent: string,
     executor: string,
+    model: string | undefined,
     result: ExecutorResult,
   ): void {
     const usage = result.ok ? result.usage : undefined;
@@ -421,7 +512,7 @@ export class TicketRunUseCase implements TicketRunPort {
       column,
       agent,
       executor,
-      model: 'claude',
+      model: model ?? 'unknown',
       inputTokens: usage?.inputTokens ?? 0,
       outputTokens: usage?.outputTokens ?? 0,
       costUsd: usage?.costUsd ?? 0,

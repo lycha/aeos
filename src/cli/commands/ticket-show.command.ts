@@ -80,5 +80,19 @@ export function registerTicketShowCommand(
           console.log(`  • ${artifact}`);
         }
       }
+
+      if (result.executions.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log('');
+        // eslint-disable-next-line no-console
+        console.log('Executions:');
+        for (const execution of result.executions) {
+          const modelInfo = execution.model === 'unknown' ? '(unknown)' : execution.model;
+          // eslint-disable-next-line no-console
+          console.log(
+            `  • ${execution.column} (${execution.agent}): ${execution.executor} / ${modelInfo}`,
+          );
+        }
+      }
     });
 }

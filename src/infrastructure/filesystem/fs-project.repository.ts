@@ -3,6 +3,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Project } from '../../domain/model/project.js';
+import type { ProjectExecutorConfig } from '../../domain/model/project-executor-config.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import {
   ProjectRootNotFoundError,
@@ -63,6 +64,25 @@ export function readProjectConfig(root?: string): Project {
   }
 }
 
+/** Reads and parses .aeos/project.json with executor config. Throws if not found or invalid JSON. */
+export function readProjectExecutorConfig(root?: string): ProjectExecutorConfig {
+  const dir = aeosDir(root);
+  const configPath = path.join(dir, PROJECT_JSON);
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf-8');
+  } catch {
+    throw new ProjectConfigNotFoundError();
+  }
+
+  try {
+    return JSON.parse(raw) as ProjectExecutorConfig;
+  } catch {
+    throw new ProjectConfigCorruptError();
+  }
+}
+
 export class FsProjectRepository implements ProjectRepository {
   exists(projectPath: string): boolean {
     const filePath = path.join(projectPath, AEOS_DIR, PROJECT_JSON);
@@ -103,6 +123,14 @@ export class FsProjectRepository implements ProjectRepository {
     }
 
     return null;
+  }
+
+  readExecutorConfig(projectPath: string): ProjectExecutorConfig | null {
+    try {
+      return readProjectExecutorConfig(projectPath);
+    } catch {
+      return null;
+    }
   }
 
   readConstraints(projectPath: string): string | null {

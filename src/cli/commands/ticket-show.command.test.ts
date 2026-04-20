@@ -18,6 +18,15 @@ function createMockTicketShowUseCase(): TicketShowPort {
         updatedAt: '2026-01-01T00:00:00.000Z',
       },
       artifacts: ['AEOS-1-ticket.md', 'AEOS-1-prd.md'],
+      executions: [
+        {
+          executor: 'claude-cli',
+          model: 'claude-opus-4-6',
+          agent: 'worker-agent',
+          column: 'PRODUCT_SCOPING',
+          recordedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
     }),
   };
 }
@@ -36,6 +45,7 @@ function createMockProjectRepo(): ProjectRepository {
     writeProject: vi.fn(),
     ensureColumnSpecsDir: vi.fn(),
     findRoot: vi.fn().mockReturnValue('/test'),
+    readExecutorConfig: vi.fn().mockReturnValue(null),
     readConstraints: vi.fn().mockReturnValue(null),
     writeConstraintsPlaceholder: vi.fn(),
   };
@@ -93,6 +103,7 @@ describe('registerTicketShowCommand', () => {
         updatedAt: '2026-01-01T00:00:00.000Z',
       },
       artifacts: [],
+      executions: [],
     });
 
     program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
@@ -154,6 +165,7 @@ describe('registerTicketShowCommand', () => {
         updatedAt: '2026-01-01T00:00:00.000Z',
       },
       artifacts: [],
+      executions: [],
     });
 
     program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);

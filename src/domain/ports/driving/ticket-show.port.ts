@@ -8,8 +8,16 @@ export interface TicketShowInput {
   projectPath: string;
 }
 
+export interface TicketExecutionInfo {
+  executor: string;
+  model: string;
+  agent: string;
+  column: string;
+  recordedAt: string;
+}
+
 export type TicketShowResult =
-  | { ok: true; ticket: Ticket; artifacts: string[] }
+  | { ok: true; ticket: Ticket; artifacts: string[]; executions: TicketExecutionInfo[] }
   | { ok: false; reason: 'NOT_FOUND' };
 
 export interface TicketShowPort {

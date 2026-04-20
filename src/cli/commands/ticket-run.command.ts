@@ -1,7 +1,10 @@
 // CLI command — aeos ticket run
 
 import type { Command } from 'commander';
-import type { TicketRunPort } from '../../domain/ports/driving/ticket-run.port.js';
+import type {
+  TicketRunPort,
+  ExecutorOverrides,
+} from '../../domain/ports/driving/ticket-run.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 
 export function registerTicketRunCommand(
@@ -19,8 +22,23 @@ export function registerTicketRunCommand(
       'Run the full column cycle for a ticket (preflight → executor → review → sign-off)',
     )
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
-    .action(async (ticketId: string) => {
+    .option('--executor <type>', 'Override executor type (claude-cli, auggie-cli, ollama-cli)')
+    .option('--model <model>', 'Override model identifier')
+    .action(async (ticketId: string, options: { executor?: string; model?: string }) => {
       try {
+        // Validate executor option
+        if (
+          options.executor &&
+          !['claude-cli', 'auggie-cli', 'ollama-cli'].includes(options.executor)
+        ) {
+          // eslint-disable-next-line no-console
+          console.error(
+            `Error: Invalid executor '${options.executor}'. Supported executors: claude-cli, auggie-cli, ollama-cli`,
+          );
+          process.exitCode = 1;
+          return;
+        }
+
         const cwd = process.cwd();
         const projectPath = projectRepo.findRoot(cwd);
 
@@ -36,7 +54,24 @@ export function registerTicketRunCommand(
         // eslint-disable-next-line no-console
         console.log(`Running ticket ${ticketId}…`);
 
-        const result = await getTicketRunUseCase().execute(project.id, projectPath, ticketId);
+        const executorOverrides: ExecutorOverrides | undefined =
+          options.executor || options.model
+            ? {
+                executorType: options.executor as
+                  | 'claude-cli'
+                  | 'auggie-cli'
+                  | 'ollama-cli'
+                  | undefined,
+                model: options.model,
+              }
+            : undefined;
+
+        const result = await getTicketRunUseCase().execute(
+          project.id,
+          projectPath,
+          ticketId,
+          executorOverrides,
+        );
 
         switch (result.status) {
           case 'success':

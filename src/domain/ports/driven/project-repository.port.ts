@@ -1,6 +1,7 @@
 // Driven port — ProjectRepository: CRUD for projects (backed by JSON files + registry)
 
 import type { Project } from '../../model/project.js';
+import type { ProjectExecutorConfig } from '../../model/project-executor-config.js';
 
 export interface ProjectRepository {
   /** Returns true if .aeos/project.json already exists at the given path */
@@ -13,6 +14,8 @@ export interface ProjectRepository {
   ensureColumnSpecsDir(projectPath: string): void;
   /** Walk up from `startDir` to find the nearest directory containing .aeos/project.json. Returns the project root path, or null if not found. */
   findRoot(startDir: string): string | null;
+  /** Reads project.json with any executor defaults needed for runtime selection. Returns null if missing or invalid. */
+  readExecutorConfig(projectPath: string): ProjectExecutorConfig | null;
   /** Reads CONSTRAINTS.md from .aeos/ directory. Returns null if not present. */
   readConstraints(projectPath: string): string | null;
   /** Writes a placeholder CONSTRAINTS.md into .aeos/ if one does not already exist. */

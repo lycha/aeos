@@ -1,4 +1,4 @@
-// Adapter — Claude CLI (child_process) implementation of Executor port
+// Adapter — Ollama CLI (child_process) implementation of Executor port
 
 import { type ChildProcess, execFile } from 'node:child_process';
 import * as fs from 'node:fs/promises';
@@ -8,12 +8,10 @@ import type { ExecutorInvocation } from '../../domain/model/executor-invocation.
 import type { ExecutorResult } from '../../domain/model/executor-result.js';
 import type { Executor } from '../../domain/ports/driven/executor.port.js';
 
-/** Configuration for the Claude CLI executor. */
-export interface ClaudeCliExecutorConfig {
-  /** Model identifier passed as --model flag (e.g. 'claude-opus-4-6'). */
+/** Configuration for the Ollama CLI executor. */
+export interface OllamaCliExecutorConfig {
+  /** Model identifier passed to ollama run command (e.g. 'llama3:8b'). */
   model?: string;
-  /** Maximum output tokens passed as --max-tokens flag. */
-  maxTokens?: number;
   /** Timeout in milliseconds before killing the process (default: 300 000). */
   timeoutMs?: number;
 }
@@ -21,17 +19,16 @@ export interface ClaudeCliExecutorConfig {
 const DEFAULT_TIMEOUT_MS = 300_000;
 const TIMEOUT_OUTPUT_PREVIEW_LIMIT = 2_000;
 const PROMPT_PREVIEW_LIMIT = 1_000;
-const AGENTIC_ALLOWED_TOOLS = 'Bash,Glob,Grep,LS,Read,Edit,MultiEdit,Write';
 
-export class ClaudeCodeCliExecutor implements Executor {
+export class OllamaCliExecutor implements Executor {
   private runningProcess: ChildProcess | null = null;
   private interrupted = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly config: ClaudeCliExecutorConfig = {}) {}
+  constructor(private readonly config: OllamaCliExecutorConfig = {}) {}
 
   async run(invocation: ExecutorInvocation): Promise<ExecutorResult> {
-    const args = this.buildArgs(invocation);
+    const args = this.buildArgs();
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.interrupted = false;
 
@@ -52,7 +49,7 @@ export class ClaudeCodeCliExecutor implements Executor {
         resolve(result);
       };
 
-      const child = execFile('claude', args, {
+      const child = execFile('ollama', args, {
         timeout: 0,
         cwd: invocation.workingDirectory,
       });
@@ -69,7 +66,10 @@ export class ClaudeCodeCliExecutor implements Executor {
       child.once('error', (error) => {
         const err = error as NodeJS.ErrnoException;
         if (err.code === 'ENOENT') {
-          finalize({ ok: false, reason: 'claude CLI not found on PATH' });
+          finalize({
+            ok: false,
+            reason: 'ollama CLI not found on PATH. Install from https://ollama.com',
+          });
           return;
         }
 
@@ -95,14 +95,14 @@ export class ClaudeCodeCliExecutor implements Executor {
         }
 
         if (signal) {
-          finalize({ ok: false, reason: stderr || `claude process exited with signal ${signal}` });
+          finalize({ ok: false, reason: stderr || `ollama process exited with signal ${signal}` });
           return;
         }
 
         if (code !== 0) {
           finalize({
             ok: false,
-            reason: stderr || `claude exited with code ${code ?? 'unknown'}`,
+            reason: stderr || `ollama exited with code ${code ?? 'unknown'}`,
           });
           return;
         }
@@ -112,7 +112,7 @@ export class ClaudeCodeCliExecutor implements Executor {
         try {
           await fs.mkdir(path.dirname(invocation.outputPath), { recursive: true });
           await fs.writeFile(invocation.outputPath, stdout, 'utf8');
-          // TODO(M2-007): Parse usage from Claude CLI JSON output mode when available
+          // TODO(M5a-008): Parse usage from Ollama CLI output when available
           finalize({ ok: true, artifactPath: invocation.outputPath, content: stdout });
         } catch (writeErr) {
           finalize({
@@ -124,11 +124,9 @@ export class ClaudeCodeCliExecutor implements Executor {
 
       this.runningProcess = child;
 
-      // Pipe prompt via stdin only for artifact mode.
+      // Pipe prompt via stdin
       if (child.stdin) {
-        if (this.shouldPipePromptViaStdin(invocation)) {
-          child.stdin.write(invocation.prompt);
-        }
+        child.stdin.write(invocation.prompt);
         child.stdin.end();
       }
 
@@ -154,31 +152,18 @@ export class ClaudeCodeCliExecutor implements Executor {
   }
 
   /** Build the CLI arguments array. */
-  private buildArgs(invocation: ExecutorInvocation): string[] {
-    const args =
-      invocation.mode === 'agentic'
-        ? [
-            '-p',
-            invocation.prompt,
-            '--permission-mode',
-            'acceptEdits',
-            '--allowedTools',
-            AGENTIC_ALLOWED_TOOLS,
-          ]
-        : ['--print', '-'];
+  private buildArgs(): string[] {
+    // Ollama CLI pattern: ollama run <model>
+    const args = ['run'];
 
+    // Model is required for ollama
     if (this.config.model) {
-      args.push('--model', this.config.model);
-    }
-    if (this.config.maxTokens !== undefined) {
-      args.push('--max-tokens', String(this.config.maxTokens));
+      args.push(this.config.model);
+    } else {
+      throw new Error('Model is required for Ollama CLI executor');
     }
 
     return args;
-  }
-
-  private shouldPipePromptViaStdin(invocation: ExecutorInvocation): boolean {
-    return invocation.mode !== 'agentic';
   }
 
   private buildTimeoutReason(timeoutMs: number, stdout: string, stderr: string): string {
@@ -211,12 +196,12 @@ export class ClaudeCodeCliExecutor implements Executor {
   ): void {
     const promptPreview = invocation.prompt.slice(0, PROMPT_PREVIEW_LIMIT);
     const message = [
-      '[ClaudeCodeCliExecutor timeout diagnostics]',
+      '[OllamaCliExecutor timeout diagnostics]',
       `ticketId: ${invocation.ticketId}`,
       `column: ${invocation.column}`,
       `timeoutMs: ${timeoutMs}`,
-      `command: claude`,
-      `args: ${JSON.stringify(this.redactArgsForDiagnostics(args, invocation))}`,
+      `command: ollama`,
+      `args: ${JSON.stringify(args)}`,
       'promptPreview:',
       promptPreview,
       this.formatCapturedOutput('stdoutPreview', stdout),
@@ -224,18 +209,5 @@ export class ClaudeCodeCliExecutor implements Executor {
     ].join('\n');
 
     process.stderr.write(`${message}\n`);
-  }
-
-  private redactArgsForDiagnostics(args: string[], invocation: ExecutorInvocation): string[] {
-    if (invocation.mode !== 'agentic') {
-      return args;
-    }
-
-    return args.map((arg, index) => {
-      if (index === 1 && args[0] === '-p') {
-        return `<prompt:${invocation.prompt.length} chars>`;
-      }
-      return arg;
-    });
   }
 }

@@ -37,12 +37,15 @@ import { ContextAssembler } from '../application/services/context-assembler.js';
 import { buildPrompt } from '../application/services/prompt-builder.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
 import { ClaudeCodeCliExecutor } from '../infrastructure/executor/claude-cli-executor.adapter.js';
+import { AuggieCliExecutor } from '../infrastructure/executor/auggie-cli-executor.adapter.js';
+import { OllamaCliExecutor } from '../infrastructure/executor/ollama-cli-executor.adapter.js';
 import { YamlColumnSpecLoader } from '../infrastructure/spec-loader/yaml-column-spec-loader.adapter.js';
 import { YamlAgentSpecLoader } from '../infrastructure/spec-loader/yaml-agent-spec-loader.adapter.js';
 import { FsRubricLoader } from '../infrastructure/filesystem/fs-rubric-loader.adapter.js';
 import { PreflightService } from '../application/services/preflight.js';
 import { SqliteCostRepository } from '../infrastructure/persistence/sqlite-cost.repository.js';
 import { DecisionPromotionService } from '../application/services/decision-promotion.service.js';
+import { ExecutorConfigResolver } from '../application/services/executor-config-resolver.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
 
 export interface Container {
@@ -91,10 +94,25 @@ export function createContainer(): Container {
       return new StubExecutor();
     }
 
-    return new ClaudeCodeCliExecutor({
-      model: agentSpec.executor.model,
-      timeoutMs: agentSpec.executor.timeoutSeconds * 1000,
-    });
+    switch (agentSpec.executor.type) {
+      case 'claude-cli':
+        return new ClaudeCodeCliExecutor({
+          model: agentSpec.executor.model,
+          timeoutMs: agentSpec.executor.timeoutSeconds * 1000,
+        });
+      case 'auggie-cli':
+        return new AuggieCliExecutor({
+          model: agentSpec.executor.model,
+          timeoutMs: agentSpec.executor.timeoutSeconds * 1000,
+        });
+      case 'ollama-cli':
+        return new OllamaCliExecutor({
+          model: agentSpec.executor.model,
+          timeoutMs: agentSpec.executor.timeoutSeconds * 1000,
+        });
+      default:
+        throw new Error(`Unsupported executor type: ${agentSpec.executor.type}`);
+    }
   };
 
   return {
@@ -107,7 +125,7 @@ export function createContainer(): Container {
       return new TicketListUseCase(getTicketRepo());
     },
     get ticketShow() {
-      return new TicketShowUseCase(getTicketRepo(), artifactStore);
+      return new TicketShowUseCase(getTicketRepo(), artifactStore, getCostRepo());
     },
     get ticketAnswer() {
       return new TicketAnswerUseCase(
@@ -124,6 +142,7 @@ export function createContainer(): Container {
       const agentSpecLoader = new YamlAgentSpecLoader();
       const rubricLoader = new FsRubricLoader();
       const preflight = new PreflightService(artifactStore, getStateMachine());
+      const executorConfigResolver = new ExecutorConfigResolver(projectRepo);
       return new TicketRunUseCase(
         getTicketRepo(),
         getStateMachine(),
@@ -137,6 +156,7 @@ export function createContainer(): Container {
         rubricLoader,
         preflight,
         getCostRepo(),
+        executorConfigResolver,
       );
     },
     get ticketApprove() {

@@ -29,6 +29,10 @@ const nonEmptyRule: ValidationRule = {
 const minimumWordCountRule: ValidationRule = {
   name: 'minimum-word-count',
   check(content: string, spec: ColumnSpec): ValidationResult {
+    if (spec.executorMode === 'agentic') {
+      return { passed: true, violations: [] };
+    }
+
     const required = spec.minWordCount ?? DEFAULT_MIN_WORD_COUNT;
     const words = content.split(/\s+/).filter((w) => w.length > 0);
     if (words.length < required) {

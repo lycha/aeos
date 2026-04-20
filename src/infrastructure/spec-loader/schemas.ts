@@ -32,7 +32,7 @@ export const AgentSpecSchema = z.object({
   outputFormat: z.string().min(1),
   selfVerificationChecklist: z.array(z.string()).default([]),
   executor: z.object({
-    type: z.enum(['claude-cli', 'stub']),
+    type: z.enum(['claude-cli', 'auggie-cli', 'ollama-cli', 'stub']),
     model: z.string().optional(),
     timeoutSeconds: z.number().int().positive().default(300),
   }),

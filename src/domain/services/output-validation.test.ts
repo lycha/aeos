@@ -61,6 +61,15 @@ describe('minimum word count rule', () => {
     const result = validateOutput(words(50), specWith({ minWordCount: 50 }));
     expect(result.violations).not.toContainEqual(expect.stringContaining('minimum word count'));
   });
+
+  it('skips minimum word count for agentic executor mode', () => {
+    const result = validateOutput(
+      words(10),
+      specWith({ executorMode: 'agentic', minWordCount: 50 }),
+    );
+    expect(result.violations).not.toContain('Output below minimum word count: 10 < 50');
+    expect(result.passed).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

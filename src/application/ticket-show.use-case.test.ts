@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TicketShowUseCase } from './ticket-show.use-case.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
+import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { Ticket } from '../domain/model/ticket.js';
 
 function createMockTicketRepo(): TicketRepository {
@@ -28,6 +29,14 @@ function createMockArtifactStore(): ArtifactStore {
   };
 }
 
+function createMockCostRepo(): CostRepository {
+  return {
+    record: vi.fn(),
+    findByProject: vi.fn().mockReturnValue([]),
+    findByTicket: vi.fn().mockReturnValue([]),
+  };
+}
+
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {
     id: 'AEOS-1',
@@ -44,6 +53,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
 describe('TicketShowUseCase', () => {
   let ticketRepo: ReturnType<typeof createMockTicketRepo>;
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
+  let costRepo: ReturnType<typeof createMockCostRepo>;
   let useCase: TicketShowUseCase;
 
   const defaultInput = {
@@ -55,7 +65,8 @@ describe('TicketShowUseCase', () => {
   beforeEach(() => {
     ticketRepo = createMockTicketRepo();
     artifactStore = createMockArtifactStore();
-    useCase = new TicketShowUseCase(ticketRepo, artifactStore);
+    costRepo = createMockCostRepo();
+    useCase = new TicketShowUseCase(ticketRepo, artifactStore, costRepo);
   });
 
   it('should return ticket and artifacts when ticket exists', () => {
@@ -72,6 +83,7 @@ describe('TicketShowUseCase', () => {
     if (result.ok) {
       expect(result.ticket).toEqual(ticket);
       expect(result.artifacts).toEqual(['AEOS-1-ticket.md', 'AEOS-1-prd.md']);
+      expect(result.executions).toEqual([]);
     }
   });
 
@@ -111,6 +123,7 @@ describe('TicketShowUseCase', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.artifacts).toEqual([]);
+      expect(result.executions).toEqual([]);
     }
   });
 

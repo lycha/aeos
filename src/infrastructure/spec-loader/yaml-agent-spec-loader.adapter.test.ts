@@ -282,18 +282,29 @@ describe('engineer-agent.yaml integration', () => {
     expect(result.systemPrompt).toContain('tradeoff');
     expect(result.systemPrompt).toContain('test');
     expect(result.systemPrompt.toLowerCase()).toContain('incremental');
+    expect(result.systemPrompt).toContain('working code changes');
   });
 
   it('taskInstruction contains guidance for both IMPLEMENTATION and CODE_REVIEW columns', () => {
     const result = loader.load('agents/engineer-agent.yaml', repoRoot);
     expect(result.taskInstruction).toContain('### When running in IMPLEMENTATION');
     expect(result.taskInstruction).toContain('### When running in CODE_REVIEW');
+    expect(result.taskInstruction).toContain('modifying the repository directly');
+    expect(result.taskInstruction).toContain('Do the implementation work first');
+    expect(result.taskInstruction).toContain('Make sequencing explicit');
+    expect(result.taskInstruction).toContain('Always include a rollback section');
   });
 
   it('outputFormat contains inline template content for both columns', () => {
     const result = loader.load('agents/engineer-agent.yaml', repoRoot);
     expect(result.outputFormat).toContain('### IMPLEMENTATION output');
     expect(result.outputFormat).toContain('### CODE_REVIEW output');
+    expect(result.outputFormat).toContain('# Implementation Summary');
+    expect(result.outputFormat).toContain('what was actually implemented');
+    expect(result.outputFormat).toContain('Code Changes');
+    expect(result.outputFormat).toContain('Implementation Sequencing');
+    expect(result.outputFormat).toContain('Rollback Plan');
+    expect(result.outputFormat).toContain('Remaining Risks / Follow-ups');
   });
 
   it('selfVerificationChecklist contains at least 3 items', () => {

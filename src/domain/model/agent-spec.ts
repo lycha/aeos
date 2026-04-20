@@ -8,7 +8,7 @@ export interface AgentSpec {
   readonly outputFormat: string;
   readonly selfVerificationChecklist: string[];
   readonly executor: {
-    readonly type: 'claude-cli' | 'stub';
+    readonly type: 'claude-cli' | 'auggie-cli' | 'ollama-cli' | 'stub';
     readonly model?: string;
     readonly timeoutSeconds: number;
   };

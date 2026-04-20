@@ -189,7 +189,9 @@ describe('ClaudeCodeCliExecutor', () => {
       return child;
     });
 
-    await executor.run(makeInvocation({ mode: 'agentic', prompt: 'Edit files and summarize changes.' }));
+    await executor.run(
+      makeInvocation({ mode: 'agentic', prompt: 'Edit files and summarize changes.' }),
+    );
     expect(writtenData).toBe('');
   });
 

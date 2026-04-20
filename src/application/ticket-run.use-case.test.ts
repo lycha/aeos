@@ -13,6 +13,7 @@ import type { CostRepository } from '../domain/ports/driven/cost-repository.port
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { ContextAssembler } from './services/context-assembler.js';
 import type { PreflightService } from './services/preflight.js';
+import type { ExecutorConfigResolver } from './services/executor-config-resolver.js';
 import type { Ticket } from '../domain/model/ticket.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
@@ -49,7 +50,7 @@ function createMockGitGateway(): GitGateway {
     init: vi.fn(),
     commit: vi.fn(),
     commitFiles: vi.fn(),
-    diff: vi.fn().mockReturnValue(''),
+    diff: vi.fn().mockReturnValue('diff --git a/src/file.ts b/src/file.ts'),
   };
 }
 
@@ -102,6 +103,16 @@ function createMockCostRepo(): CostRepository {
     findByProject: vi.fn().mockReturnValue([]),
     findByTicket: vi.fn().mockReturnValue([]),
   };
+}
+
+function createMockExecutorConfigResolver(): ExecutorConfigResolver {
+  return {
+    resolveExecutorConfig: vi.fn().mockReturnValue({
+      executorType: 'claude-cli',
+      model: 'claude-opus-4-6',
+      timeoutMs: 300_000,
+    }),
+  } as unknown as ExecutorConfigResolver;
 }
 
 function defaultColumnSpec(): ColumnSpec {
@@ -183,6 +194,7 @@ describe('TicketRunUseCase', () => {
   let rubricLoader: ReturnType<typeof createMockRubricLoader>;
   let preflight: ReturnType<typeof createMockPreflight>;
   let costRepo: ReturnType<typeof createMockCostRepo>;
+  let executorConfigResolver: ReturnType<typeof createMockExecutorConfigResolver>;
   let buildPromptFn: (context: AssembledContext, agentSpec: AgentSpec) => string;
   let useCase: TicketRunUseCase;
 
@@ -200,6 +212,7 @@ describe('TicketRunUseCase', () => {
     rubricLoader = createMockRubricLoader();
     preflight = createMockPreflight();
     costRepo = createMockCostRepo();
+    executorConfigResolver = createMockExecutorConfigResolver();
     buildPromptFn = vi.fn().mockReturnValue('assembled prompt') as unknown as (
       context: AssembledContext,
       agentSpec: AgentSpec,
@@ -220,6 +233,7 @@ describe('TicketRunUseCase', () => {
       rubricLoader,
       preflight,
       costRepo,
+      executorConfigResolver,
     );
   });
 
@@ -277,8 +291,26 @@ describe('TicketRunUseCase', () => {
 
     await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-    expect(createExecutorSpy).toHaveBeenNthCalledWith(1, workerSpec);
-    expect(createExecutorSpy).toHaveBeenNthCalledWith(2, reviewerSpec);
+    // Expect resolved specs with ExecutorConfigResolver modifications
+    const expectedWorkerSpec = {
+      ...workerSpec,
+      executor: {
+        type: 'claude-cli',
+        model: 'claude-opus-4-6',
+        timeoutSeconds: 300,
+      },
+    };
+    const expectedReviewerSpec = {
+      ...reviewerSpec,
+      executor: {
+        type: 'claude-cli',
+        model: 'claude-opus-4-6',
+        timeoutSeconds: 300, // Based on the resolved config timeout converted back to seconds
+      },
+    };
+
+    expect(createExecutorSpy).toHaveBeenNthCalledWith(1, expectedWorkerSpec);
+    expect(createExecutorSpy).toHaveBeenNthCalledWith(2, expectedReviewerSpec);
   });
 
   it('should run IMPLEMENTATION worker in agentic mode and reviewer in artifact mode', async () => {
@@ -325,6 +357,61 @@ describe('TicketRunUseCase', () => {
         mode: 'artifact',
         workingDirectory: undefined,
       }),
+    );
+  });
+
+  it('should allow agentic IMPLEMENTATION runs when the resolved executor is auggie-cli', async () => {
+    (executorConfigResolver.resolveExecutorConfig as ReturnType<typeof vi.fn>).mockReturnValue({
+      executorType: 'auggie-cli',
+      model: 'auggie-pro',
+      timeoutMs: 300_000,
+    });
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, {
+      executorType: 'auggie-cli',
+    });
+
+    expect(preflight.run).toHaveBeenCalledOnce();
+    expect(executor.run).toHaveBeenCalled();
+  });
+
+  it('should fail early when an agentic IMPLEMENTATION run resolves to a non-agentic executor', async () => {
+    (executorConfigResolver.resolveExecutorConfig as ReturnType<typeof vi.fn>).mockReturnValue({
+      executorType: 'ollama-cli',
+      model: 'llama3.2',
+      timeoutMs: 300_000,
+    });
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, {
+      executorType: 'ollama-cli',
+    });
+
+    expect(result).toEqual({
+      status: 'failed',
+      ticketId: TICKET_ID,
+      error:
+        "Executor 'ollama-cli' does not support agentic IMPLEMENTATION runs. Use 'claude-cli', 'auggie-cli', or omit --executor.",
+    });
+    expect(preflight.run).not.toHaveBeenCalled();
+    expect(executor.run).not.toHaveBeenCalled();
+  });
+
+  it('should fail agentic IMPLEMENTATION runs when no repository changes were made', async () => {
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('');
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result).toEqual({
+      status: 'failed',
+      ticketId: TICKET_ID,
+      error: 'Agentic implementation produced no repository changes',
+    });
+    expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'FAILED');
+    expect(artifactStore.writeArtifact).not.toHaveBeenCalledWith(
+      PROJECT_PATH,
+      TICKET_ID,
+      'AEOS-1-impl.md',
+      expect.anything(),
     );
   });
 
