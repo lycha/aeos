@@ -117,7 +117,7 @@ export class TicketRunUseCase implements TicketRunPort {
       return {
         status: 'failed',
         ticketId,
-        error: `Executor '${resolvedWorkerConfig.executorType}' does not support agentic IMPLEMENTATION runs. Use 'claude-cli', 'auggie-cli', or omit --executor.`,
+        error: `Executor '${resolvedWorkerConfig.executorType}' does not support agentic IMPLEMENTATION runs. Use 'claude-cli', 'auggie-cli', 'opencode-cli', or omit --executor.`,
       };
     }
 
@@ -492,7 +492,10 @@ export class TicketRunUseCase implements TicketRunPort {
 
   private supportsAgenticExecution(executorType: AgentSpec['executor']['type']): boolean {
     return (
-      executorType === 'claude-cli' || executorType === 'auggie-cli' || executorType === 'stub'
+      executorType === 'claude-cli' ||
+      executorType === 'auggie-cli' ||
+      executorType === 'opencode-cli' ||
+      executorType === 'stub'
     );
   }
 

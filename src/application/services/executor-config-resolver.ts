@@ -5,12 +5,12 @@ import type { ProjectExecutorConfig } from '../../domain/model/project-executor-
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 
 export interface ExecutorOverrides {
-  executorType?: 'claude-cli' | 'auggie-cli' | 'ollama-cli';
+  executorType?: 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli';
   model?: string;
 }
 
 export interface ResolvedExecutorConfig {
-  executorType: 'claude-cli' | 'auggie-cli' | 'ollama-cli' | 'stub';
+  executorType: 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli' | 'stub';
   model?: string;
   timeoutMs: number;
 }
@@ -30,7 +30,7 @@ export class ExecutorConfigResolver {
     // Validate executor type from CLI overrides
     if (overrides?.executorType && !this.isValidExecutorType(overrides.executorType)) {
       throw new Error(
-        `Invalid executor type: ${overrides.executorType}. Supported types: claude-cli, auggie-cli, ollama-cli`,
+        `Invalid executor type: ${overrides.executorType}. Supported types: claude-cli, auggie-cli, opencode-cli, ollama-cli`,
       );
     }
 
@@ -57,7 +57,7 @@ export class ExecutorConfigResolver {
     overrides: ExecutorOverrides | undefined,
     agentSpec: AgentSpec,
     projectConfig: ProjectExecutorConfig | null,
-  ): 'claude-cli' | 'auggie-cli' | 'ollama-cli' | 'stub' {
+  ): 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli' | 'stub' {
     // 1. CLI override takes highest precedence
     if (overrides?.executorType) {
       return overrides.executorType;
@@ -101,7 +101,9 @@ export class ExecutorConfigResolver {
     return undefined;
   }
 
-  private isValidExecutorType(type: string): type is 'claude-cli' | 'auggie-cli' | 'ollama-cli' {
-    return ['claude-cli', 'auggie-cli', 'ollama-cli'].includes(type);
+  private isValidExecutorType(
+    type: string,
+  ): type is 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli' {
+    return ['claude-cli', 'auggie-cli', 'opencode-cli', 'ollama-cli'].includes(type);
   }
 }

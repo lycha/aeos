@@ -119,6 +119,11 @@ describe('AgentSpecSchema', () => {
     expect(result.executor.type).toBe('stub');
   });
 
+  it('accepts executor type opencode-cli', () => {
+    const result = AgentSpecSchema.parse(validAgentInput({ executor: { type: 'opencode-cli' } }));
+    expect(result.executor.type).toBe('opencode-cli');
+  });
+
   it('throws ZodError for invalid executor type', () => {
     expect(() => AgentSpecSchema.parse(validAgentInput({ executor: { type: 'invalid' } }))).toThrow(
       ZodError,

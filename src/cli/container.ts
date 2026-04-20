@@ -38,6 +38,7 @@ import { buildPrompt } from '../application/services/prompt-builder.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
 import { ClaudeCodeCliExecutor } from '../infrastructure/executor/claude-cli-executor.adapter.js';
 import { AuggieCliExecutor } from '../infrastructure/executor/auggie-cli-executor.adapter.js';
+import { OpenCodeCliExecutor } from '../infrastructure/executor/opencode-cli-executor.adapter.js';
 import { OllamaCliExecutor } from '../infrastructure/executor/ollama-cli-executor.adapter.js';
 import { YamlColumnSpecLoader } from '../infrastructure/spec-loader/yaml-column-spec-loader.adapter.js';
 import { YamlAgentSpecLoader } from '../infrastructure/spec-loader/yaml-agent-spec-loader.adapter.js';
@@ -102,6 +103,11 @@ export function createContainer(): Container {
         });
       case 'auggie-cli':
         return new AuggieCliExecutor({
+          model: agentSpec.executor.model,
+          timeoutMs: agentSpec.executor.timeoutSeconds * 1000,
+        });
+      case 'opencode-cli':
+        return new OpenCodeCliExecutor({
           model: agentSpec.executor.model,
           timeoutMs: agentSpec.executor.timeoutSeconds * 1000,
         });

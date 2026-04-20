@@ -22,18 +22,21 @@ export function registerTicketRunCommand(
       'Run the full column cycle for a ticket (preflight → executor → review → sign-off)',
     )
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
-    .option('--executor <type>', 'Override executor type (claude-cli, auggie-cli, ollama-cli)')
+    .option(
+      '--executor <type>',
+      'Override executor type (claude-cli, auggie-cli, opencode-cli, ollama-cli)',
+    )
     .option('--model <model>', 'Override model identifier')
     .action(async (ticketId: string, options: { executor?: string; model?: string }) => {
       try {
         // Validate executor option
         if (
           options.executor &&
-          !['claude-cli', 'auggie-cli', 'ollama-cli'].includes(options.executor)
+          !['claude-cli', 'auggie-cli', 'opencode-cli', 'ollama-cli'].includes(options.executor)
         ) {
           // eslint-disable-next-line no-console
           console.error(
-            `Error: Invalid executor '${options.executor}'. Supported executors: claude-cli, auggie-cli, ollama-cli`,
+            `Error: Invalid executor '${options.executor}'. Supported executors: claude-cli, auggie-cli, opencode-cli, ollama-cli`,
           );
           process.exitCode = 1;
           return;
@@ -60,6 +63,7 @@ export function registerTicketRunCommand(
                 executorType: options.executor as
                   | 'claude-cli'
                   | 'auggie-cli'
+                  | 'opencode-cli'
                   | 'ollama-cli'
                   | undefined,
                 model: options.model,

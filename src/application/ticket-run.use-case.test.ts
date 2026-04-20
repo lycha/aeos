@@ -375,6 +375,21 @@ describe('TicketRunUseCase', () => {
     expect(executor.run).toHaveBeenCalled();
   });
 
+  it('should allow agentic IMPLEMENTATION runs when the resolved executor is opencode-cli', async () => {
+    (executorConfigResolver.resolveExecutorConfig as ReturnType<typeof vi.fn>).mockReturnValue({
+      executorType: 'opencode-cli',
+      model: 'opencode/qwen2.5-coder',
+      timeoutMs: 300_000,
+    });
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, {
+      executorType: 'opencode-cli',
+    });
+
+    expect(preflight.run).toHaveBeenCalledOnce();
+    expect(executor.run).toHaveBeenCalled();
+  });
+
   it('should fail early when an agentic IMPLEMENTATION run resolves to a non-agentic executor', async () => {
     (executorConfigResolver.resolveExecutorConfig as ReturnType<typeof vi.fn>).mockReturnValue({
       executorType: 'ollama-cli',
@@ -390,7 +405,7 @@ describe('TicketRunUseCase', () => {
       status: 'failed',
       ticketId: TICKET_ID,
       error:
-        "Executor 'ollama-cli' does not support agentic IMPLEMENTATION runs. Use 'claude-cli', 'auggie-cli', or omit --executor.",
+        "Executor 'ollama-cli' does not support agentic IMPLEMENTATION runs. Use 'claude-cli', 'auggie-cli', 'opencode-cli', or omit --executor.",
     });
     expect(preflight.run).not.toHaveBeenCalled();
     expect(executor.run).not.toHaveBeenCalled();

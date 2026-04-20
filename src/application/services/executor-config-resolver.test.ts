@@ -74,12 +74,12 @@ describe('ExecutorConfigResolver', () => {
     const result = resolver.resolveExecutorConfig(
       '/project',
       createAgentSpec({ type: 'claude-cli', model: 'claude-sonnet' }),
-      { executorType: 'auggie-cli', model: 'auggie-pro' },
+      { executorType: 'opencode-cli', model: 'opencode/qwen2.5-coder' },
     );
 
     expect(result).toEqual({
-      executorType: 'auggie-cli',
-      model: 'auggie-pro',
+      executorType: 'opencode-cli',
+      model: 'opencode/qwen2.5-coder',
       timeoutMs: 300_000,
     });
   });

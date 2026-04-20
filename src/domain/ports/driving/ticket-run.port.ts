@@ -1,7 +1,7 @@
 // Driving port — TicketRun use case interface (orchestration: preflight → executor → validate → review → sign-off)
 
 export interface ExecutorOverrides {
-  executorType?: 'claude-cli' | 'auggie-cli' | 'ollama-cli';
+  executorType?: 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli';
   model?: string;
 }
 

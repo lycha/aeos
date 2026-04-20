@@ -19,7 +19,8 @@
     "lint:fix": "eslint 'src/**/*.ts' --fix && prettier --write src/",
     "typecheck": "tsc --noEmit",
     "smoke-test": "npx tsx src/infrastructure/executor/claude-cli-executor.smoke-test.ts",
-    "smoke-test:auggie": "npx tsx src/infrastructure/executor/auggie-cli-executor.smoke-test.ts"
+    "smoke-test:auggie": "npx tsx src/infrastructure/executor/auggie-cli-executor.smoke-test.ts",
+    "smoke-test:opencode": "npx tsx src/infrastructure/executor/opencode-cli-executor.smoke-test.ts"
   },
   "keywords": [],
   "author": "",
