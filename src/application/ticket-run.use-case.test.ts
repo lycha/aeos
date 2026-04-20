@@ -107,6 +107,7 @@ function createMockCostRepo(): CostRepository {
 function defaultColumnSpec(): ColumnSpec {
   return {
     column: 'IMPLEMENTATION',
+    phase: 'BUILD',
     workerAgentFile: 'agents/worker.yaml',
     reviewerAgentFile: 'agents/reviewer.yaml',
     outputArtifact: 'impl.md',
@@ -278,6 +279,53 @@ describe('TicketRunUseCase', () => {
 
     expect(createExecutorSpy).toHaveBeenNthCalledWith(1, workerSpec);
     expect(createExecutorSpy).toHaveBeenNthCalledWith(2, reviewerSpec);
+  });
+
+  it('should run IMPLEMENTATION worker in agentic mode and reviewer in artifact mode', async () => {
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(executor.run).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        prompt: 'assembled prompt',
+        ticketId: TICKET_ID,
+        column: 'IMPLEMENTATION',
+        mode: 'agentic',
+        workingDirectory: PROJECT_PATH,
+      }),
+    );
+    expect(executor.run).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        ticketId: TICKET_ID,
+        column: 'IMPLEMENTATION',
+        mode: 'artifact',
+      }),
+    );
+  });
+
+  it('should keep non-IMPLEMENTATION worker runs in artifact mode by default', async () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      runnableTicket({ column: 'PRODUCT_SCOPING' }),
+    );
+    (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...defaultColumnSpec(),
+      column: 'PRODUCT_SCOPING',
+      phase: 'PLAN',
+      outputArtifact: 'prd.md',
+      executorMode: undefined,
+    });
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(executor.run).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        column: 'PRODUCT_SCOPING',
+        mode: 'artifact',
+        workingDirectory: undefined,
+      }),
+    );
   });
 
   it('should reuse the first assembled context for the worker prompt', async () => {

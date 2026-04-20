@@ -11,4 +11,8 @@ export interface ExecutorInvocation {
   readonly ticketId: string;
   /** Column this invocation belongs to */
   readonly column: Column;
+  /** artifact = stdout artifact only; agentic = may edit repo and emit summary */
+  readonly mode?: 'artifact' | 'agentic';
+  /** Working directory for the executor process, used by agentic runs. */
+  readonly workingDirectory?: string;
 }

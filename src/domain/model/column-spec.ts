@@ -3,6 +3,7 @@
 export interface ColumnSpec {
   readonly column: string;
   readonly phase?: 'PLAN' | 'PREPARE' | 'BUILD' | 'DEPLOY';
+  readonly executorMode?: 'artifact' | 'agentic';
   readonly workerAgentFile: string;
   readonly reviewerAgentFile: string;
   readonly outputArtifact: string;

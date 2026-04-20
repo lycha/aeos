@@ -21,6 +21,7 @@ export interface ClaudeCliExecutorConfig {
 const DEFAULT_TIMEOUT_MS = 300_000;
 const TIMEOUT_OUTPUT_PREVIEW_LIMIT = 2_000;
 const PROMPT_PREVIEW_LIMIT = 1_000;
+const AGENTIC_ALLOWED_TOOLS = 'Bash,Glob,Grep,LS,Read,Edit,MultiEdit,Write';
 
 export class ClaudeCodeCliExecutor implements Executor {
   private runningProcess: ChildProcess | null = null;
@@ -30,7 +31,7 @@ export class ClaudeCodeCliExecutor implements Executor {
   constructor(private readonly config: ClaudeCliExecutorConfig = {}) {}
 
   async run(invocation: ExecutorInvocation): Promise<ExecutorResult> {
-    const args = this.buildArgs();
+    const args = this.buildArgs(invocation);
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.interrupted = false;
 
@@ -51,7 +52,10 @@ export class ClaudeCodeCliExecutor implements Executor {
         resolve(result);
       };
 
-      const child = execFile('claude', args, { timeout: 0 });
+      const child = execFile('claude', args, {
+        timeout: 0,
+        cwd: invocation.workingDirectory,
+      });
 
       child.stdout?.setEncoding('utf8');
       child.stderr?.setEncoding('utf8');
@@ -120,9 +124,11 @@ export class ClaudeCodeCliExecutor implements Executor {
 
       this.runningProcess = child;
 
-      // Pipe prompt via stdin
+      // Pipe prompt via stdin only for artifact mode.
       if (child.stdin) {
-        child.stdin.write(invocation.prompt);
+        if (this.shouldPipePromptViaStdin(invocation)) {
+          child.stdin.write(invocation.prompt);
+        }
         child.stdin.end();
       }
 
@@ -148,8 +154,18 @@ export class ClaudeCodeCliExecutor implements Executor {
   }
 
   /** Build the CLI arguments array. */
-  private buildArgs(): string[] {
-    const args = ['--print', '-'];
+  private buildArgs(invocation: ExecutorInvocation): string[] {
+    const args =
+      invocation.mode === 'agentic'
+        ? [
+            '-p',
+            invocation.prompt,
+            '--permission-mode',
+            'acceptEdits',
+            '--allowedTools',
+            AGENTIC_ALLOWED_TOOLS,
+          ]
+        : ['--print', '-'];
 
     if (this.config.model) {
       args.push('--model', this.config.model);
@@ -159,6 +175,10 @@ export class ClaudeCodeCliExecutor implements Executor {
     }
 
     return args;
+  }
+
+  private shouldPipePromptViaStdin(invocation: ExecutorInvocation): boolean {
+    return invocation.mode !== 'agentic';
   }
 
   private buildTimeoutReason(timeoutMs: number, stdout: string, stderr: string): string {
@@ -196,7 +216,7 @@ export class ClaudeCodeCliExecutor implements Executor {
       `column: ${invocation.column}`,
       `timeoutMs: ${timeoutMs}`,
       `command: claude`,
-      `args: ${JSON.stringify(args)}`,
+      `args: ${JSON.stringify(this.redactArgsForDiagnostics(args, invocation))}`,
       'promptPreview:',
       promptPreview,
       this.formatCapturedOutput('stdoutPreview', stdout),
@@ -204,5 +224,21 @@ export class ClaudeCodeCliExecutor implements Executor {
     ].join('\n');
 
     process.stderr.write(`${message}\n`);
+  }
+
+  private redactArgsForDiagnostics(
+    args: string[],
+    invocation: ExecutorInvocation,
+  ): string[] {
+    if (invocation.mode !== 'agentic') {
+      return args;
+    }
+
+    return args.map((arg, index) => {
+      if (index === 1 && args[0] === '-p') {
+        return `<prompt:${invocation.prompt.length} chars>`;
+      }
+      return arg;
+    });
   }
 }

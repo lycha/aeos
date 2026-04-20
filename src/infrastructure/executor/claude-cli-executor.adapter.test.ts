@@ -93,6 +93,34 @@ describe('ClaudeCodeCliExecutor', () => {
     expect(mockExecFile).toHaveBeenCalledWith('claude', ['--print', '-'], expect.any(Object));
   });
 
+  it('uses agentic CLI args and working directory when mode is agentic', async () => {
+    setupExecFile((child) => {
+      child.stdout.write('Implemented feature and updated tests.');
+      emitClose(child, 0);
+    });
+
+    await executor.run(
+      makeInvocation({
+        mode: 'agentic',
+        workingDirectory: tmpDir,
+        prompt: 'Implement the feature and summarize what changed.',
+      }),
+    );
+
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'claude',
+      [
+        '-p',
+        'Implement the feature and summarize what changed.',
+        '--permission-mode',
+        'acceptEdits',
+        '--allowedTools',
+        'Bash,Glob,Grep,LS,Read,Edit,MultiEdit,Write',
+      ],
+      expect.objectContaining({ cwd: tmpDir, timeout: 0 }),
+    );
+  });
+
   it('passes --model flag when config.model is set', async () => {
     executor = new ClaudeCodeCliExecutor({ model: 'claude-opus-4-6' });
     setupExecFile((child) => {
@@ -142,6 +170,27 @@ describe('ClaudeCodeCliExecutor', () => {
 
     await executor.run(makeInvocation({ prompt: 'Hello Claude!' }));
     expect(writtenData).toBe('Hello Claude!');
+  });
+
+  it('does not pipe prompt to stdin in agentic mode', async () => {
+    let writtenData = '';
+    mockExecFile.mockImplementation(() => {
+      const child = createMockChild();
+      child.stdin = new Writable({
+        write(chunk, _enc, callback) {
+          writtenData += chunk.toString();
+          callback();
+        },
+      });
+      process.nextTick(() => {
+        child.stdout.write('summary');
+        emitClose(child, 0);
+      });
+      return child;
+    });
+
+    await executor.run(makeInvocation({ mode: 'agentic', prompt: 'Edit files and summarize changes.' }));
+    expect(writtenData).toBe('');
   });
 
   it('captures stdout incrementally across multiple chunks', async () => {

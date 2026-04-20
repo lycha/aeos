@@ -13,9 +13,12 @@ export class StubExecutor implements Executor {
       '# STUB OUTPUT',
       `**Ticket:** ${invocation.ticketId}`,
       `**Column:** ${invocation.column}`,
+      `**Mode:** ${invocation.mode ?? 'artifact'}`,
       `**Generated:** ${new Date().toISOString()}`,
       '',
-      'This is a stub artifact produced by StubExecutor for pipeline testing.',
+      invocation.mode === 'agentic'
+        ? 'This is a stub agentic execution summary produced by StubExecutor for pipeline testing.'
+        : 'This is a stub artifact produced by StubExecutor for pipeline testing.',
       'All structural checks should pass on this output.',
       '',
     ].join('\n');

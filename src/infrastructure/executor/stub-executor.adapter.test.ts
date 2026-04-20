@@ -59,6 +59,15 @@ describe('StubExecutor', () => {
     expect(content).toContain('StubExecutor for pipeline testing');
   });
 
+  it('agentic mode writes a stub execution summary', async () => {
+    const invocation = makeInvocation({ mode: 'agentic' });
+    await executor.run(invocation);
+
+    const content = await fs.readFile(invocation.outputPath, 'utf8');
+    expect(content).toContain('**Mode:** agentic');
+    expect(content).toContain('stub agentic execution summary');
+  });
+
   it('written file contains an ISO timestamp', async () => {
     const invocation = makeInvocation();
     await executor.run(invocation);

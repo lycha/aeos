@@ -57,6 +57,15 @@ describe('YamlColumnSpecLoader', () => {
     expect(result.advanceMode).toBe('manual');
     expect(result.requiredSections).toEqual([]);
     expect(result.reviewerRubrics).toEqual([]);
+    expect(result.executorMode).toBeUndefined();
+  });
+
+  it('loads optional executorMode when present', () => {
+    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'product-scoping.yaml');
+    fs.writeFileSync(specPath, validColumnSpecYaml({ executorMode: 'agentic' }), 'utf-8');
+
+    const result = loader.load(Column.PRODUCT_SCOPING, tmpDir);
+    expect(result.executorMode).toBe('agentic');
   });
 
   it('loads architecture-spike spec for ARCH_SPIKE column', () => {

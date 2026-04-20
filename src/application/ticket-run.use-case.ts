@@ -15,6 +15,7 @@ import type { ContextAssembler } from './services/context-assembler.js';
 import type { PreflightService } from './services/preflight.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
+import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { Ticket } from '../domain/model/ticket.js';
 import type { TicketRunPort, TicketRunResult } from '../domain/ports/driving/ticket-run.port.js';
 import { Column } from '../domain/model/column.js';
@@ -161,12 +162,15 @@ export class TicketRunUseCase implements TicketRunPort {
 
     // 7. Run executor
     let executorResult: ExecutorResult;
+    const workerMode = this.resolveWorkerExecutorMode(columnSpec, column);
     try {
       executorResult = await workerExecutor.run({
         prompt,
         outputPath: artifactAbsPath,
         ticketId,
         column,
+        mode: workerMode,
+        workingDirectory: workerMode === 'agentic' ? projectPath : undefined,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -288,6 +292,7 @@ export class TicketRunUseCase implements TicketRunPort {
       outputPath: reviewAbsPath,
       ticketId,
       column,
+      mode: 'artifact',
     });
 
     // Record reviewer cost
@@ -388,6 +393,17 @@ export class TicketRunUseCase implements TicketRunPort {
       return columnString;
     }
     return null;
+  }
+
+  private resolveWorkerExecutorMode(
+    columnSpec: ColumnSpec,
+    column: Column,
+  ): 'artifact' | 'agentic' {
+    if (columnSpec.executorMode) {
+      return columnSpec.executorMode;
+    }
+
+    return column === Column.IMPLEMENTATION ? 'agentic' : 'artifact';
   }
 
   private recordCost(

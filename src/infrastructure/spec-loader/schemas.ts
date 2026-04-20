@@ -6,6 +6,7 @@ import { z } from 'zod';
 export const ColumnSpecSchema = z.object({
   column: z.string().min(1),
   phase: z.enum(['PLAN', 'PREPARE', 'BUILD', 'DEPLOY']).optional(),
+  executorMode: z.enum(['artifact', 'agentic']).optional(),
   workerAgentFile: z.string().min(1),
   reviewerAgentFile: z.string().min(1),
   outputArtifact: z.string().min(1),

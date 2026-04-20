@@ -65,8 +65,20 @@ describe('ColumnSpecSchema', () => {
     expect(ColumnSpecSchema.parse(validColumnInput({ phase: 'PLAN' })).phase).toBe('PLAN');
   });
 
+  it('accepts optional executorMode field', () => {
+    expect(ColumnSpecSchema.parse(validColumnInput({ executorMode: 'agentic' })).executorMode).toBe(
+      'agentic',
+    );
+  });
+
   it('throws ZodError for invalid phase', () => {
     expect(() => ColumnSpecSchema.parse(validColumnInput({ phase: 'INVALID' }))).toThrow(ZodError);
+  });
+
+  it('throws ZodError for invalid executorMode', () => {
+    expect(() => ColumnSpecSchema.parse(validColumnInput({ executorMode: 'invalid' }))).toThrow(
+      ZodError,
+    );
   });
 });
 
