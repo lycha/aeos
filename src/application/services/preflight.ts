@@ -17,7 +17,6 @@ export type PreflightResult = { blocked: false } | { blocked: true; questionsPat
 
 export class PreflightService {
   constructor(
-    private readonly executor: Executor,
     private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
   ) {}
@@ -29,6 +28,7 @@ export class PreflightService {
     assembledContext: AssembledContext,
     columnSpec: ColumnSpec,
     workerAgentSpec: AgentSpec,
+    executor: Executor,
   ): Promise<PreflightResult> {
     // 1. Short-circuit if preflight is disabled
     if (!columnSpec.preflight.enabled) {
@@ -43,7 +43,7 @@ export class PreflightService {
 
     // 4. Construct executor invocation and run
     const tempPath = join(tmpdir(), `preflight-${ticketId}-${randomUUID()}.md`);
-    const result = await this.executor.run({
+    const result = await executor.run({
       prompt,
       outputPath: tempPath,
       ticketId,
@@ -57,7 +57,8 @@ export class PreflightService {
 
     const content = result.content ?? '';
 
-    // 6. Parse output — check for NO_BLOCKERS on the first meaningful line
+    // 6. Parse output — accept a standalone NO_BLOCKERS marker anywhere,
+    // including simple markdown emphasis/quoting wrappers.
     if (this.isNoBlockersResponse(content)) {
       return { blocked: false };
     }
@@ -124,11 +125,17 @@ export class PreflightService {
   }
 
   private isNoBlockersResponse(content: string): boolean {
-    const firstMeaningfulLine = content
+    return content
       .split('\n')
-      .map((line) => line.trim())
-      .find((line) => line.length > 0);
+      .map((line) => this.normalizePotentialNoBlockersMarker(line))
+      .some((line) => /^NO_BLOCKERS$/i.test(line));
+  }
 
-    return firstMeaningfulLine === 'NO_BLOCKERS';
+  private normalizePotentialNoBlockersMarker(line: string): string {
+    return line
+      .trim()
+      .replace(/^[*_`"'“”‘’([{<]+/, '')
+      .replace(/[*_`"'“”‘’)}\]>.,:;!?-]+$/, '')
+      .trim();
   }
 }

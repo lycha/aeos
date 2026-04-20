@@ -29,7 +29,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly stateMachine: StateMachineService,
     private readonly contextAssembler: ContextAssembler,
     private readonly buildPromptFn: (context: AssembledContext, agentSpec: AgentSpec) => string,
-    private readonly executor: Executor,
+    private readonly createExecutor: (agentSpec: AgentSpec) => Executor,
     private readonly artifactStore: ArtifactStore,
     private readonly gitGateway: GitGateway,
     private readonly columnSpecLoader: ColumnSpecLoader,
@@ -83,6 +83,7 @@ export class TicketRunUseCase implements TicketRunPort {
     const columnSpec = this.columnSpecLoader.load(ticket.column, projectPath);
     const workerAgentSpec = this.agentSpecLoader.load(columnSpec.workerAgentFile, projectPath);
     const reviewerAgentSpec = this.agentSpecLoader.load(columnSpec.reviewerAgentFile, projectPath);
+    const workerExecutor = this.createExecutor(workerAgentSpec);
 
     // 2b. Resolve column early — return typed result on invalid value
     const column = this.resolveColumn(columnSpec.column);
@@ -109,6 +110,7 @@ export class TicketRunUseCase implements TicketRunPort {
       assembledContext,
       columnSpec,
       workerAgentSpec,
+      workerExecutor,
     );
     if (preflightResult.blocked) {
       const questionsAbsPath = path.join(
@@ -160,7 +162,7 @@ export class TicketRunUseCase implements TicketRunPort {
     // 7. Run executor
     let executorResult: ExecutorResult;
     try {
-      executorResult = await this.executor.run({
+      executorResult = await workerExecutor.run({
         prompt,
         outputPath: artifactAbsPath,
         ticketId,
@@ -278,9 +280,10 @@ export class TicketRunUseCase implements TicketRunPort {
 
     // 11d. Build reviewer prompt
     const reviewerPrompt = this.buildPromptFn(enrichedContext, reviewerAgentSpec);
+    const reviewerExecutor = this.createExecutor(reviewerAgentSpec);
 
     // 11e. Run reviewer executor
-    const reviewResult = await this.executor.run({
+    const reviewResult = await reviewerExecutor.run({
       prompt: reviewerPrompt,
       outputPath: reviewAbsPath,
       ticketId,

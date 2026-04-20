@@ -43,6 +43,7 @@ import { FsRubricLoader } from '../infrastructure/filesystem/fs-rubric-loader.ad
 import { PreflightService } from '../application/services/preflight.js';
 import { SqliteCostRepository } from '../infrastructure/persistence/sqlite-cost.repository.js';
 import { DecisionPromotionService } from '../application/services/decision-promotion.service.js';
+import type { AgentSpec } from '../domain/model/agent-spec.js';
 
 export interface Container {
   install: InstallPort;
@@ -84,9 +85,17 @@ export function createContainer(): Container {
   const getStateMachine = (): StateMachineService =>
     (stateMachine ??= new StateMachineService(getTicketRepo(), getTransitionRepo()));
 
-  // Executor selection: AEOS_EXECUTOR=stub for testing, otherwise real Claude CLI
-  const createExecutor = () =>
-    process.env.AEOS_EXECUTOR === 'stub' ? new StubExecutor() : new ClaudeCodeCliExecutor();
+  // Executor selection: AEOS_EXECUTOR=stub for testing, otherwise use per-agent executor config.
+  const createExecutor = (agentSpec: AgentSpec) => {
+    if (process.env.AEOS_EXECUTOR === 'stub' || agentSpec.executor.type === 'stub') {
+      return new StubExecutor();
+    }
+
+    return new ClaudeCodeCliExecutor({
+      model: agentSpec.executor.model,
+      timeoutMs: agentSpec.executor.timeoutSeconds * 1000,
+    });
+  };
 
   return {
     install: new InstallUseCase(configStore),
@@ -110,18 +119,17 @@ export function createContainer(): Container {
       );
     },
     get ticketRun() {
-      const executor = createExecutor();
       const contextAssembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
       const columnSpecLoader = new YamlColumnSpecLoader();
       const agentSpecLoader = new YamlAgentSpecLoader();
       const rubricLoader = new FsRubricLoader();
-      const preflight = new PreflightService(executor, artifactStore, getStateMachine());
+      const preflight = new PreflightService(artifactStore, getStateMachine());
       return new TicketRunUseCase(
         getTicketRepo(),
         getStateMachine(),
         contextAssembler,
         buildPrompt,
-        executor,
+        createExecutor,
         artifactStore,
         gitGateway,
         columnSpecLoader,

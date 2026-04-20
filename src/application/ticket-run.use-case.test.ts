@@ -120,7 +120,7 @@ function defaultColumnSpec(): ColumnSpec {
   };
 }
 
-function defaultAgentSpec(): AgentSpec {
+function defaultAgentSpec(overrides: Partial<AgentSpec> = {}): AgentSpec {
   return {
     name: 'test-agent',
     systemPrompt: 'You are a test agent.',
@@ -128,6 +128,7 @@ function defaultAgentSpec(): AgentSpec {
     outputFormat: 'Markdown',
     selfVerificationChecklist: [],
     executor: { type: 'stub', timeoutSeconds: 300 },
+    ...overrides,
   };
 }
 
@@ -172,6 +173,8 @@ describe('TicketRunUseCase', () => {
   let stateMachine: ReturnType<typeof createMockStateMachine>;
   let contextAssembler: ReturnType<typeof createMockContextAssembler>;
   let executor: ReturnType<typeof createMockExecutor>;
+  let createExecutorSpy: ReturnType<typeof vi.fn>;
+  let createExecutor: (agentSpec: AgentSpec) => Executor;
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let gitGateway: ReturnType<typeof createMockGitGateway>;
   let columnSpecLoader: ReturnType<typeof createMockColumnSpecLoader>;
@@ -187,6 +190,8 @@ describe('TicketRunUseCase', () => {
     stateMachine = createMockStateMachine();
     contextAssembler = createMockContextAssembler();
     executor = createMockExecutor();
+    createExecutorSpy = vi.fn().mockReturnValue(executor);
+    createExecutor = createExecutorSpy as unknown as (agentSpec: AgentSpec) => Executor;
     artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     columnSpecLoader = createMockColumnSpecLoader();
@@ -206,7 +211,7 @@ describe('TicketRunUseCase', () => {
       stateMachine,
       contextAssembler,
       buildPromptFn,
-      executor,
+      createExecutor,
       artifactStore,
       gitGateway,
       columnSpecLoader,
@@ -234,6 +239,7 @@ describe('TicketRunUseCase', () => {
     await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
     expect(preflight.run).toHaveBeenCalledOnce();
+    expect(createExecutorSpy).toHaveBeenCalledTimes(2);
     expect(contextAssembler.assemble).toHaveBeenCalledTimes(2);
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'WORKING');
     expect(executor.run).toHaveBeenCalledTimes(2); // worker + reviewer
@@ -251,7 +257,27 @@ describe('TicketRunUseCase', () => {
       defaultContext(),
       defaultColumnSpec(),
       defaultAgentSpec(),
+      executor,
     );
+  });
+
+  it('should create executors from worker and reviewer agent specs', async () => {
+    const workerSpec = defaultAgentSpec({
+      name: 'worker-agent',
+      executor: { type: 'stub', timeoutSeconds: 300 },
+    });
+    const reviewerSpec = defaultAgentSpec({
+      name: 'reviewer-agent',
+      executor: { type: 'stub', timeoutSeconds: 180 },
+    });
+    (agentSpecLoader.load as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(workerSpec)
+      .mockReturnValueOnce(reviewerSpec);
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(createExecutorSpy).toHaveBeenNthCalledWith(1, workerSpec);
+    expect(createExecutorSpy).toHaveBeenNthCalledWith(2, reviewerSpec);
   });
 
   it('should reuse the first assembled context for the worker prompt', async () => {

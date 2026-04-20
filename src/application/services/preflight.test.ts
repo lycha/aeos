@@ -85,11 +85,7 @@ describe('PreflightService', () => {
     executor = createMockExecutor();
     artifactStore = createMockArtifactStore();
     stateMachine = createMockStateMachine();
-    service = new PreflightService(
-      executor,
-      artifactStore,
-      stateMachine as unknown as StateMachineService,
-    );
+    service = new PreflightService(artifactStore, stateMachine as unknown as StateMachineService);
   });
 
   it('returns { blocked: false } when preflight is disabled', async () => {
@@ -104,6 +100,7 @@ describe('PreflightService', () => {
       makeContext(),
       spec,
       makeAgentSpec(),
+      executor,
     );
 
     expect(result).toEqual({ blocked: false });
@@ -125,6 +122,7 @@ describe('PreflightService', () => {
       makeContext(),
       makeColumnSpec(),
       makeAgentSpec(),
+      executor,
     );
 
     expect(result).toEqual({ blocked: false });
@@ -147,6 +145,7 @@ describe('PreflightService', () => {
       makeContext(),
       makeColumnSpec(),
       makeAgentSpec(),
+      executor,
     );
 
     expect(result).toEqual({ blocked: false });
@@ -168,6 +167,77 @@ describe('PreflightService', () => {
       makeContext(),
       makeColumnSpec(),
       makeAgentSpec(),
+      executor,
+    );
+
+    expect(result).toEqual({ blocked: false });
+    expect(artifactStore.writeArtifact).not.toHaveBeenCalled();
+    expect(stateMachine.setSubState).not.toHaveBeenCalled();
+  });
+
+  it('returns { blocked: false } when explanatory text appears before a standalone NO_BLOCKERS line', async () => {
+    const executorResult: ExecutorResult = {
+      ok: true,
+      artifactPath: '/tmp/preflight.md',
+      content:
+        'After thoroughly reviewing the prior artifacts, I can confirm:\n\nNO_BLOCKERS\n\nEvery potential question has already been settled.',
+    };
+    (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue(executorResult);
+
+    const result = await service.run(
+      TICKET_ID,
+      PROJECT_ID,
+      PROJECT_PATH,
+      makeContext(),
+      makeColumnSpec(),
+      makeAgentSpec(),
+      executor,
+    );
+
+    expect(result).toEqual({ blocked: false });
+    expect(artifactStore.writeArtifact).not.toHaveBeenCalled();
+    expect(stateMachine.setSubState).not.toHaveBeenCalled();
+  });
+
+  it('returns { blocked: false } when the standalone marker is lowercase', async () => {
+    const executorResult: ExecutorResult = {
+      ok: true,
+      artifactPath: '/tmp/preflight.md',
+      content: 'no_blockers',
+    };
+    (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue(executorResult);
+
+    const result = await service.run(
+      TICKET_ID,
+      PROJECT_ID,
+      PROJECT_PATH,
+      makeContext(),
+      makeColumnSpec(),
+      makeAgentSpec(),
+      executor,
+    );
+
+    expect(result).toEqual({ blocked: false });
+    expect(artifactStore.writeArtifact).not.toHaveBeenCalled();
+  });
+
+  it('returns { blocked: false } when the standalone marker is wrapped in markdown bold', async () => {
+    const executorResult: ExecutorResult = {
+      ok: true,
+      artifactPath: '/tmp/preflight.md',
+      content:
+        'The tech spec addresses all these items and was approved without findings.\n\n**NO_BLOCKERS**',
+    };
+    (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue(executorResult);
+
+    const result = await service.run(
+      TICKET_ID,
+      PROJECT_ID,
+      PROJECT_PATH,
+      makeContext(),
+      makeColumnSpec(),
+      makeAgentSpec(),
+      executor,
     );
 
     expect(result).toEqual({ blocked: false });
@@ -191,6 +261,7 @@ describe('PreflightService', () => {
       makeContext(),
       makeColumnSpec(),
       makeAgentSpec(),
+      executor,
     );
 
     expect(result).toEqual({ blocked: true, questionsPath: 'AEOS-1-questions.md' });
@@ -218,6 +289,7 @@ describe('PreflightService', () => {
       makeContext(),
       makeColumnSpec(),
       makeAgentSpec(),
+      executor,
     );
 
     const invocation = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -229,6 +301,28 @@ describe('PreflightService', () => {
     expect(invocation.prompt).toContain('Format-Version: 2');
     expect(invocation.ticketId).toBe(TICKET_ID);
     expect(invocation.column).toBe('PRODUCT_SCOPING');
+  });
+
+  it('uses the executor instance passed to run()', async () => {
+    const alternateExecutor = createMockExecutor();
+    (alternateExecutor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      artifactPath: '/tmp/preflight.md',
+      content: 'NO_BLOCKERS',
+    });
+
+    await service.run(
+      TICKET_ID,
+      PROJECT_ID,
+      PROJECT_PATH,
+      makeContext(),
+      makeColumnSpec(),
+      makeAgentSpec(),
+      alternateExecutor,
+    );
+
+    expect(alternateExecutor.run).toHaveBeenCalledOnce();
+    expect(executor.run).not.toHaveBeenCalled();
   });
 
   it('throws when executor returns failure', async () => {
@@ -243,6 +337,7 @@ describe('PreflightService', () => {
         makeContext(),
         makeColumnSpec(),
         makeAgentSpec(),
+        executor,
       ),
     ).rejects.toThrow('Preflight executor failed: Model timeout');
   });
@@ -262,6 +357,7 @@ describe('PreflightService', () => {
       makeContext(),
       makeColumnSpec(),
       makeAgentSpec(),
+      executor,
     );
 
     // Empty string trimmed is '', which !== 'NO_BLOCKERS', so it writes artifact

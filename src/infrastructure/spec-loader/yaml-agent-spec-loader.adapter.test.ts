@@ -245,6 +245,11 @@ describe('architect-agent.yaml integration', () => {
     const result = loader.load('agents/architect-agent.yaml', repoRoot);
     expect(result.executor.model).toBe('claude-sonnet-4-20250514');
   });
+
+  it('executor.timeoutSeconds is 2340', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    expect(result.executor.timeoutSeconds).toBe(2340);
+  });
 });
 
 describe('engineer-agent.yaml integration', () => {
