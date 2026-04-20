@@ -7,6 +7,7 @@ import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.j
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { DecisionPromotionService } from './services/decision-promotion.service.js';
 
 function createMockTicketRepo(): TicketRepository {
   return {
@@ -50,6 +51,19 @@ function createMockStateMachine() {
   return mock as unknown as StateMachineService;
 }
 
+function createMockDecisionPromotionService() {
+  return {
+    promote: vi.fn().mockReturnValue({
+      status: 'promoted',
+      decisionsPath: `${TICKET_ID}-decisions.md`,
+      createdDecisionIds: ['D-001'],
+      updatedDecisionIds: [],
+      supersededDecisionIds: [],
+      warnings: [],
+    }),
+  } as unknown as DecisionPromotionService;
+}
+
 const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
 const TICKET_ID = 'AEOS-1';
@@ -71,6 +85,7 @@ describe('TicketAnswerUseCase', () => {
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let gitGateway: ReturnType<typeof createMockGitGateway>;
   let stateMachine: ReturnType<typeof createMockStateMachine>;
+  let decisionPromotionService: ReturnType<typeof createMockDecisionPromotionService>;
   let useCase: TicketAnswerUseCase;
 
   const defaultInput = { projectId: PROJECT_ID, projectPath: PROJECT_PATH, ticketId: TICKET_ID };
@@ -80,18 +95,41 @@ describe('TicketAnswerUseCase', () => {
     artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
-    useCase = new TicketAnswerUseCase(ticketRepo, artifactStore, stateMachine, gitGateway);
+    decisionPromotionService = createMockDecisionPromotionService();
+    useCase = new TicketAnswerUseCase(
+      ticketRepo,
+      artifactStore,
+      stateMachine,
+      gitGateway,
+      decisionPromotionService,
+    );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(blockedTicket());
   });
 
   it('should unblock a BLOCKED ticket with modified questions file', () => {
     const result = useCase.execute(defaultInput);
-    expect(result).toEqual({ ok: true, ticketId: TICKET_ID });
+    expect(result).toEqual({ ok: true, ticketId: TICKET_ID, warnings: undefined });
   });
 
-  it('should call setSubState with WORKING', () => {
+  it('should call setSubState with READY', () => {
     useCase.execute(defaultInput);
-    expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'WORKING');
+    expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'READY');
+  });
+
+  it('should promote answered questions before setting READY', () => {
+    useCase.execute(defaultInput);
+
+    expect(decisionPromotionService.promote).toHaveBeenCalledWith({
+      projectPath: PROJECT_PATH,
+      ticketId: TICKET_ID,
+      stage: 'IMPLEMENTATION',
+      settledBy: 'human',
+    });
+    const promoteOrder = (decisionPromotionService.promote as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    const setSubStateOrder = (stateMachine.setSubState as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    expect(promoteOrder).toBeLessThan(setSubStateOrder);
   });
 
   it('should commit the answered questions file', () => {
@@ -104,12 +142,13 @@ describe('TicketAnswerUseCase', () => {
       [
         path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-questions.md`),
         path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-ticket.md`),
+        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-decisions.md`),
       ],
       `[${TICKET_ID}][QUESTIONS][v1][human][answered]`,
     );
   });
 
-  it('should update the ticket document metadata to WORKING before commit', () => {
+  it('should update the ticket document metadata to READY before commit', () => {
     (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
       '# Ticket: AEOS-1\n\n## Title\nTest',
     );
@@ -118,7 +157,7 @@ describe('TicketAnswerUseCase', () => {
       PROJECT_PATH,
       TICKET_ID,
       `${TICKET_ID}-ticket.md`,
-      expect.stringContaining('- Sub-state: WORKING'),
+      expect.stringContaining('- Sub-state: READY'),
     );
   });
 
@@ -162,7 +201,52 @@ describe('TicketAnswerUseCase', () => {
       new Date('2025-01-01T09:00:00Z'),
     );
     const result = useCase.execute({ ...defaultInput, confirmed: true });
-    expect(result).toEqual({ ok: true, ticketId: TICKET_ID });
+    expect(result).toEqual({ ok: true, ticketId: TICKET_ID, warnings: undefined });
+  });
+
+  it('should return warning and skip decisions commit when promotion is legacy-skipped', () => {
+    (decisionPromotionService.promote as ReturnType<typeof vi.fn>).mockReturnValue({
+      status: 'legacy-skipped',
+      decisionsPath: null,
+      createdDecisionIds: [],
+      updatedDecisionIds: [],
+      supersededDecisionIds: [],
+      warnings: ['Questions file is legacy or unsupported; skipped decision promotion.'],
+    });
+
+    const result = useCase.execute(defaultInput);
+
+    expect(result).toEqual({
+      ok: true,
+      ticketId: TICKET_ID,
+      warnings: ['Questions file is legacy or unsupported; skipped decision promotion.'],
+    });
+    expect(gitGateway.commitFiles).toHaveBeenCalledWith(
+      path.join(PROJECT_PATH, '.aeos'),
+      [
+        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-questions.md`),
+        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-ticket.md`),
+      ],
+      `[${TICKET_ID}][QUESTIONS][v1][human][answered]`,
+    );
+  });
+
+  it('should return error and keep ticket blocked when promotion validation fails', () => {
+    (decisionPromotionService.promote as ReturnType<typeof vi.fn>).mockReturnValue({
+      status: 'validation-error',
+      decisionsPath: null,
+      createdDecisionIds: [],
+      updatedDecisionIds: [],
+      supersededDecisionIds: [],
+      warnings: [],
+      error: 'Missing required answers for: Q-001',
+    });
+
+    const result = useCase.execute(defaultInput);
+
+    expect(result).toEqual({ ok: false, error: 'Missing required answers for: Q-001' });
+    expect(stateMachine.setSubState).not.toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'READY');
+    expect(gitGateway.commitFiles).not.toHaveBeenCalled();
   });
 
   it('should revert sub-state to BLOCKED when git commit fails', () => {

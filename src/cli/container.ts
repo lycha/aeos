@@ -9,6 +9,7 @@ import type { TicketAnswerPort } from '../domain/ports/driving/ticket-answer.por
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
 import type { TicketMovePort } from '../domain/ports/driving/ticket-move.port.js';
+import type { TicketReadyPort } from '../domain/ports/driving/ticket-ready.port.js';
 import type { TicketDodApprovePort } from '../domain/ports/driving/ticket-dod-approve.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js';
@@ -28,6 +29,7 @@ import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
 import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
 import { TicketMoveUseCase } from '../application/ticket-move.use-case.js';
+import { TicketReadyUseCase } from '../application/ticket-ready.use-case.js';
 import { TicketDodApproveUseCase } from '../application/ticket-dod-approve.use-case.js';
 import { StateMachineService } from '../domain/services/state-machine.js';
 import { SqliteTransitionRepository } from '../infrastructure/persistence/sqlite-transition.repository.js';
@@ -40,6 +42,7 @@ import { YamlAgentSpecLoader } from '../infrastructure/spec-loader/yaml-agent-sp
 import { FsRubricLoader } from '../infrastructure/filesystem/fs-rubric-loader.adapter.js';
 import { PreflightService } from '../application/services/preflight.js';
 import { SqliteCostRepository } from '../infrastructure/persistence/sqlite-cost.repository.js';
+import { DecisionPromotionService } from '../application/services/decision-promotion.service.js';
 
 export interface Container {
   install: InstallPort;
@@ -51,6 +54,7 @@ export interface Container {
   ticketRun: TicketRunPort;
   ticketApprove: TicketApprovePort;
   ticketMove: TicketMovePort;
+  ticketReady: TicketReadyPort;
   ticketDodApprove: TicketDodApprovePort;
   projectRepo: ProjectRepository;
   rubricLoader: RubricLoader;
@@ -97,7 +101,13 @@ export function createContainer(): Container {
       return new TicketShowUseCase(getTicketRepo(), artifactStore);
     },
     get ticketAnswer() {
-      return new TicketAnswerUseCase(getTicketRepo(), artifactStore, getStateMachine(), gitGateway);
+      return new TicketAnswerUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getStateMachine(),
+        gitGateway,
+        new DecisionPromotionService(artifactStore),
+      );
     },
     get ticketRun() {
       const executor = createExecutor();
@@ -131,6 +141,9 @@ export function createContainer(): Container {
     },
     get ticketMove() {
       return new TicketMoveUseCase(getTicketRepo(), artifactStore, getStateMachine(), gitGateway);
+    },
+    get ticketReady() {
+      return new TicketReadyUseCase(getTicketRepo(), artifactStore, getStateMachine(), gitGateway);
     },
     get ticketDodApprove() {
       return new TicketDodApproveUseCase(

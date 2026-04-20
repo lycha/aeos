@@ -94,17 +94,21 @@ export class TicketRunUseCase implements TicketRunPort {
       };
     }
 
-    // 3. Run pre-flight
-    const ticketFilename = `${ticketId}-ticket.md`;
-    const ticketContent = this.artifactStore.readArtifact(projectPath, ticketId, ticketFilename);
+    // 3. Assemble context before pre-flight so blocker analysis sees settled decisions too
     const aeosDir = path.join(projectPath, '.aeos');
     let mirroredTicket = ticket;
+    const assembledContext = await this.contextAssembler.assemble(
+      ticketId,
+      projectPath,
+      columnSpec.column,
+    );
     const preflightResult = await this.preflight.run(
       ticketId,
       projectId,
       projectPath,
-      ticketContent,
+      assembledContext,
       columnSpec,
+      workerAgentSpec,
     );
     if (preflightResult.blocked) {
       const questionsAbsPath = path.join(
@@ -146,14 +150,7 @@ export class TicketRunUseCase implements TicketRunPort {
       `[${ticketId}][STATE][v1][sub-state: WORKING]`,
     );
 
-    // 5. Assemble context
-    const assembledContext = await this.contextAssembler.assemble(
-      ticketId,
-      projectPath,
-      columnSpec.column,
-    );
-
-    // 6. Build prompt
+    // 5. Build prompt using the already-assembled context
     const prompt = this.buildPromptFn(assembledContext, workerAgentSpec);
 
     // Derive artifact filename
@@ -161,12 +158,22 @@ export class TicketRunUseCase implements TicketRunPort {
     const artifactAbsPath = path.join(aeosDir, 'tickets', ticketId, artifactFilename);
 
     // 7. Run executor
-    const executorResult = await this.executor.run({
-      prompt,
-      outputPath: artifactAbsPath,
-      ticketId,
-      column,
-    });
+    let executorResult: ExecutorResult;
+    try {
+      executorResult = await this.executor.run({
+        prompt,
+        outputPath: artifactAbsPath,
+        ticketId,
+        column,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        status: 'failed',
+        ticketId,
+        error: this.formatExecutorFailure('worker', column, message),
+      };
+    }
 
     // 8. Record cost (regardless of success/failure)
     this.recordCost(
@@ -195,7 +202,11 @@ export class TicketRunUseCase implements TicketRunPort {
         mirroredTicket,
         `[${ticketId}][STATE][v1][sub-state: FAILED]`,
       );
-      return { status: 'failed', ticketId, error: `Executor failed: ${executorResult.reason}` };
+      return {
+        status: 'failed',
+        ticketId,
+        error: this.formatExecutorFailure('worker', column, executorResult.reason),
+      };
     }
 
     const content = executorResult.content ?? '';
@@ -407,5 +418,14 @@ export class TicketRunUseCase implements TicketRunPort {
     const aeosDir = path.join(projectPath, '.aeos');
     const ticketFilePath = this.syncMirroredTicket(projectPath, ticket);
     this.gitGateway.commitFiles(aeosDir, [ticketFilePath], message);
+  }
+
+  private formatExecutorFailure(
+    stage: 'worker' | 'reviewer',
+    column: Column,
+    reason: string,
+  ): string {
+    const capitalizedStage = stage === 'worker' ? 'Worker' : 'Reviewer';
+    return `${capitalizedStage} executor failed in ${column}:\n${reason}`;
   }
 }

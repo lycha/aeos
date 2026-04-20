@@ -10,7 +10,9 @@ import type {
   TicketAnswerInput,
   TicketAnswerResult,
 } from '../domain/ports/driving/ticket-answer.port.js';
+import { SubState } from '../domain/model/sub-state.js';
 import { syncTicketDocument } from './services/ticket-document.js';
+import type { DecisionPromotionService } from './services/decision-promotion.service.js';
 
 export class TicketAnswerUseCase implements TicketAnswerPort {
   constructor(
@@ -18,6 +20,7 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
     private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
     private readonly gitGateway: GitGateway,
+    private readonly decisionPromotionService: DecisionPromotionService,
   ) {}
 
   execute(input: TicketAnswerInput): TicketAnswerResult {
@@ -57,23 +60,39 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
       }
     }
 
-    // 5. Transition sub-state to WORKING
-    const result = this.stateMachine.setSubState(projectId, ticketId, 'WORKING');
+    // 5. Promote structured questions into decisions when possible
+    const promotion = this.decisionPromotionService.promote({
+      projectPath,
+      ticketId,
+      stage: ticket.column,
+      settledBy: 'human',
+    });
+
+    if (promotion.status === 'validation-error') {
+      return { ok: false, error: promotion.error ?? 'Decision promotion failed' };
+    }
+
+    // 6. Transition sub-state to READY so ticket run can resume execution
+    const result = this.stateMachine.setSubState(projectId, ticketId, SubState.READY);
     if (!result.ok) {
       return { ok: false, error: `Failed to set sub-state: ${result.reason}` };
     }
 
-    // 6. Commit the answered questions file
+    // 7. Commit the answered questions file (and decisions file when promoted)
     const aeosDir = path.join(projectPath, '.aeos');
     const questionsFilePath = path.join(aeosDir, 'tickets', ticketId, questionsFilename);
     const ticketFilePath = syncTicketDocument(this.artifactStore, projectPath, {
       ...ticket,
-      subState: 'WORKING',
+      subState: SubState.READY,
     });
+    const filesToCommit = [questionsFilePath, ticketFilePath];
+    if (promotion.status === 'promoted' && promotion.decisionsPath !== null) {
+      filesToCommit.push(path.join(aeosDir, 'tickets', ticketId, promotion.decisionsPath));
+    }
     try {
       this.gitGateway.commitFiles(
         aeosDir,
-        [questionsFilePath, ticketFilePath],
+        filesToCommit,
         `[${ticketId}][QUESTIONS][v1][human][answered]`,
       );
     } catch (err) {
@@ -83,7 +102,11 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
       throw err;
     }
 
-    // 7. Return success
-    return { ok: true, ticketId };
+    // 8. Return success
+    return {
+      ok: true,
+      ticketId,
+      warnings: promotion.status === 'legacy-skipped' ? promotion.warnings : undefined,
+    };
   }
 }

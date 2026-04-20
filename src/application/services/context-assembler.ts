@@ -21,19 +21,32 @@ export class ContextAssembler {
     const ticketFilename = `${ticketId}-ticket.md`;
     const ticketContent = this.artifactStore.readArtifact(projectRoot, ticketId, ticketFilename);
 
-    // 2. List and read prior artifacts (excluding the ticket file itself)
+    // 2. Detect decisions artifact and read it when present
+    const decisionsFilename = `${ticketId}-decisions.md`;
+    const questionsFilename = `${ticketId}-questions.md`;
     const allFilenames = this.artifactStore.listArtifacts(projectRoot, ticketId);
+    const hasDecisions = allFilenames.includes(decisionsFilename);
+    const settledDecisions = hasDecisions
+      ? this.artifactStore.readArtifact(projectRoot, ticketId, decisionsFilename)
+      : null;
+
+    // 3. List and read prior artifacts (excluding ticket/decisions; questions omitted once decisions exist)
     const priorArtifacts = allFilenames
-      .filter((filename) => filename !== ticketFilename)
+      .filter(
+        (filename) =>
+          filename !== ticketFilename &&
+          filename !== decisionsFilename &&
+          !(hasDecisions && filename === questionsFilename),
+      )
       .map((filename) => ({
         name: filename,
         content: this.artifactStore.readArtifact(projectRoot, ticketId, filename),
       }));
 
-    // 3. Read constraints
+    // 4. Read constraints
     const constraints = this.projectRepo.readConstraints(projectRoot);
 
-    // 4. Inject git diff for CODE_REVIEW column
+    // 5. Inject git diff for CODE_REVIEW column
     let codeDiff: string | null = null;
     if (column === Column.CODE_REVIEW) {
       const rawDiff = this.gitGateway.diff(projectRoot);
@@ -46,6 +59,6 @@ export class ContextAssembler {
       }
     }
 
-    return { ticketContent, priorArtifacts, constraints, codeDiff };
+    return { ticketContent, settledDecisions, priorArtifacts, constraints, codeDiff };
   }
 }

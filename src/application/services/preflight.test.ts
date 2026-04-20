@@ -5,6 +5,8 @@ import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.por
 import type { StateMachineService } from '../../domain/services/state-machine.js';
 import type { ColumnSpec } from '../../domain/model/column-spec.js';
 import type { ExecutorResult } from '../../domain/model/executor-result.js';
+import type { AssembledContext } from '../../domain/model/assembled-context.js';
+import type { AgentSpec } from '../../domain/model/agent-spec.js';
 
 function createMockExecutor(): Executor {
   return {
@@ -47,6 +49,29 @@ function makeColumnSpec(overrides: Partial<ColumnSpec> = {}): ColumnSpec {
   };
 }
 
+function makeContext(overrides: Partial<AssembledContext> = {}): AssembledContext {
+  return {
+    ticketContent: '# Build a login page\nUsers should be able to log in with email and password.',
+    settledDecisions: '# AEOS Decisions\nUse email/password auth only.',
+    priorArtifacts: [{ name: 'AEOS-1-prd.md', content: '# PRD' }],
+    constraints: 'Use TypeScript strict mode',
+    codeDiff: null,
+    ...overrides,
+  };
+}
+
+function makeAgentSpec(overrides: Partial<AgentSpec> = {}): AgentSpec {
+  return {
+    name: 'architect-agent',
+    systemPrompt: 'You are an expert software architect.',
+    taskInstruction: 'Produce a technical artifact.',
+    outputFormat: 'Markdown',
+    selfVerificationChecklist: [],
+    executor: { type: 'stub', timeoutSeconds: 300 },
+    ...overrides,
+  };
+}
+
 describe('PreflightService', () => {
   let executor: ReturnType<typeof createMockExecutor>;
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
@@ -56,9 +81,6 @@ describe('PreflightService', () => {
   const TICKET_ID = 'AEOS-1';
   const PROJECT_ID = 'proj-1';
   const PROJECT_PATH = '/projects/test';
-  const TICKET_CONTENT =
-    '# Build a login page\nUsers should be able to log in with email and password.';
-
   beforeEach(() => {
     executor = createMockExecutor();
     artifactStore = createMockArtifactStore();
@@ -75,7 +97,14 @@ describe('PreflightService', () => {
       preflight: { enabled: false, questionsArtifact: 'questions.md' },
     });
 
-    const result = await service.run(TICKET_ID, PROJECT_ID, PROJECT_PATH, TICKET_CONTENT, spec);
+    const result = await service.run(
+      TICKET_ID,
+      PROJECT_ID,
+      PROJECT_PATH,
+      makeContext(),
+      spec,
+      makeAgentSpec(),
+    );
 
     expect(result).toEqual({ blocked: false });
     expect(executor.run).not.toHaveBeenCalled();
@@ -93,8 +122,9 @@ describe('PreflightService', () => {
       TICKET_ID,
       PROJECT_ID,
       PROJECT_PATH,
-      TICKET_CONTENT,
+      makeContext(),
       makeColumnSpec(),
+      makeAgentSpec(),
     );
 
     expect(result).toEqual({ blocked: false });
@@ -114,11 +144,35 @@ describe('PreflightService', () => {
       TICKET_ID,
       PROJECT_ID,
       PROJECT_PATH,
-      TICKET_CONTENT,
+      makeContext(),
       makeColumnSpec(),
+      makeAgentSpec(),
     );
 
     expect(result).toEqual({ blocked: false });
+  });
+
+  it('returns { blocked: false } when NO_BLOCKERS is followed by explanatory text', async () => {
+    const executorResult: ExecutorResult = {
+      ok: true,
+      artifactPath: '/tmp/preflight.md',
+      content:
+        'NO_BLOCKERS\n\nThe codebase already contains enough information to proceed with the artifact.',
+    };
+    (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue(executorResult);
+
+    const result = await service.run(
+      TICKET_ID,
+      PROJECT_ID,
+      PROJECT_PATH,
+      makeContext(),
+      makeColumnSpec(),
+      makeAgentSpec(),
+    );
+
+    expect(result).toEqual({ blocked: false });
+    expect(artifactStore.writeArtifact).not.toHaveBeenCalled();
+    expect(stateMachine.setSubState).not.toHaveBeenCalled();
   });
 
   it('writes questions artifact and sets BLOCKED when model responds with questions', async () => {
@@ -134,8 +188,9 @@ describe('PreflightService', () => {
       TICKET_ID,
       PROJECT_ID,
       PROJECT_PATH,
-      TICKET_CONTENT,
+      makeContext(),
       makeColumnSpec(),
+      makeAgentSpec(),
     );
 
     expect(result).toEqual({ blocked: true, questionsPath: 'AEOS-1-questions.md' });
@@ -148,7 +203,7 @@ describe('PreflightService', () => {
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'BLOCKED');
   });
 
-  it('builds correct prompt with ticket content and output artifact', async () => {
+  it('builds correct prompt with assembled context and worker role', async () => {
     const executorResult: ExecutorResult = {
       ok: true,
       artifactPath: '/tmp/preflight.md',
@@ -156,13 +211,22 @@ describe('PreflightService', () => {
     };
     (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue(executorResult);
 
-    await service.run(TICKET_ID, PROJECT_ID, PROJECT_PATH, TICKET_CONTENT, makeColumnSpec());
+    await service.run(
+      TICKET_ID,
+      PROJECT_ID,
+      PROJECT_PATH,
+      makeContext(),
+      makeColumnSpec(),
+      makeAgentSpec(),
+    );
 
     const invocation = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(invocation.prompt).toContain('[ROLE] You are a requirements analyst.');
-    expect(invocation.prompt).toContain(TICKET_CONTENT);
+    expect(invocation.prompt).toContain('You are an expert software architect.');
+    expect(invocation.prompt).toContain('## Ticket\n# Build a login page');
+    expect(invocation.prompt).toContain('## Settled Decisions\n# AEOS Decisions');
     expect(invocation.prompt).toContain('prd.md');
     expect(invocation.prompt).toContain('NO_BLOCKERS');
+    expect(invocation.prompt).toContain('Format-Version: 2');
     expect(invocation.ticketId).toBe(TICKET_ID);
     expect(invocation.column).toBe('PRODUCT_SCOPING');
   });
@@ -172,7 +236,14 @@ describe('PreflightService', () => {
     (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue(executorResult);
 
     await expect(
-      service.run(TICKET_ID, PROJECT_ID, PROJECT_PATH, TICKET_CONTENT, makeColumnSpec()),
+      service.run(
+        TICKET_ID,
+        PROJECT_ID,
+        PROJECT_PATH,
+        makeContext(),
+        makeColumnSpec(),
+        makeAgentSpec(),
+      ),
     ).rejects.toThrow('Preflight executor failed: Model timeout');
   });
 
@@ -188,8 +259,9 @@ describe('PreflightService', () => {
       TICKET_ID,
       PROJECT_ID,
       PROJECT_PATH,
-      TICKET_CONTENT,
+      makeContext(),
       makeColumnSpec(),
+      makeAgentSpec(),
     );
 
     // Empty string trimmed is '', which !== 'NO_BLOCKERS', so it writes artifact

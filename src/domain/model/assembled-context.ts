@@ -7,6 +7,7 @@ export interface PriorArtifact {
 
 export interface AssembledContext {
   ticketContent: string;
+  settledDecisions: string | null;
   priorArtifacts: PriorArtifact[];
   constraints: string | null;
   codeDiff: string | null;

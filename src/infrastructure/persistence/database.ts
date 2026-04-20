@@ -99,16 +99,18 @@ CREATE TABLE IF NOT EXISTS schema_version (
 }
 
 function getCurrentVersion(db: BetterSqlite3.Database): number {
-  const row = db
-    .prepare('SELECT MAX(version) AS v FROM schema_version')
-    .get() as { v: number | null } | undefined;
+  const row = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as
+    | { v: number | null }
+    | undefined;
   return row?.v ?? 0;
 }
 
 function recordVersion(db: BetterSqlite3.Database, migration: Migration): void {
-  db.prepare(
-    'INSERT INTO schema_version (version, description, applied_at) VALUES (?, ?, ?)',
-  ).run(migration.version, migration.description, new Date().toISOString());
+  db.prepare('INSERT INTO schema_version (version, description, applied_at) VALUES (?, ?, ?)').run(
+    migration.version,
+    migration.description,
+    new Date().toISOString(),
+  );
 }
 
 /** Detects pre-migration databases (tables exist but no schema_version) */

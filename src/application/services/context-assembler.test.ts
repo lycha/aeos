@@ -91,6 +91,47 @@ describe('ContextAssembler', () => {
       name: 'AEOS-1-tech-spec.md',
       content: '# Tech Spec content',
     });
+    expect(result.settledDecisions).toBeNull();
+  });
+
+  it('reads settled decisions when decisions artifact exists', async () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockImplementation(
+      (_proj: string, _ticket: string, filename: string) => {
+        if (filename === 'AEOS-1-ticket.md') return '# Ticket';
+        if (filename === 'AEOS-1-decisions.md') return '# AEOS Decisions\n...';
+        return '';
+      },
+    );
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue([
+      'AEOS-1-decisions.md',
+      'AEOS-1-ticket.md',
+    ]);
+
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
+
+    expect(result.settledDecisions).toBe('# AEOS Decisions\n...');
+  });
+
+  it('excludes decisions and questions from priorArtifacts once decisions exist', async () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockImplementation(
+      (_proj: string, _ticket: string, filename: string) => {
+        if (filename === 'AEOS-1-ticket.md') return '# Ticket';
+        if (filename === 'AEOS-1-decisions.md') return '# AEOS Decisions';
+        if (filename === 'AEOS-1-prd.md') return '# PRD';
+        if (filename === 'AEOS-1-questions.md') return '# Questions';
+        return '';
+      },
+    );
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue([
+      'AEOS-1-decisions.md',
+      'AEOS-1-prd.md',
+      'AEOS-1-questions.md',
+      'AEOS-1-ticket.md',
+    ]);
+
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
+
+    expect(result.priorArtifacts).toEqual([{ name: 'AEOS-1-prd.md', content: '# PRD' }]);
   });
 
   it('filters out the ticket file from priorArtifacts', async () => {

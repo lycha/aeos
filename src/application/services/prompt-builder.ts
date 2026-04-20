@@ -35,13 +35,18 @@ export function buildPrompt(context: AssembledContext, agentSpec: AgentSpec): st
   return sections.join('\n\n');
 }
 
-function buildContextSection(context: AssembledContext): string {
+export function buildContextSection(context: AssembledContext): string {
   const parts: string[] = [];
 
   parts.push('[CONTEXT]');
 
   // Ticket
   parts.push(`## Ticket\n${context.ticketContent}`);
+
+  // Settled Decisions — omit section entirely if null
+  if (context.settledDecisions !== null) {
+    parts.push(`## Settled Decisions\n${context.settledDecisions}`);
+  }
 
   // Prior Artifacts — omit section entirely if empty
   if (context.priorArtifacts.length > 0) {

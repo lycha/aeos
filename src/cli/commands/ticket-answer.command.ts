@@ -32,7 +32,7 @@ export function registerTicketAnswerCommand(
       try {
         const cwd = process.cwd();
         const projectPath = projectRepo.findRoot(cwd);
-        const successMsg = `✓ Ticket ${ticketId} unblocked — sub-state set to WORKING`;
+        const successMsg = `✓ Ticket ${ticketId} unblocked — sub-state set to READY`;
 
         if (!projectPath) {
           // eslint-disable-next-line no-console
@@ -72,6 +72,11 @@ export function registerTicketAnswerCommand(
             return;
           }
 
+          retryResult.warnings?.forEach((warning) => {
+            // eslint-disable-next-line no-console
+            console.warn(`Warning: ${warning}`);
+          });
+
           // eslint-disable-next-line no-console
           console.log(successMsg);
           return;
@@ -83,6 +88,11 @@ export function registerTicketAnswerCommand(
           process.exitCode = 1;
           return;
         }
+
+        result.warnings?.forEach((warning) => {
+          // eslint-disable-next-line no-console
+          console.warn(`Warning: ${warning}`);
+        });
 
         // eslint-disable-next-line no-console
         console.log(successMsg);

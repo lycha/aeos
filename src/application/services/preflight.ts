@@ -8,7 +8,10 @@ import type { Executor } from '../../domain/ports/driven/executor.port.js';
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
 import type { StateMachineService } from '../../domain/services/state-machine.js';
 import type { ColumnSpec } from '../../domain/model/column-spec.js';
+import type { AgentSpec } from '../../domain/model/agent-spec.js';
+import type { AssembledContext } from '../../domain/model/assembled-context.js';
 import { type Column, isValidColumn } from '../../domain/model/column.js';
+import { buildContextSection } from './prompt-builder.js';
 
 export type PreflightResult = { blocked: false } | { blocked: true; questionsPath: string };
 
@@ -23,8 +26,9 @@ export class PreflightService {
     ticketId: string,
     projectId: string,
     projectPath: string,
-    ticketContent: string,
+    assembledContext: AssembledContext,
     columnSpec: ColumnSpec,
+    workerAgentSpec: AgentSpec,
   ): Promise<PreflightResult> {
     // 1. Short-circuit if preflight is disabled
     if (!columnSpec.preflight.enabled) {
@@ -32,7 +36,7 @@ export class PreflightService {
     }
 
     // 2. Build the preflight-specific prompt
-    const prompt = this.buildPrompt(ticketContent, columnSpec.outputArtifact);
+    const prompt = this.buildPrompt(ticketId, assembledContext, columnSpec, workerAgentSpec);
 
     // 3. Derive column enum value from columnSpec.column string
     const column = this.resolveColumn(columnSpec.column);
@@ -53,8 +57,8 @@ export class PreflightService {
 
     const content = result.content ?? '';
 
-    // 6. Parse output — check for NO_BLOCKERS
-    if (content.trim() === 'NO_BLOCKERS') {
+    // 6. Parse output — check for NO_BLOCKERS on the first meaningful line
+    if (this.isNoBlockersResponse(content)) {
       return { blocked: false };
     }
 
@@ -69,12 +73,46 @@ export class PreflightService {
     return { blocked: true, questionsPath: questionsFilename };
   }
 
-  private buildPrompt(ticketContent: string, outputArtifact: string): string {
+  private buildPrompt(
+    ticketId: string,
+    assembledContext: AssembledContext,
+    columnSpec: ColumnSpec,
+    workerAgentSpec: AgentSpec,
+  ): string {
     return [
-      '[ROLE] You are a requirements analyst.',
-      `[CONTEXT] ${ticketContent}`,
-      `[TASK] Identify any blocking questions that, if unanswered, would prevent you from producing a high-quality ${outputArtifact}. If there are no blockers, respond with exactly: NO_BLOCKERS`,
-      '[OUTPUT FORMAT] Either: "NO_BLOCKERS" or a numbered list of questions.',
+      `[ROLE]\n${workerAgentSpec.systemPrompt}\n\nYou are performing a preflight blocker analysis before artifact generation.`,
+      buildContextSection(assembledContext),
+      [
+        '[TASK]',
+        `Identify only net-new blocking questions that would prevent producing a high-quality ${columnSpec.outputArtifact}.`,
+        'Consult settled decisions first and do not re-ask already settled topics.',
+        'If an older decision is insufficient, cite the contradiction or gap explicitly.',
+        'If there are no blockers, respond with exactly: NO_BLOCKERS',
+      ].join('\n'),
+      [
+        '[OUTPUT FORMAT]',
+        'Either exactly "NO_BLOCKERS" or a structured markdown document in this format:',
+        '# AEOS Questions',
+        'Format-Version: 2',
+        `Ticket: ${ticketId}`,
+        `Stage: ${columnSpec.column}`,
+        'Generated-By: preflight',
+        '',
+        'For each blocker use:',
+        '## Q-001',
+        'Status: OPEN',
+        'Topic: short-kebab-topic',
+        'Required: yes',
+        '',
+        '### Question',
+        '```text',
+        '<question text>',
+        '```',
+        '',
+        '### Answer',
+        '```text',
+        '```',
+      ].join('\n'),
     ].join('\n');
   }
 
@@ -83,5 +121,14 @@ export class PreflightService {
       return columnString;
     }
     throw new Error(`Invalid column value: ${columnString}`);
+  }
+
+  private isNoBlockersResponse(content: string): boolean {
+    const firstMeaningfulLine = content
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+
+    return firstMeaningfulLine === 'NO_BLOCKERS';
   }
 }

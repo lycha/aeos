@@ -8,7 +8,7 @@ export interface TicketAnswerInput {
 }
 
 export type TicketAnswerResult =
-  | { ok: true; ticketId: string }
+  | { ok: true; ticketId: string; warnings?: string[] }
   | { ok: false; needsConfirmation: true; reason: string }
   | { ok: false; needsConfirmation?: false; error: string };
 

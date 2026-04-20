@@ -18,6 +18,7 @@ function createAgentSpec(overrides: Partial<AgentSpec> = {}): AgentSpec {
 function createContext(overrides: Partial<AssembledContext> = {}): AssembledContext {
   return {
     ticketContent: '# AEOS-1\nImplement feature X',
+    settledDecisions: null,
     priorArtifacts: [],
     constraints: null,
     codeDiff: null,
@@ -65,6 +66,28 @@ describe('buildPrompt', () => {
     expect(result).toContain('## Prior Artifacts');
     expect(result).toContain('### AEOS-1-prd.md\n# PRD content');
     expect(result).toContain('### AEOS-1-tech-spec.md\n# Tech Spec content');
+  });
+
+  it('renders settled decisions before prior artifacts when present', () => {
+    const context = createContext({
+      settledDecisions: '# AEOS Decisions\nSupport `claude` and `stub` only in v1.',
+      priorArtifacts: [{ name: 'AEOS-1-prd.md', content: '# PRD content' }],
+    });
+
+    const result = buildPrompt(context, createAgentSpec());
+
+    expect(result).toContain(
+      '## Settled Decisions\n# AEOS Decisions\nSupport `claude` and `stub` only in v1.',
+    );
+    expect(result.indexOf('## Settled Decisions')).toBeLessThan(
+      result.indexOf('## Prior Artifacts'),
+    );
+  });
+
+  it('omits ## Settled Decisions section when settledDecisions is null', () => {
+    const result = buildPrompt(createContext({ settledDecisions: null }), createAgentSpec());
+
+    expect(result).not.toContain('## Settled Decisions');
   });
 
   it('shows (none) for constraints when constraints is null', () => {

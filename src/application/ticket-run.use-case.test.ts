@@ -132,7 +132,13 @@ function defaultAgentSpec(): AgentSpec {
 }
 
 function defaultContext(): AssembledContext {
-  return { ticketContent: 'ticket content', priorArtifacts: [], constraints: null, codeDiff: null };
+  return {
+    ticketContent: 'ticket content',
+    settledDecisions: null,
+    priorArtifacts: [],
+    constraints: null,
+    codeDiff: null,
+  };
 }
 
 function runnableTicket(overrides: Partial<Ticket> = {}): Ticket {
@@ -228,10 +234,39 @@ describe('TicketRunUseCase', () => {
     await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
     expect(preflight.run).toHaveBeenCalledOnce();
+    expect(contextAssembler.assemble).toHaveBeenCalledTimes(2);
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'WORKING');
     expect(executor.run).toHaveBeenCalledTimes(2); // worker + reviewer
     expect(artifactStore.writeArtifact).toHaveBeenCalledTimes(5); // 3 state mirrors + worker + review
     expect(gitGateway.commitFiles).toHaveBeenCalledTimes(5);
+  });
+
+  it('should pass assembled context and worker agent spec into preflight', async () => {
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(preflight.run).toHaveBeenCalledWith(
+      TICKET_ID,
+      PROJECT_ID,
+      PROJECT_PATH,
+      defaultContext(),
+      defaultColumnSpec(),
+      defaultAgentSpec(),
+    );
+  });
+
+  it('should reuse the first assembled context for the worker prompt', async () => {
+    const firstContext = { ...defaultContext(), settledDecisions: '# AEOS Decisions' };
+    const secondContext = {
+      ...defaultContext(),
+      priorArtifacts: [{ name: 'AEOS-1-impl.md', content: '...' }],
+    };
+    (contextAssembler.assemble as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(firstContext)
+      .mockResolvedValueOnce(secondContext);
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(buildPromptFn).toHaveBeenNthCalledWith(1, firstContext, defaultAgentSpec());
   });
 
   it('should set sub-state to SIGNED_OFF on success', async () => {
@@ -381,7 +416,8 @@ describe('TicketRunUseCase', () => {
 
     expect(result.status).toBe('failed');
     if (result.status === 'failed') {
-      expect(result.error).toContain('Executor failed');
+      expect(result.error).toContain('Worker executor failed in IMPLEMENTATION');
+      expect(result.error).toContain('Model timeout');
     }
     expect(artifactStore.removeArtifact).toHaveBeenCalled();
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'FAILED');
@@ -390,6 +426,24 @@ describe('TicketRunUseCase', () => {
       [TICKET_FILE_PATH],
       `[${TICKET_ID}][STATE][v1][sub-state: FAILED]`,
     );
+  });
+
+  it('should surface timeout partial output from the worker executor', async () => {
+    (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      reason:
+        'Executor timeout after 300s\n\nPartial stdout:\nThinking through architecture...\n\nPartial stderr: (no output captured)',
+    });
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error).toContain('Worker executor failed in IMPLEMENTATION');
+      expect(result.error).toContain('Executor timeout after 300s');
+      expect(result.error).toContain('Partial stdout');
+      expect(result.error).toContain('Thinking through architecture');
+    }
   });
 
   // --- Validation failure ---

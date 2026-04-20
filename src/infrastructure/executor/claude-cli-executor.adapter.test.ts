@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { EventEmitter } from 'node:events';
-import { Writable } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 
 import { Column } from '../../domain/model/column.js';
@@ -19,10 +19,16 @@ import { execFile } from 'node:child_process';
 
 const mockExecFile = vi.mocked(execFile);
 
-type ExecFileCallback = (err: Error | null, stdout: string, stderr: string) => void;
+type MockChildProcess = ChildProcess & {
+  stdout: PassThrough;
+  stderr: PassThrough;
+  stdin: Writable;
+};
 
-function createMockChild(): ChildProcess {
-  const child = new EventEmitter() as ChildProcess;
+function createMockChild(): MockChildProcess {
+  const child = new EventEmitter() as MockChildProcess;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
   child.stdin = new Writable({
     write(_chunk, _enc, cb) {
       cb();
@@ -33,17 +39,21 @@ function createMockChild(): ChildProcess {
   return child;
 }
 
-function setupExecFile(
-  handler: (
-    child: ChildProcess,
-    callback: (err: Error | null, stdout: string, stderr: string) => void,
-  ) => void,
+function emitClose(
+  child: MockChildProcess,
+  code: number | null,
+  signal: NodeJS.Signals | null = null,
 ) {
-  mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+  child.stdout.end();
+  child.stderr.end();
+  process.nextTick(() => child.emit('close', code, signal));
+}
+
+function setupExecFile(handler: (child: MockChildProcess) => void) {
+  mockExecFile.mockImplementation(() => {
     const child = createMockChild();
-    const callback = cb as (err: Error | null, stdout: string, stderr: string) => void;
     // Defer so the caller can capture the child reference
-    process.nextTick(() => handler(child, callback));
+    process.nextTick(() => handler(child));
     return child;
   });
 }
@@ -73,66 +83,87 @@ describe('ClaudeCodeCliExecutor', () => {
   }
 
   it('invokes claude CLI with --print and - flags', async () => {
-    setupExecFile((_child, cb) => cb(null, 'output', ''));
+    setupExecFile((child) => {
+      child.stdout.write('output');
+      emitClose(child, 0);
+    });
     const invocation = makeInvocation();
     await executor.run(invocation);
 
-    expect(mockExecFile).toHaveBeenCalledWith(
-      'claude',
-      ['--print', '-'],
-      expect.any(Object),
-      expect.any(Function),
-    );
+    expect(mockExecFile).toHaveBeenCalledWith('claude', ['--print', '-'], expect.any(Object));
   });
 
   it('passes --model flag when config.model is set', async () => {
     executor = new ClaudeCodeCliExecutor({ model: 'claude-opus-4-6' });
-    setupExecFile((_child, cb) => cb(null, 'output', ''));
+    setupExecFile((child) => {
+      child.stdout.write('output');
+      emitClose(child, 0);
+    });
     await executor.run(makeInvocation());
 
     expect(mockExecFile).toHaveBeenCalledWith(
       'claude',
       ['--print', '-', '--model', 'claude-opus-4-6'],
       expect.any(Object),
-      expect.any(Function),
     );
   });
 
   it('passes --max-tokens flag when config.maxTokens is set', async () => {
     executor = new ClaudeCodeCliExecutor({ maxTokens: 8000 });
-    setupExecFile((_child, cb) => cb(null, 'output', ''));
+    setupExecFile((child) => {
+      child.stdout.write('output');
+      emitClose(child, 0);
+    });
     await executor.run(makeInvocation());
 
     expect(mockExecFile).toHaveBeenCalledWith(
       'claude',
       ['--print', '-', '--max-tokens', '8000'],
       expect.any(Object),
-      expect.any(Function),
     );
   });
 
   it('pipes prompt to child stdin', async () => {
     let writtenData = '';
-    mockExecFile.mockImplementation(
-      (_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
-        const child = createMockChild();
-        child.stdin = new Writable({
-          write(chunk, _enc, callback) {
-            writtenData += chunk.toString();
-            callback();
-          },
-        });
-        process.nextTick(() => (cb as ExecFileCallback)(null, 'result', ''));
-        return child;
-      },
-    );
+    mockExecFile.mockImplementation(() => {
+      const child = createMockChild();
+      child.stdin = new Writable({
+        write(chunk, _enc, callback) {
+          writtenData += chunk.toString();
+          callback();
+        },
+      });
+      process.nextTick(() => {
+        child.stdout.write('result');
+        emitClose(child, 0);
+      });
+      return child;
+    });
 
     await executor.run(makeInvocation({ prompt: 'Hello Claude!' }));
     expect(writtenData).toBe('Hello Claude!');
   });
 
+  it('captures stdout incrementally across multiple chunks', async () => {
+    setupExecFile((child) => {
+      child.stdout.write('# Generated ');
+      child.stdout.write('Output');
+      emitClose(child, 0);
+    });
+
+    const invocation = makeInvocation();
+    const result = await executor.run(invocation);
+
+    expect(result.ok).toBe(true);
+    const content = await fs.readFile(invocation.outputPath, 'utf8');
+    expect(content).toBe('# Generated Output');
+  });
+
   it('writes stdout to outputPath on success', async () => {
-    setupExecFile((_child, cb) => cb(null, '# Generated Output', ''));
+    setupExecFile((child) => {
+      child.stdout.write('# Generated Output');
+      emitClose(child, 0);
+    });
     const invocation = makeInvocation();
     const result = await executor.run(invocation);
 
@@ -145,7 +176,10 @@ describe('ClaudeCodeCliExecutor', () => {
   });
 
   it('creates output directory if missing', async () => {
-    setupExecFile((_child, cb) => cb(null, 'content', ''));
+    setupExecFile((child) => {
+      child.stdout.write('content');
+      emitClose(child, 0);
+    });
     const deepPath = path.join(tmpDir, 'nested', 'deep', 'output.md');
     const invocation = makeInvocation({ outputPath: deepPath });
     await executor.run(invocation);
@@ -155,9 +189,9 @@ describe('ClaudeCodeCliExecutor', () => {
   });
 
   it('returns ok: false with stderr on non-zero exit', async () => {
-    setupExecFile((_child, cb) => {
-      const err = new Error('Command failed');
-      cb(err, '', 'Error: rate limited');
+    setupExecFile((child) => {
+      child.stderr.write('Error: rate limited');
+      emitClose(child, 1);
     });
 
     const result = await executor.run(makeInvocation());
@@ -168,23 +202,22 @@ describe('ClaudeCodeCliExecutor', () => {
   });
 
   it('returns ok: false with error message when stderr is empty', async () => {
-    setupExecFile((_child, cb) => {
-      const err = new Error('exit code 1');
-      cb(err, '', '');
+    setupExecFile((child) => {
+      emitClose(child, 1);
     });
 
     const result = await executor.run(makeInvocation());
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toBe('exit code 1');
+      expect(result.reason).toBe('claude exited with code 1');
     }
   });
 
   it('returns ok: false with ENOENT message when claude binary not found', async () => {
-    setupExecFile((_child, cb) => {
+    setupExecFile((child) => {
       const err = new Error('spawn claude ENOENT') as NodeJS.ErrnoException;
       err.code = 'ENOENT';
-      cb(err, '', '');
+      child.emit('error', err);
     });
 
     const result = await executor.run(makeInvocation());
@@ -194,46 +227,58 @@ describe('ClaudeCodeCliExecutor', () => {
     }
   });
 
-  it('kills process and returns timeout error when timeout exceeded', async () => {
+  it('kills process and returns timeout diagnostics when timeout exceeded', async () => {
     executor = new ClaudeCodeCliExecutor({ timeoutMs: 50 });
+    const stderrWriteSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
-    mockExecFile.mockImplementation(
-      (_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+    try {
+      mockExecFile.mockImplementation(() => {
         const child = createMockChild();
-        // Simulate a long-running process — callback fires after kill
+        process.nextTick(() => {
+          child.stdout.write('partial stdout');
+          child.stderr.write('partial stderr');
+        });
         (child.kill as ReturnType<typeof vi.fn>).mockImplementation(() => {
-          process.nextTick(() => (cb as ExecFileCallback)(new Error('killed'), '', ''));
+          emitClose(child, null, 'SIGKILL');
           return true;
         });
         return child;
-      },
-    );
+      });
 
-    const result = await executor.run(makeInvocation());
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('Executor timeout');
+      const result = await executor.run(makeInvocation({ prompt: 'P'.repeat(1_500) }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain('Executor timeout after 1s');
+        expect(result.reason).toContain('Partial stdout');
+        expect(result.reason).toContain('partial stdout');
+        expect(result.reason).toContain('Partial stderr');
+        expect(result.reason).toContain('partial stderr');
+      }
+      expect(stderrWriteSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[ClaudeCodeCliExecutor timeout diagnostics]'),
+      );
+      expect(stderrWriteSpy).toHaveBeenCalledWith(expect.stringContaining('timeoutMs: 50'));
+      expect(stderrWriteSpy).toHaveBeenCalledWith(expect.stringContaining('args: ["--print","-"]'));
+      expect(stderrWriteSpy).toHaveBeenCalledWith(expect.stringContaining('promptPreview:'));
+      expect(stderrWriteSpy).toHaveBeenCalledWith(expect.stringContaining('P'.repeat(1_000)));
+    } finally {
+      stderrWriteSpy.mockRestore();
     }
   });
 
   it('interrupt() kills running process and run() returns interrupted error', async () => {
-    let childRef: ChildProcess | null = null;
-    let cbRef: ExecFileCallback | null = null;
+    let childRef: MockChildProcess | null = null;
 
-    mockExecFile.mockImplementation(
-      (_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
-        const child = createMockChild();
-        childRef = child;
-        cbRef = cb as ExecFileCallback;
-        // Don't call cb — simulate a long-running process
-        (child.kill as ReturnType<typeof vi.fn>).mockImplementation(() => {
-          // Simulate SIGTERM causing the process to exit
-          process.nextTick(() => cbRef!(new Error('killed'), '', ''));
-          return true;
-        });
-        return child;
-      },
-    );
+    mockExecFile.mockImplementation(() => {
+      const child = createMockChild();
+      childRef = child;
+      // Don't close — simulate a long-running process
+      (child.kill as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        emitClose(child, null, 'SIGTERM');
+        return true;
+      });
+      return child;
+    });
 
     const runPromise = executor.run(makeInvocation());
 
