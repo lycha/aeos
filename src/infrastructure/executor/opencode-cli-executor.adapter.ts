@@ -74,8 +74,14 @@ export class OpenCodeCliExecutor implements Executor {
 
       child.stdout?.setEncoding('utf8');
       child.stderr?.setEncoding('utf8');
-      child.stdout?.on('data', (chunk: string) => (stdout += chunk));
-      child.stderr?.on('data', (chunk: string) => (stderr += chunk));
+      child.stdout?.on('data', (chunk: string) => {
+        stdout += chunk;
+        invocation.onChunk?.('stdout', chunk);
+      });
+      child.stderr?.on('data', (chunk: string) => {
+        stderr += chunk;
+        invocation.onChunk?.('stderr', chunk);
+      });
 
       child.once('error', (error) => {
         const err = error as NodeJS.ErrnoException;

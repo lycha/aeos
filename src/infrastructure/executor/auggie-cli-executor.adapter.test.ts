@@ -233,6 +233,23 @@ describe('AuggieCliExecutor', () => {
     expect(content).toBe('# Agentic Summary');
   });
 
+  it('streams stdout and stderr chunks to the invocation observer', async () => {
+    const onChunk = vi.fn();
+
+    setupExecFile((child) => {
+      child.stdout.write('auggie output');
+      child.stderr.write('diagnostic');
+      emitClose(child, 0);
+    });
+
+    await executor.run(makeInvocation({ onChunk }));
+
+    expect(onChunk.mock.calls).toEqual([
+      ['stdout', 'auggie output'],
+      ['stderr', 'diagnostic'],
+    ]);
+  });
+
   it('kills process and returns timeout diagnostics when timeout exceeded', async () => {
     executor = new AuggieCliExecutor({ timeoutMs: 50 });
     const stderrWriteSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);

@@ -830,6 +830,11 @@ aeos config set model claude-opus-4-6  # default model
 - ❓ BLOCKED — awaiting operator answers to pre-flight questions
 - ⚪ WAITING — idle (Backlog, blocked on BUILD slot)
 
+**See also:**
+- `docs/aeos-ticket-run-event-model-proposal.md` — proposed event vocabulary for live run progress
+- `docs/aeos-ticket-run-terminal-layout-spec.md` — split-pane execution UI for `aeos ticket run`
+- `docs/aeos-ticket-run-implementation-plan.md` — phased roadmap for adding the live run experience
+
 ### 8.3 Operator Actions
 
 | Action | CLI command | Git commit |

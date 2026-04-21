@@ -61,9 +61,11 @@ export class ClaudeCodeCliExecutor implements Executor {
       child.stderr?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {
         stdout += chunk;
+        invocation.onChunk?.('stdout', chunk);
       });
       child.stderr?.on('data', (chunk: string) => {
         stderr += chunk;
+        invocation.onChunk?.('stderr', chunk);
       });
 
       child.once('error', (error) => {

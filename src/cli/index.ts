@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import { Command } from 'commander';
 import { createContainer } from './container.js';
+import { runInkApp } from './ui/run-ink-app.js';
 import { registerInstallCommand } from './commands/install.command.js';
 import { registerProjectInitCommand } from './commands/project-init.command.js';
 import { registerTicketCreateCommand } from './commands/ticket-create.command.js';
@@ -32,6 +33,13 @@ export { registerTicketSignOffCommand } from './commands/ticket-sign-off.command
 export { registerTicketMoveCommand } from './commands/ticket-move.command.js';
 export { registerTicketReadyCommand } from './commands/ticket-ready.command.js';
 export { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
+
+interface CliRuntimeDependencies {
+  readonly stdout: Pick<NodeJS.WriteStream, 'isTTY'>;
+  readonly createContainer: typeof createContainer;
+  readonly buildProgram: () => Command;
+  readonly runInkApp: typeof runInkApp;
+}
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -83,11 +91,48 @@ export function buildProgram(): Command {
   return program;
 }
 
+export function shouldLaunchInkShell(
+  commandArgs: string[],
+  stdout: Pick<NodeJS.WriteStream, 'isTTY'> = process.stdout,
+): boolean {
+  return stdout.isTTY === true && commandArgs.length === 0;
+}
+
+export async function runCli(
+  argv: string[] = process.argv,
+  overrides: Partial<CliRuntimeDependencies> = {},
+): Promise<void> {
+  const runtime: CliRuntimeDependencies = {
+    stdout: process.stdout,
+    createContainer,
+    buildProgram: () => buildProgram(),
+    runInkApp,
+    ...overrides,
+  };
+  const commandArgs = argv.slice(2);
+
+  if (shouldLaunchInkShell(commandArgs, runtime.stdout)) {
+    await runtime.runInkApp({
+      container: runtime.createContainer(),
+      buildProgram: runtime.buildProgram,
+      cwd: process.cwd(),
+    });
+    return;
+  }
+
+  await runtime.buildProgram().parseAsync(argv);
+}
+
 // Only parse when run as CLI entrypoint (not when imported as module)
 const thisFile = fileURLToPath(import.meta.url);
 const isEntrypoint =
   process.argv[1] != null && realpathSync(process.argv[1]) === realpathSync(thisFile);
 
 if (isEntrypoint) {
-  buildProgram().parse();
+  void runCli().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    // eslint-disable-next-line no-console
+    console.error(`Error: ${message}`);
+    process.exitCode = 1;
+  });
 }

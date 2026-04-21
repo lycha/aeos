@@ -45,6 +45,11 @@ Implement the CLI command in `src/cli/commands/dashboard.command.ts` and the use
 - Live auto-refresh / watch mode (v2)
 - Interactive selection / navigation (v2)
 
+**Related design inputs for future interactive work:**
+- `docs/aeos-ticket-run-event-model-proposal.md`
+- `docs/aeos-ticket-run-terminal-layout-spec.md`
+- `docs/aeos-ticket-run-implementation-plan.md`
+
 ## Technical Notes / Hints
 - Use box-drawing Unicode characters for borders (`┌`, `─`, `┬`, `┐`, `│`, `└`, `┘`)
 - `process.stdout.columns` gives the terminal width — use it to set max column width

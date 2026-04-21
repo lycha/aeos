@@ -10,6 +10,7 @@ import type { StateMachineService } from '../../domain/services/state-machine.js
 import type { ColumnSpec } from '../../domain/model/column-spec.js';
 import type { AgentSpec } from '../../domain/model/agent-spec.js';
 import type { AssembledContext } from '../../domain/model/assembled-context.js';
+import type { ExecutorChunkObserver } from '../../domain/model/executor-invocation.js';
 import { type Column, isValidColumn } from '../../domain/model/column.js';
 import { buildContextSection } from './prompt-builder.js';
 
@@ -29,6 +30,7 @@ export class PreflightService {
     columnSpec: ColumnSpec,
     workerAgentSpec: AgentSpec,
     executor: Executor,
+    onChunk?: ExecutorChunkObserver,
   ): Promise<PreflightResult> {
     // 1. Short-circuit if preflight is disabled
     if (!columnSpec.preflight.enabled) {
@@ -48,6 +50,7 @@ export class PreflightService {
       outputPath: tempPath,
       ticketId,
       column,
+      onChunk,
     });
 
     // 5. Check executor result

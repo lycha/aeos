@@ -18,6 +18,7 @@ import type { Ticket } from '../domain/model/ticket.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
+import type { TicketRunEvent } from '../domain/model/ticket-run-event.js';
 
 // --- Mock factories ---
 
@@ -273,7 +274,58 @@ describe('TicketRunUseCase', () => {
       defaultColumnSpec(),
       defaultAgentSpec(),
       executor,
+      expect.any(Function),
     );
+  });
+
+  it('should emit ordered observer events and streamed chunks', async () => {
+    const events: TicketRunEvent[] = [];
+
+    (preflight.run as ReturnType<typeof vi.fn>).mockImplementation(async (...args: unknown[]) => {
+      const onChunk = args[7] as ((stream: 'stdout' | 'stderr', chunk: string) => void) | undefined;
+      onChunk?.('stdout', 'preflight ok\n');
+      return { blocked: false };
+    });
+
+    let invocationCount = 0;
+    (executor.run as ReturnType<typeof vi.fn>).mockImplementation(async (invocation) => {
+      invocationCount += 1;
+      if (invocationCount === 1) {
+        invocation.onChunk?.('stdout', 'worker output\n');
+        return { ok: true, artifactPath: '/tmp/out', content: 'A '.repeat(60) };
+      }
+
+      invocation.onChunk?.('stderr', 'review warning\n');
+      return { ok: true, artifactPath: '/tmp/review', content: 'APPROVED' };
+    });
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, undefined, {
+      onEvent(event) {
+        events.push(event);
+      },
+    });
+
+    expect(result.status).toBe('success');
+    expect(events[0]?.type).toBe('ticket-run.started');
+    expect(events.at(-1)?.type).toBe('ticket-run.completed');
+    expect(events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: events.length }, (_unused, index) => index + 1),
+    );
+    expect(
+      events.some(
+        (event) => event.type === 'executor.stdout.chunk' && event.payload.source === 'preflight',
+      ),
+    ).toBe(true);
+    expect(
+      events.some(
+        (event) => event.type === 'executor.stdout.chunk' && event.payload.source === 'worker',
+      ),
+    ).toBe(true);
+    expect(
+      events.some(
+        (event) => event.type === 'executor.stderr.chunk' && event.payload.source === 'reviewer',
+      ),
+    ).toBe(true);
   });
 
   it('should create executors from worker and reviewer agent specs', async () => {
@@ -324,6 +376,7 @@ describe('TicketRunUseCase', () => {
         column: 'IMPLEMENTATION',
         mode: 'agentic',
         workingDirectory: PROJECT_PATH,
+        onChunk: expect.any(Function),
       }),
     );
     expect(executor.run).toHaveBeenNthCalledWith(
@@ -332,6 +385,7 @@ describe('TicketRunUseCase', () => {
         ticketId: TICKET_ID,
         column: 'IMPLEMENTATION',
         mode: 'artifact',
+        onChunk: expect.any(Function),
       }),
     );
   });
@@ -356,8 +410,34 @@ describe('TicketRunUseCase', () => {
         column: 'PRODUCT_SCOPING',
         mode: 'artifact',
         workingDirectory: undefined,
+        onChunk: expect.any(Function),
       }),
     );
+  });
+
+  it('should interrupt the active executor and return an interrupted failure', async () => {
+    let resolveWorkerRun: ((value: Awaited<ReturnType<Executor['run']>>) => void) | undefined;
+
+    (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+      () =>
+        new Promise((resolve: (value: Awaited<ReturnType<Executor['run']>>) => void) => {
+          resolveWorkerRun = resolve;
+        }),
+    );
+
+    const executePromise = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await useCase.interrupt();
+    expect(executor.interrupt).toHaveBeenCalledOnce();
+
+    resolveWorkerRun?.({ ok: false, reason: 'Execution interrupted by operator' });
+
+    await expect(executePromise).resolves.toEqual({
+      status: 'failed',
+      ticketId: TICKET_ID,
+      error: 'Execution interrupted by operator',
+    });
   });
 
   it('should allow agentic IMPLEMENTATION runs when the resolved executor is auggie-cli', async () => {

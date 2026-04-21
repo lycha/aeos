@@ -1,5 +1,7 @@
 // Driving port — TicketRun use case interface (orchestration: preflight → executor → validate → review → sign-off)
 
+import type { TicketRunObserver } from '../../model/ticket-run-event.js';
+
 export interface ExecutorOverrides {
   executorType?: 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli';
   model?: string;
@@ -16,5 +18,8 @@ export interface TicketRunPort {
     projectPath: string,
     ticketId: string,
     executorOverrides?: ExecutorOverrides,
+    observer?: TicketRunObserver,
   ): Promise<TicketRunResult>;
+
+  interrupt(): Promise<void>;
 }

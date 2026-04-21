@@ -6,6 +6,7 @@ import type {
   ExecutorOverrides,
 } from '../../domain/ports/driving/ticket-run.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { createTicketRunDisplay } from '../ui/ticket-run-display.js';
 
 export function registerTicketRunCommand(
   program: Command,
@@ -53,9 +54,8 @@ export function registerTicketRunCommand(
         }
 
         const project = projectRepo.read(projectPath);
-
-        // eslint-disable-next-line no-console
-        console.log(`Running ticket ${ticketId}…`);
+        const ticketRunUseCase = getTicketRunUseCase();
+        const display = createTicketRunDisplay(process.stdout);
 
         const executorOverrides: ExecutorOverrides | undefined =
           options.executor || options.model
@@ -70,12 +70,32 @@ export function registerTicketRunCommand(
               }
             : undefined;
 
-        const result = await getTicketRunUseCase().execute(
-          project.id,
-          projectPath,
-          ticketId,
-          executorOverrides,
-        );
+        if (!display.live) {
+          // eslint-disable-next-line no-console
+          console.log(`Running ticket ${ticketId}…`);
+        }
+
+        const interruptHandler = () => {
+          display.requestInterrupt();
+          void ticketRunUseCase.interrupt().catch(() => undefined);
+        };
+
+        display.start();
+        process.once('SIGINT', interruptHandler);
+
+        let result;
+        try {
+          result = await ticketRunUseCase.execute(
+            project.id,
+            projectPath,
+            ticketId,
+            executorOverrides,
+            display.observer,
+          );
+        } finally {
+          process.removeListener('SIGINT', interruptHandler);
+          display.stop();
+        }
 
         switch (result.status) {
           case 'success':

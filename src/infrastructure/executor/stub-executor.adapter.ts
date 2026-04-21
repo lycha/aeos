@@ -23,6 +23,8 @@ export class StubExecutor implements Executor {
       '',
     ].join('\n');
 
+    invocation.onChunk?.('stdout', content);
+
     await fs.mkdir(path.dirname(invocation.outputPath), { recursive: true });
     await fs.writeFile(invocation.outputPath, content, 'utf8');
 

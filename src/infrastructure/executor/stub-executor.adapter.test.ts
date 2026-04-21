@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -109,6 +109,14 @@ describe('StubExecutor', () => {
 
     const content = await fs.readFile(deepPath, 'utf8');
     expect(content).toContain('# STUB OUTPUT');
+  });
+
+  it('emits generated content through onChunk when provided', async () => {
+    const onChunk = vi.fn();
+
+    await executor.run(makeInvocation({ onChunk }));
+
+    expect(onChunk).toHaveBeenCalledWith('stdout', expect.stringContaining('# STUB OUTPUT'));
   });
 
   it('interrupt() resolves without error', async () => {

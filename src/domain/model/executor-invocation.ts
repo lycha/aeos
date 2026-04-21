@@ -2,6 +2,9 @@
 
 import type { Column } from './column.js';
 
+export type ExecutorStream = 'stdout' | 'stderr';
+export type ExecutorChunkObserver = (stream: ExecutorStream, chunk: string) => void;
+
 export interface ExecutorInvocation {
   /** Fully assembled prompt string to send to the model */
   readonly prompt: string;
@@ -15,4 +18,6 @@ export interface ExecutorInvocation {
   readonly mode?: 'artifact' | 'agentic';
   /** Working directory for the executor process, used by agentic runs. */
   readonly workingDirectory?: string;
+  /** Optional callback for live stdout/stderr chunks. */
+  readonly onChunk?: ExecutorChunkObserver;
 }

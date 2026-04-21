@@ -210,6 +210,25 @@ describe('ClaudeCodeCliExecutor', () => {
     expect(content).toBe('# Generated Output');
   });
 
+  it('streams stdout and stderr chunks to the invocation observer', async () => {
+    const onChunk = vi.fn();
+
+    setupExecFile((child) => {
+      child.stdout.write('hello ');
+      child.stderr.write('warn');
+      child.stdout.write('world');
+      emitClose(child, 0);
+    });
+
+    await executor.run(makeInvocation({ onChunk }));
+
+    expect(onChunk.mock.calls).toEqual([
+      ['stdout', 'hello '],
+      ['stderr', 'warn'],
+      ['stdout', 'world'],
+    ]);
+  });
+
   it('writes stdout to outputPath on success', async () => {
     setupExecFile((child) => {
       child.stdout.write('# Generated Output');

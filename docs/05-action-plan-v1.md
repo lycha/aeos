@@ -251,6 +251,11 @@ M7   Polish & Distribution            ← pkg binary, install experience
 - [ ] Error messages: every FAILED state has a clear, actionable message
 - [ ] README: install → first ticket → approve → done
 
+**Supporting design references:**
+- `docs/aeos-ticket-run-event-model-proposal.md`
+- `docs/aeos-ticket-run-terminal-layout-spec.md`
+- `docs/aeos-ticket-run-implementation-plan.md`
+
 **Exit criteria:** Install from a GitHub release. Create a project, run a ticket through the full pipeline, reach DONE. No setup beyond `aeos install`.
 
 ---

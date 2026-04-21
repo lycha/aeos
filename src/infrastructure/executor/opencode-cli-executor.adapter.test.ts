@@ -169,6 +169,25 @@ describe('OpenCodeCliExecutor', () => {
     expect(await fs.readFile(invocation.outputPath, 'utf8')).toBe('# OpenCode Summary');
   });
 
+  it('streams stdout and stderr chunks to the invocation observer', async () => {
+    const onChunk = vi.fn();
+
+    setupExecFile((child) => {
+      child.stdout.write('open ');
+      child.stderr.write('warning');
+      child.stdout.write('code');
+      emitClose(child, 0);
+    });
+
+    await executor.run(makeInvocation({ onChunk }));
+
+    expect(onChunk.mock.calls).toEqual([
+      ['stdout', 'open '],
+      ['stderr', 'warning'],
+      ['stdout', 'code'],
+    ]);
+  });
+
   it('returns helpful error when opencode is missing', async () => {
     mockExecFile.mockImplementation(() => {
       const child = createMockChild();
