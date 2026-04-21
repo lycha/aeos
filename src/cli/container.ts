@@ -8,6 +8,7 @@ import type { TicketShowPort } from '../domain/ports/driving/ticket-show.port.js
 import type { TicketAnswerPort } from '../domain/ports/driving/ticket-answer.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
+import type { TicketSignOffPort } from '../domain/ports/driving/ticket-sign-off.port.js';
 import type { TicketMovePort } from '../domain/ports/driving/ticket-move.port.js';
 import type { TicketReadyPort } from '../domain/ports/driving/ticket-ready.port.js';
 import type { TicketDodApprovePort } from '../domain/ports/driving/ticket-dod-approve.port.js';
@@ -28,6 +29,7 @@ import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
 import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
 import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
+import { TicketSignOffUseCase } from '../application/ticket-sign-off.use-case.js';
 import { TicketMoveUseCase } from '../application/ticket-move.use-case.js';
 import { TicketReadyUseCase } from '../application/ticket-ready.use-case.js';
 import { TicketDodApproveUseCase } from '../application/ticket-dod-approve.use-case.js';
@@ -58,6 +60,7 @@ export interface Container {
   ticketAnswer: TicketAnswerPort;
   ticketRun: TicketRunPort;
   ticketApprove: TicketApprovePort;
+  ticketSignOff: TicketSignOffPort;
   ticketMove: TicketMovePort;
   ticketReady: TicketReadyPort;
   ticketDodApprove: TicketDodApprovePort;
@@ -167,6 +170,14 @@ export function createContainer(): Container {
     },
     get ticketApprove() {
       return new TicketApproveUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getStateMachine(),
+        gitGateway,
+      );
+    },
+    get ticketSignOff() {
+      return new TicketSignOffUseCase(
         getTicketRepo(),
         artifactStore,
         getStateMachine(),

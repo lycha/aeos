@@ -143,7 +143,7 @@ describe('TicketApproveUseCase', () => {
     expect(result).toEqual({
       status: 'error',
       ticketId: TICKET_ID,
-      error: `Ticket ${TICKET_ID} is not signed off (current state: WORKING). Run 'aeos ticket run ${TICKET_ID}' first.`,
+      error: `Ticket ${TICKET_ID} is not signed off (current state: WORKING). Run 'aeos ticket run ${TICKET_ID}' or 'aeos ticket sign-off ${TICKET_ID}' first.`,
     });
   });
 

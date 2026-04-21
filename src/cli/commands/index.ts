@@ -6,6 +6,7 @@ export * from './ticket-list.command.js';
 export * from './ticket-show.command.js';
 export * from './ticket-run.command.js';
 export * from './ticket-approve.command.js';
+export * from './ticket-sign-off.command.js';
 export * from './ticket-move.command.js';
 export * from './ticket-ready.command.js';
 export * from './ticket-answer.command.js';

@@ -13,6 +13,7 @@ import { registerTicketShowCommand } from './commands/ticket-show.command.js';
 import { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
 import { registerTicketRunCommand } from './commands/ticket-run.command.js';
 import { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
+import { registerTicketSignOffCommand } from './commands/ticket-sign-off.command.js';
 import { registerTicketMoveCommand } from './commands/ticket-move.command.js';
 import { registerTicketReadyCommand } from './commands/ticket-ready.command.js';
 import { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
@@ -27,6 +28,7 @@ export { registerTicketShowCommand } from './commands/ticket-show.command.js';
 export { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
 export { registerTicketRunCommand } from './commands/ticket-run.command.js';
 export { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
+export { registerTicketSignOffCommand } from './commands/ticket-sign-off.command.js';
 export { registerTicketMoveCommand } from './commands/ticket-move.command.js';
 export { registerTicketReadyCommand } from './commands/ticket-ready.command.js';
 export { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
@@ -47,6 +49,7 @@ export function buildProgram(): Command {
         '  aeos ticket create "Title"                Create a ticket\n' +
         '  aeos ticket run <id>                      Run the pipeline column\n' +
         '  aeos ticket approve <id>                  Advance to next column\n' +
+        '  aeos ticket sign-off <id>                 Manually mark as SIGNED_OFF\n' +
         '  aeos ticket move <id> <status>            Move ticket to any status\n' +
         '  aeos ticket ready <id>                    Reset ticket sub-state to READY\n\n' +
         'Environment variables:\n' +
@@ -66,6 +69,7 @@ export function buildProgram(): Command {
   registerTicketAnswerCommand(program, () => container.ticketAnswer, container.projectRepo);
   registerTicketRunCommand(program, () => container.ticketRun, container.projectRepo);
   registerTicketApproveCommand(program, () => container.ticketApprove, container.projectRepo);
+  registerTicketSignOffCommand(program, () => container.ticketSignOff, container.projectRepo);
   registerTicketMoveCommand(program, () => container.ticketMove, container.projectRepo);
   registerTicketReadyCommand(program, () => container.ticketReady, container.projectRepo);
   registerTicketDodApproveCommand(

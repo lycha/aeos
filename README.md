@@ -73,6 +73,79 @@ Each column follows the same cycle:
 5. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
 6. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
 
+## Ticket State Machine
+
+Each ticket stores exactly two workflow fields:
+
+- **Column** — where the ticket is in the pipeline
+- **Sub-state** — what is happening inside that column right now
+
+Think of the state machine as `column + sub-state`.
+
+### Columns
+
+The forward pipeline order is:
+
+`BACKLOG → PRODUCT_SCOPING → ARCH_SPIKE → TECH_SPEC → IMPLEMENTATION → CODE_REVIEW → QA → DOD_GATE → DONE`
+
+### Sub-states
+
+AEOS currently supports these sub-states:
+
+- `READY` — queued in the current column and ready to run
+- `BLOCKED` — pre-flight found open questions; answer them with `aeos ticket answer`
+- `WORKING` — the worker is actively executing the column
+- `INTERRUPTED` — work was deliberately stopped before completion
+- `FAILED` — execution, validation, or review failed
+- `IN_REVIEW` — output exists and is being reviewed
+- `SIGNED_OFF` — the column passed review and is waiting for a human gate
+
+### Normal lifecycle inside an active column
+
+For any non-terminal working column, the typical path is:
+
+`READY → BLOCKED/WORKING → IN_REVIEW → SIGNED_OFF`
+
+With possible detours to:
+
+- `BLOCKED` when pre-flight needs human answers
+- `FAILED` when execution, validation, or review fails
+- `INTERRUPTED` when work is stopped intentionally
+
+After a human approves the ticket with `aeos ticket approve <id>`, it moves to the next column and is reset to `READY`.
+
+### Valid stored combinations
+
+The normal persisted combinations are:
+
+| Column | Allowed sub-state values |
+|--------|--------------------------|
+| `BACKLOG` | `null` only |
+| `PRODUCT_SCOPING` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
+| `ARCH_SPIKE` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
+| `TECH_SPEC` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
+| `IMPLEMENTATION` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
+| `CODE_REVIEW` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
+| `QA` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
+| `DOD_GATE` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
+| `DONE` | `null` only |
+
+In other words:
+
+- `BACKLOG` tickets have no sub-state yet
+- in-flight columns always have a non-null sub-state
+- `DONE` is terminal and normally has no active sub-state
+
+### Human/manual controls
+
+Operators can deliberately override the normal path:
+
+- `aeos ticket ready <id>` sets any non-`BACKLOG`, non-`DONE` ticket to `READY`
+- `aeos ticket sign-off <id>` manually marks any non-`BACKLOG`, non-`DONE` ticket as `SIGNED_OFF`
+- `aeos ticket move <id> <status>` moves a ticket to any column; non-terminal targets are reset to `READY`, while `BACKLOG` and `DONE` use `null`
+
+So the domain state machine is intentionally permissive for operator control, while the normal workflow policy is enforced by the higher-level ticket commands.
+
 ## Executors
 
 AEOS supports multiple executor backends. The effective executor for a run is resolved in this order:
@@ -135,6 +208,7 @@ Notes:
 | `aeos ticket show <id>` | Show ticket details, column, sub-state, artifacts, and recorded executions |
 | `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review |
 | `aeos ticket approve <id>` | Advance a SIGNED_OFF ticket to the next column |
+| `aeos ticket sign-off <id>` | Manual override — set a ticket sub-state to SIGNED_OFF |
 | `aeos ticket move <id> <status>` | Human override — move a ticket directly to any workflow status |
 | `aeos ticket answer <id>` | Unblock a ticket after answering pre-flight questions |
 | `aeos ticket dod-approve <id>` | Final human gate — mark ticket as DONE *(not yet implemented)* |

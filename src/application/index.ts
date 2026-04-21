@@ -6,6 +6,7 @@ export * from './ticket-list.use-case.js';
 export * from './ticket-show.use-case.js';
 export * from './ticket-run.use-case.js';
 export * from './ticket-approve.use-case.js';
+export * from './ticket-sign-off.use-case.js';
 export * from './ticket-answer.use-case.js';
 export * from './ticket-dod-approve.use-case.js';
 export * from './dashboard.use-case.js';

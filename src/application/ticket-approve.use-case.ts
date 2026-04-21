@@ -38,7 +38,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
       return {
         status: 'error',
         ticketId,
-        error: `Ticket ${ticketId} is not signed off (current state: ${stateDescription}). Run 'aeos ticket run ${ticketId}' first.`,
+        error: `Ticket ${ticketId} is not signed off (current state: ${stateDescription}). Run 'aeos ticket run ${ticketId}' or 'aeos ticket sign-off ${ticketId}' first.`,
       };
     }
 
