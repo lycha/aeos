@@ -65,6 +65,7 @@ describe('OrchestratorUseCase', () => {
       find: vi.fn().mockReturnValue(null),
       upsert: vi.fn(),
       findByProject: vi.fn().mockReturnValue([]),
+      touch: vi.fn(),
     };
     columnSpecLoader = {
       load: vi.fn().mockReturnValue({ advanceMode: 'auto' }),
@@ -249,6 +250,109 @@ describe('OrchestratorUseCase', () => {
     );
 
     expect(seen).toEqual([`run:${EPIC_ID}`, `run:${EPIC_ID}`]);
+  });
+
+  describe('concurrency guard', () => {
+    function runningSince(updatedAt: string) {
+      return {
+        projectId: PROJECT_ID,
+        epicId: EPIC_ID,
+        status: OrchestratorStatus.RUNNING,
+        haltReason: null,
+        message: null,
+        budgetUsd: null,
+        updatedAt,
+      };
+    }
+
+    it('refuses to start when another run is live', async () => {
+      (stateRepo.find as ReturnType<typeof vi.fn>).mockReturnValue(
+        runningSince(new Date().toISOString()),
+      );
+
+      const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+      expect(result.message).toContain('already being driven');
+      expect(ticketRun.execute).not.toHaveBeenCalled();
+      // Critically, it must not stomp the live run's row.
+      expect(stateRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('takes over a RUNNING row that stopped heartbeating', async () => {
+      // A crashed run leaves RUNNING behind; without a staleness window the
+      // epic would be locked out permanently.
+      (stateRepo.find as ReturnType<typeof vi.fn>).mockReturnValue(
+        runningSince(new Date(Date.now() - 60 * 60 * 1000).toISOString()),
+      );
+
+      const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { maxSteps: 1 });
+
+      expect(result.steps.length).toBeGreaterThan(0);
+      expect(ticketRun.execute).toHaveBeenCalled();
+    });
+
+    it('treats an unparseable heartbeat as stale rather than locking forever', async () => {
+      (stateRepo.find as ReturnType<typeof vi.fn>).mockReturnValue(runningSince('not-a-date'));
+
+      const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { maxSteps: 1 });
+
+      expect(result.steps.length).toBeGreaterThan(0);
+    });
+
+    it('leaves a paused epic paused rather than rewriting its state', async () => {
+      (stateRepo.find as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...runningSince(new Date().toISOString()),
+        status: OrchestratorStatus.PAUSED,
+      });
+
+      await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+      expect(stateRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('heartbeats off the ticket run event stream', async () => {
+      let emit: ((event: unknown) => void) | undefined;
+      (ticketRun.execute as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_p, _pp, _t, _o, observer) => {
+          emit = observer?.onEvent;
+          // A long agentic run emits continuously; one event is enough to prove
+          // the observer is wired through.
+          emit?.({ type: 'executor.stdout.chunk' });
+          return {
+            status: 'escalated',
+            ticketId: EPIC_ID,
+            reason: 'ITERATIONS_EXHAUSTED',
+            message: 'x',
+            attempts: 1,
+          };
+        },
+      );
+
+      await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { maxSteps: 1 });
+
+      expect(emit).toBeDefined();
+      expect(stateRepo.touch).toHaveBeenCalled();
+    });
+  });
+
+  describe('unexpected failure', () => {
+    it('clears RUNNING so the epic is not locked out, and rethrows', async () => {
+      (ticketRun.execute as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('column spec missing'),
+      );
+
+      await expect(useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID)).rejects.toThrow(
+        'column spec missing',
+      );
+
+      const written = (stateRepo.upsert as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0],
+      );
+      expect(written[written.length - 1]).toMatchObject({
+        status: OrchestratorStatus.IDLE,
+      });
+      expect(written[written.length - 1].message).toContain('ended unexpectedly');
+    });
   });
 
   describe('pause and resume', () => {

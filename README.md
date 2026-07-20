@@ -355,6 +355,20 @@ Every exit is a named halt reason, including the successful ones.
 | `aeos orchestrator resume <epicId>`                                 | Allow scheduling again                             |
 | `aeos orchestrator status [epicId]`                                 | Show status, last halt reason, and budget          |
 
+### One driver per epic
+
+An epic is driven by one run at a time. A second `orchestrator run` against the
+same epic refuses rather than double-scheduling its tasks.
+
+The lock is a heartbeat, not a flag: a live run touches the epic's row
+continuously — riding the ticket run's own event stream, so even a 30-minute
+agentic build keeps it fresh. A row that goes quiet for five minutes is treated
+as abandoned and the next run takes over, so a crashed process cannot lock an
+epic out permanently. An unexpected error clears the lock on the way out.
+
+If you are certain a run is gone and do not want to wait, `aeos orchestrator
+resume <epicId>` clears the lock.
+
 **Turning it off is always safe.** All state lives in SQLite and git-committed
 markdown, so a paused or halted epic is just a set of tickets in ordinary
 sub-states that you can drive by hand with `aeos ticket run` / `approve`. The

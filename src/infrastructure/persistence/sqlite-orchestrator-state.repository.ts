@@ -68,6 +68,15 @@ export class SqliteOrchestratorStateRepository implements OrchestratorStateRepos
       );
   }
 
+  touch(projectId: string, epicId: string, at: string): void {
+    this.db
+      .prepare(
+        `UPDATE orchestrator_state SET updated_at = ?
+         WHERE project_id = ? AND UPPER(epic_id) = UPPER(?)`,
+      )
+      .run(at, projectId, epicId);
+  }
+
   findByProject(projectId: string): OrchestratorState[] {
     const rows = this.db
       .prepare(
