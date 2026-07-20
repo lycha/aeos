@@ -4,12 +4,17 @@ import type BetterSqlite3 from 'better-sqlite3';
 import type { Column } from '../../domain/model/column.js';
 import type { Ticket } from '../../domain/model/ticket.js';
 import type { SubStateOrNull } from '../../domain/model/sub-state.js';
+import type { TicketKind } from '../../domain/model/ticket-kind.js';
 import type { TicketRepository } from '../../domain/ports/driven/ticket-repository.port.js';
+
+const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, "column", sub_state, created_at, updated_at`;
 
 interface TicketRow {
   id: string;
   project_id: string;
   title: string;
+  kind: TicketKind;
+  parent_id: string | null;
   column: Column;
   sub_state: string | null;
   created_at: string;
@@ -24,6 +29,9 @@ export class SqliteTicketRepository implements TicketRepository {
       id: row.id,
       projectId: row.project_id,
       title: row.title,
+      // Rows written before the hierarchy migration are epics by definition.
+      kind: row.kind ?? 'EPIC',
+      parentId: row.parent_id ?? null,
       column: row.column,
       subState: (row.sub_state as SubStateOrNull) ?? null,
       createdAt: row.created_at,
@@ -44,13 +52,15 @@ export class SqliteTicketRepository implements TicketRepository {
   save(ticket: Ticket): void {
     this.db
       .prepare(
-        `INSERT INTO tickets (id, project_id, title, "column", sub_state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, project_id, title, kind, parent_id, "column", sub_state, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         ticket.id,
         ticket.projectId,
         ticket.title,
+        ticket.kind,
+        ticket.parentId,
         ticket.column,
         ticket.subState,
         ticket.createdAt,
@@ -76,7 +86,7 @@ export class SqliteTicketRepository implements TicketRepository {
   findById(projectId: string, ticketId: string): Ticket | null {
     const row = this.db
       .prepare(
-        `SELECT id, project_id, title, "column", sub_state, created_at, updated_at
+        `SELECT ${TICKET_COLUMNS}
          FROM tickets WHERE project_id = ? AND UPPER(id) = UPPER(?)`,
       )
       .get(projectId, ticketId) as TicketRow | undefined;
@@ -87,8 +97,7 @@ export class SqliteTicketRepository implements TicketRepository {
   }
 
   findByProject(projectId: string, columnFilter?: Column): Ticket[] {
-    let sql =
-      'SELECT id, project_id, title, "column", sub_state, created_at, updated_at FROM tickets WHERE project_id = ?';
+    let sql = `SELECT ${TICKET_COLUMNS} FROM tickets WHERE project_id = ?`;
     const params: string[] = [projectId];
 
     if (columnFilter) {
@@ -99,6 +108,19 @@ export class SqliteTicketRepository implements TicketRepository {
     sql += " ORDER BY CAST(SUBSTR(id, INSTR(id, '-') + 1) AS INTEGER)";
 
     const rows = this.db.prepare(sql).all(...params) as TicketRow[];
+
+    return rows.map((row) => this.mapRowToTicket(row));
+  }
+
+  findChildren(projectId: string, parentTicketId: string): Ticket[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ${TICKET_COLUMNS}
+         FROM tickets
+         WHERE project_id = ? AND UPPER(parent_id) = UPPER(?)
+         ORDER BY CAST(SUBSTR(id, INSTR(id, '-') + 1) AS INTEGER)`,
+      )
+      .all(projectId, parentTicketId) as TicketRow[];
 
     return rows.map((row) => this.mapRowToTicket(row));
   }

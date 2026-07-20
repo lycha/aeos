@@ -7,10 +7,17 @@ describe('SubState', () => {
     expect(SubState.WORKING).toBe('WORKING');
   });
 
-  it('all 7 sub-state values are distinct strings', () => {
+  it('all 8 sub-state values are distinct strings', () => {
     const values = Object.values(SubState);
-    expect(values).toHaveLength(7);
-    expect(new Set(values).size).toBe(7);
+    expect(values).toHaveLength(8);
+    expect(new Set(values).size).toBe(8);
+  });
+
+  it('ESCALATED is distinct from FAILED', () => {
+    // An escalation means the pipeline worked and needs a human decision;
+    // a failure means something broke. Conflating them makes "why did this
+    // stall?" unanswerable from the transition log.
+    expect(SubState.ESCALATED).not.toBe(SubState.FAILED);
   });
 });
 

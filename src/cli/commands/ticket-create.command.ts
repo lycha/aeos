@@ -15,9 +15,13 @@ export function registerTicketCreateCommand(
 
   ticketCmd
     .command('create')
-    .description('Create a new ticket')
+    .description('Create a new ticket (an epic by default, or a task with --parent)')
     .argument('<title>', 'Ticket title')
-    .action((title: string) => {
+    .option(
+      '--parent <epicId>',
+      'Create this ticket as a task under the given epic, skipping scoping and spec',
+    )
+    .action((title: string, options: { parent?: string }) => {
       try {
         const cwd = process.cwd();
         const projectPath = projectRepo.findRoot(cwd);
@@ -36,10 +40,12 @@ export function registerTicketCreateCommand(
           projectId: project.id,
           projectKey: project.key,
           projectPath,
+          parentId: options.parent,
         });
 
+        const lineage = result.parentId ? ` (task of ${result.parentId})` : '';
         // eslint-disable-next-line no-console
-        console.log(`✓ Created ticket ${result.ticketId}: "${result.title}"`);
+        console.log(`✓ Created ${result.kind} ${result.ticketId}: "${result.title}"${lineage}`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         // eslint-disable-next-line no-console

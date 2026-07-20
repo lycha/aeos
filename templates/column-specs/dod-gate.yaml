@@ -1,0 +1,17 @@
+# TODO: DOD_GATE uses human-approval flow (AEOS-20), not agent execution.
+# workerAgentFile and reviewerAgentFile are placeholders required by ColumnSpecSchema.
+column: DOD_GATE
+phase: DEPLOY
+workerAgentFile: agents/qa-agent.yaml
+reviewerAgentFile: agents/reviewer-agent.yaml
+outputArtifact: dod-verification.md
+minWordCount: 50
+requiredSections: []
+reviewerRubrics:
+  - rubrics/dod/dod-evaluation.md
+maxIterations: 3
+escalation: escalate_to_human
+advanceMode: manual
+preflight:
+  enabled: true
+  questionsArtifact: questions.md

@@ -1,11 +1,9 @@
 // Use case — TicketSignOff (human manual sign-off)
 
-import * as path from 'node:path';
 import { Column } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
-import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type {
   TicketSignOffInput,
@@ -19,7 +17,6 @@ export class TicketSignOffUseCase implements TicketSignOffPort {
     private readonly ticketRepo: TicketRepository,
     private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
-    private readonly gitGateway: GitGateway,
   ) {}
 
   execute(input: TicketSignOffInput): TicketSignOffResult {
@@ -53,25 +50,13 @@ export class TicketSignOffUseCase implements TicketSignOffPort {
       };
     }
 
-    const aeosDir = path.join(projectPath, '.aeos');
-    const ticketFilePath = syncTicketDocument(this.artifactStore, projectPath, {
+    // Mirrored to disk for readability; SQLite is authoritative for sub-state.
+    // No git commit — state churn buried the artifact history a human reads,
+    // and with nothing to fail there is no longer a rollback to compensate.
+    syncTicketDocument(this.artifactStore, projectPath, {
       ...ticket,
       subState: SubState.SIGNED_OFF,
     });
-
-    try {
-      this.gitGateway.commitFiles(
-        aeosDir,
-        [ticketFilePath],
-        `[${ticketId}][HUMAN][v1][sign-off: ${ticket.subState ?? 'NONE'} → SIGNED_OFF]`,
-      );
-    } catch (err) {
-      if (ticket.subState !== null) {
-        this.stateMachine.setSubState(projectId, ticketId, ticket.subState);
-      }
-      syncTicketDocument(this.artifactStore, projectPath, ticket);
-      throw err;
-    }
 
     return { status: 'signed_off', ticketId, previousSubState: ticket.subState };
   }

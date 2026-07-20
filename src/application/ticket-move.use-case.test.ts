@@ -16,6 +16,7 @@ function createMockTicketRepo(): TicketRepository {
     deleteById: vi.fn(),
     findById: vi.fn().mockReturnValue(null),
     findByProject: vi.fn().mockReturnValue([]),
+    findChildren: vi.fn().mockReturnValue([]),
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
   };
@@ -58,6 +59,8 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     id: TICKET_ID,
     projectId: PROJECT_ID,
     title: 'Test ticket',
+    kind: 'EPIC',
+    parentId: null,
     column: 'PRODUCT_SCOPING',
     subState: 'WORKING',
     createdAt: '2025-01-01T09:00:00Z',
@@ -136,11 +139,11 @@ describe('TicketMoveUseCase', () => {
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
-      targetColumn: 'ARCH_SPIKE',
+      targetColumn: 'TECH_SPEC',
     });
     expect(gitGateway.commit).toHaveBeenCalledWith(
       path.join(PROJECT_PATH, '.aeos'),
-      `[${TICKET_ID}][HUMAN][v1][move: PRODUCT_SCOPING → ARCH_SPIKE]`,
+      `[${TICKET_ID}][HUMAN][v1][move: PRODUCT_SCOPING → TECH_SPEC]`,
     );
   });
 

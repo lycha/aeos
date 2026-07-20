@@ -9,6 +9,11 @@ export interface ProjectInitInput {
 export interface ProjectInitResult {
   name: string;
   key: string;
+  /**
+   * Template files written into .aeos/, relative to it. Empty on a re-run
+   * where everything was already present.
+   */
+  scaffolded: string[];
 }
 
 export interface ProjectInitPort {

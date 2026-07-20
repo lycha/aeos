@@ -1,0 +1,16 @@
+column: QA
+phase: DEPLOY
+workerAgentFile: agents/qa-agent.yaml
+reviewerAgentFile: agents/reviewer-agent.yaml
+outputArtifact: qa-report.md
+minWordCount: 50
+requiredSections: []
+reviewerRubrics:
+  - rubrics/structure/qa-report-structure.md
+  - rubrics/drift/intent-drift.md
+maxIterations: 3
+escalation: escalate_to_human
+advanceMode: manual
+preflight:
+  enabled: true
+  questionsArtifact: questions.md

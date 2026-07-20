@@ -8,10 +8,14 @@ function createMockTicketShowUseCase(): TicketShowPort {
   return {
     execute: vi.fn().mockReturnValue({
       ok: true,
+      children: [],
+      parent: null,
       ticket: {
         id: 'AEOS-1',
         projectId: 'proj-1',
         title: 'Add rate limiting',
+        kind: 'EPIC',
+        parentId: null,
         column: 'PRODUCT_SCOPING',
         subState: 'WORKING',
         createdAt: '2026-01-01T00:00:00.000Z',
@@ -43,7 +47,7 @@ function createMockProjectRepo(): ProjectRepository {
       created_at: '2026-01-01',
     }),
     writeProject: vi.fn(),
-    ensureColumnSpecsDir: vi.fn(),
+    scaffoldDefaults: vi.fn().mockReturnValue([]),
     findRoot: vi.fn().mockReturnValue('/test'),
     readExecutorConfig: vi.fn().mockReturnValue(null),
     readConstraints: vi.fn().mockReturnValue(null),
@@ -93,10 +97,14 @@ describe('registerTicketShowCommand', () => {
   it('should display em-dash for null sub_state', () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: true,
+      children: [],
+      parent: null,
       ticket: {
         id: 'AEOS-1',
         projectId: 'proj-1',
         title: 'Add rate limiting',
+        kind: 'EPIC',
+        parentId: null,
         column: 'BACKLOG',
         subState: null,
         createdAt: '2026-01-01T00:00:00.000Z',
@@ -155,10 +163,14 @@ describe('registerTicketShowCommand', () => {
   it('should not display artifacts section when no artifacts exist', () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: true,
+      children: [],
+      parent: null,
       ticket: {
         id: 'AEOS-1',
         projectId: 'proj-1',
         title: 'Add rate limiting',
+        kind: 'EPIC',
+        parentId: null,
         column: 'BACKLOG',
         subState: null,
         createdAt: '2026-01-01T00:00:00.000Z',

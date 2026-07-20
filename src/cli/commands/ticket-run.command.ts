@@ -119,6 +119,24 @@ export function registerTicketRunCommand(
             console.error(`✗ Ticket ${result.ticketId} failed: ${result.error}`);
             process.exitCode = 1;
             break;
+          case 'escalated':
+            // eslint-disable-next-line no-console
+            console.error(
+              [
+                `⏸ Ticket ${result.ticketId} escalated after ${result.attempts} attempt(s)`,
+                `  Reason: ${result.reason}`,
+                `  ${result.message}`,
+                ...(result.artifactPath ? [`  See: ${result.artifactPath}`] : []),
+              ].join('\n'),
+            );
+            process.exitCode = 1;
+            break;
+          default: {
+            // Exhaustiveness guard: adding a TicketRunResult status without
+            // handling it here previously produced a silent no-output exit 0.
+            const unreachable: never = result;
+            throw new Error(`Unhandled ticket run status: ${JSON.stringify(unreachable)}`);
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

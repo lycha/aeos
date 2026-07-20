@@ -21,6 +21,7 @@ function createMockTicketRepo(): TicketRepository {
     deleteById: vi.fn(),
     findById: vi.fn().mockReturnValue(null),
     findByProject: vi.fn().mockReturnValue([]),
+    findChildren: vi.fn().mockReturnValue([]),
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
   };
@@ -69,7 +70,13 @@ describe('TicketCreateUseCase', () => {
   it('should return the generated ticket ID and title', () => {
     const result = useCase.execute(defaultInput);
 
-    expect(result).toEqual({ ticketId: 'AEOS-1', title: 'Add rate limiting' });
+    expect(result).toEqual({
+      ticketId: 'AEOS-1',
+      title: 'Add rate limiting',
+      // No parent supplied, so this is a top-level epic.
+      kind: 'EPIC',
+      parentId: null,
+    });
   });
 
   it('should call createAtomic with the project ID', () => {

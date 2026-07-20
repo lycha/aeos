@@ -405,6 +405,14 @@ function summarizeTicketRunResult(result: TicketRunResult): string[] {
       ];
     case 'failed':
       return [`✗ Ticket ${result.ticketId} failed: ${result.error}`];
+    // Presented as a pause, not an error — the run worked and wants a human.
+    case 'escalated':
+      return [
+        `⏸ Ticket ${result.ticketId} escalated after ${result.attempts} attempt(s)`,
+        `  Reason: ${result.reason}`,
+        `  ${result.message}`,
+        ...(result.artifactPath ? [`  See: ${result.artifactPath}`] : []),
+      ];
   }
 }
 
@@ -416,6 +424,8 @@ function getTicketRunStatusLine(result: TicketRunResult): string {
       return `Ticket ${result.ticketId} is blocked.`;
     case 'failed':
       return `Ticket ${result.ticketId} failed.`;
+    case 'escalated':
+      return `Ticket ${result.ticketId} needs a human decision.`;
   }
 }
 

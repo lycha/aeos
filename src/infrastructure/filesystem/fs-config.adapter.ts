@@ -10,7 +10,12 @@ import type {
   GlobalConfig,
   ProjectRegistryEntry,
 } from '../../domain/ports/driven/config-store.port.js';
-import { aeosHome, aeosConfigPath, aeosRegistryPath } from '../../shared/config.js';
+import {
+  aeosHome,
+  aeosConfigPath,
+  aeosRegistryPath,
+  withConfigDefaults,
+} from '../../shared/config.js';
 
 export class FsConfigStore implements ConfigStore {
   private get configPath(): string {
@@ -28,7 +33,7 @@ export class FsConfigStore implements ConfigStore {
   readConfig(): GlobalConfig | null {
     if (!fs.existsSync(this.configPath)) return null;
     const raw = fs.readFileSync(this.configPath, 'utf-8');
-    return JSON.parse(raw) as GlobalConfig;
+    return withConfigDefaults(JSON.parse(raw) as Partial<GlobalConfig>);
   }
 
   writeConfigIfNotExists(config: GlobalConfig): void {

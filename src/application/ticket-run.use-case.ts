@@ -1,4 +1,26 @@
-// Use case — TicketRun (orchestration: preflight → executor → validate → review → sign-off)
+// Use case — TicketRun
+//
+// Orchestration for one column:
+//
+//   eligibility → context → preflight → [WORKING]
+//     ↓
+//   ┌─ attempt: worker → validate → commit → reviewer → verdict ─┐
+//   │    verdict APPROVED*        → advance                       │
+//   │    verdict REJECTED, room   → retry with review feedback ───┘
+//   │    verdict REJECTED, no room→ escalate
+//     ↓
+//   [IN_REVIEW] → [SIGNED_OFF]
+//
+// Two invariants worth stating because they were both violated before:
+//
+//   1. The reviewer verdict is read from a parsed trailer, never from the
+//      review prose. See `parseVerdict`.
+//   2. Escalation is not failure. A run that exhausts its revision budget
+//      ends ESCALATED so an operator (or the orchestrator) can tell "needs a
+//      human" apart from "something broke".
+//
+// Git carries artifacts only. Sub-state lives in SQLite; mirroring every
+// transition into git buried the artifact commits under state churn.
 
 import * as path from 'node:path';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
@@ -9,6 +31,7 @@ import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader
 import type { AgentSpecLoader } from '../domain/ports/driven/agent-spec-loader.port.js';
 import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
+import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
 import type { ExecutorResult } from '../domain/model/executor-result.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { ContextAssembler } from './services/context-assembler.js';
@@ -25,12 +48,49 @@ import type {
 import type { TicketRunObserver, TicketRunPhase } from '../domain/model/ticket-run-event.js';
 import type { ExecutorConfigResolver } from './services/executor-config-resolver.js';
 import type { ExecutorChunkObserver } from '../domain/model/executor-invocation.js';
+import type { ReviewVerdict } from '../domain/model/review-verdict.js';
+import type { Escalation } from '../domain/model/escalation.js';
+import { EscalationReason } from '../domain/model/escalation.js';
 import { Column } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { validateOutput } from '../domain/services/output-validation.js';
 import { isValidColumn } from '../domain/model/column.js';
+import { parseVerdict } from '../domain/services/verdict-parser.js';
+import { decideNextAttempt, type LoopConfig } from '../domain/services/review-loop-policy.js';
+import { DEFAULT_GLOBAL_CONFIG } from '../shared/config.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import { TicketRunEventEmitter } from './services/ticket-run-event-emitter.js';
+
+/** Everything one attempt needs, resolved once before the loop starts. */
+interface RunContext {
+  readonly projectId: string;
+  readonly projectPath: string;
+  readonly ticketId: string;
+  readonly aeosDir: string;
+  readonly column: Column;
+  readonly columnSpec: ColumnSpec;
+  readonly workerAgentSpec: AgentSpec;
+  readonly reviewerAgentSpec: AgentSpec;
+  readonly workerExecutor: Executor;
+  readonly workerMode: 'artifact' | 'agentic';
+  readonly workerExecutorType: string;
+  readonly workerModel: string | undefined;
+  readonly reviewerExecutorType: string;
+  readonly reviewerModel: string | undefined;
+  readonly reviewerAgentSpecResolved: AgentSpec;
+  readonly baseContext: AssembledContext;
+  readonly emitter: TicketRunEventEmitter;
+  readonly artifactFilename: string;
+  readonly artifactAbsPath: string;
+  readonly reviewFilename: string;
+  readonly reviewAbsPath: string;
+}
+
+type AttemptOutcome =
+  | { kind: 'reviewed'; verdict: ReviewVerdict; reviewContent: string }
+  | { kind: 'failed'; error: string }
+  | { kind: 'interrupted'; stage: TicketRunPhase; message: string }
+  | { kind: 'escalated'; escalation: Escalation };
 
 export class TicketRunUseCase implements TicketRunPort {
   private currentExecutor: Executor | null = null;
@@ -51,6 +111,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly preflight: PreflightService,
     private readonly costRepo: CostRepository,
     private readonly executorConfigResolver: ExecutorConfigResolver,
+    private readonly configStore: ConfigStore,
   ) {}
 
   async execute(
@@ -65,40 +126,11 @@ export class TicketRunUseCase implements TicketRunPort {
     this.interruptStage = undefined;
 
     try {
-      const ticket = this.ticketRepo.findById(projectId, ticketId);
-      if (!ticket) {
-        return { status: 'failed', ticketId, error: `Ticket ${ticketId} not found` };
-      }
+      const eligibility = this.checkEligibility(projectId, ticketId);
+      if (!eligibility.ok) return eligibility.result;
+      let mirroredTicket = eligibility.ticket;
 
-      if (ticket.column === Column.BACKLOG) {
-        return {
-          status: 'failed',
-          ticketId,
-          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to PRODUCT_SCOPING first.`,
-        };
-      }
-      if (ticket.column === Column.DONE) {
-        return {
-          status: 'failed',
-          ticketId,
-          error: `Ticket ${ticketId} is already DONE.`,
-        };
-      }
-      if (ticket.column === Column.DOD_GATE) {
-        return { status: 'failed', ticketId, error: 'DoD gate is human-only' };
-      }
-      if (ticket.subState === SubState.WORKING) {
-        return { status: 'failed', ticketId, error: 'Ticket is already running' };
-      }
-      if (ticket.subState === SubState.BLOCKED) {
-        return {
-          status: 'blocked',
-          ticketId,
-          blockers: ['Ticket is blocked — run `aeos ticket answer` first'],
-        };
-      }
-
-      const columnSpec = this.columnSpecLoader.load(ticket.column, projectPath);
+      const columnSpec = this.columnSpecLoader.load(mirroredTicket.column, projectPath);
       const workerAgentSpec = this.agentSpecLoader.load(columnSpec.workerAgentFile, projectPath);
       const reviewerAgentSpec = this.agentSpecLoader.load(
         columnSpec.reviewerAgentFile,
@@ -112,11 +144,7 @@ export class TicketRunUseCase implements TicketRunPort {
 
       const column = this.resolveColumn(columnSpec.column);
       if (!column) {
-        return {
-          status: 'failed',
-          ticketId,
-          error: `Invalid column value: ${columnSpec.column}`,
-        };
+        return { status: 'failed', ticketId, error: `Invalid column value: ${columnSpec.column}` };
       }
 
       const workerMode = this.resolveWorkerExecutorMode(columnSpec, column);
@@ -150,121 +178,94 @@ export class TicketRunUseCase implements TicketRunPort {
           timeoutSeconds: resolvedWorkerConfig.timeoutMs / 1000,
         },
       };
+      const resolvedReviewerConfig = this.executorConfigResolver.resolveExecutorConfig(
+        projectPath,
+        reviewerAgentSpec,
+        executorOverrides,
+      );
+      const resolvedReviewerAgentSpec: AgentSpec = {
+        ...reviewerAgentSpec,
+        executor: {
+          ...reviewerAgentSpec.executor,
+          type: resolvedReviewerConfig.executorType,
+          model: resolvedReviewerConfig.model,
+          timeoutSeconds: resolvedReviewerConfig.timeoutMs / 1000,
+        },
+      };
 
-      const workerExecutor = this.createExecutor(resolvedWorkerAgentSpec);
       const aeosDir = path.join(projectPath, '.aeos');
-      let mirroredTicket = ticket;
 
       this.emitStageEvent(emitter, 'stage.started', 'context', 'Assembling ticket context');
-      const assembledContext = await this.contextAssembler.assemble(
+      const baseContext = await this.contextAssembler.assemble(
         ticketId,
         projectPath,
         columnSpec.column,
       );
       this.emitStageEvent(emitter, 'stage.completed', 'context', 'Context assembled');
 
-      this.emitStageEvent(emitter, 'stage.started', 'preflight', 'Running preflight checks', {
-        role: 'preflight',
-        executor: resolvedWorkerConfig.executorType,
-        model: resolvedWorkerConfig.model,
-        mode: 'artifact',
-      });
+      const workerExecutor = this.createExecutor(resolvedWorkerAgentSpec);
+      const artifactFilename = `${ticketId}-${columnSpec.outputArtifact}`;
+      const reviewFilename = `${ticketId}-${columnSpec.outputArtifact.replace('.md', '-review.md')}`;
 
-      let preflightResult;
-      try {
-        this.currentExecutor = workerExecutor;
-        this.interruptStage = 'preflight';
-        preflightResult = await this.preflight.run(
-          ticketId,
-          projectId,
-          projectPath,
-          assembledContext,
-          columnSpec,
-          workerAgentSpec,
-          workerExecutor,
-          this.createChunkObserver(emitter, 'preflight'),
-        );
-      } catch (err) {
-        this.currentExecutor = null;
-        this.interruptStage = undefined;
-        const message = err instanceof Error ? err.message : String(err);
-        this.emitStageEvent(emitter, 'stage.failed', 'preflight', message, {
-          role: 'preflight',
-          executor: resolvedWorkerConfig.executorType,
-          model: resolvedWorkerConfig.model,
-          mode: 'artifact',
-        });
-        if (this.isInterruptedReason(message)) {
-          return this.finishInterruptedRun(
-            emitter,
-            projectId,
-            ticketId,
-            projectPath,
-            mirroredTicket,
-            'preflight',
-            message,
-          );
-        }
+      const ctx: RunContext = {
+        projectId,
+        projectPath,
+        ticketId,
+        aeosDir,
+        column,
+        columnSpec,
+        workerAgentSpec,
+        reviewerAgentSpec,
+        workerExecutor,
+        workerMode,
+        workerExecutorType: resolvedWorkerConfig.executorType,
+        workerModel: resolvedWorkerConfig.model,
+        reviewerExecutorType: resolvedReviewerConfig.executorType,
+        reviewerModel: resolvedReviewerConfig.model,
+        reviewerAgentSpecResolved: resolvedReviewerAgentSpec,
+        baseContext,
+        emitter,
+        artifactFilename,
+        artifactAbsPath: path.join(aeosDir, 'tickets', ticketId, artifactFilename),
+        reviewFilename,
+        reviewAbsPath: path.join(aeosDir, 'tickets', ticketId, reviewFilename),
+      };
+
+      // ── Preflight ────────────────────────────────────────────────
+      const preflightOutcome = await this.runPreflight(ctx);
+      if (preflightOutcome.kind === 'failed') {
         emitter.emit({
           type: 'ticket-run.failed',
           phase: 'complete',
-          payload: { message },
+          payload: { message: preflightOutcome.error },
         });
-        return { status: 'failed', ticketId, error: message };
+        return { status: 'failed', ticketId, error: preflightOutcome.error };
       }
-      this.currentExecutor = null;
-      this.interruptStage = undefined;
-
-      this.emitStageEvent(
-        emitter,
-        'stage.completed',
-        'preflight',
-        preflightResult.blocked ? 'Preflight found blockers' : 'Preflight passed',
-        {
-          role: 'preflight',
-          executor: resolvedWorkerConfig.executorType,
-          model: resolvedWorkerConfig.model,
-          mode: 'artifact',
-        },
-      );
-
-      if (preflightResult.blocked) {
-        const questionsAbsPath = path.join(
-          aeosDir,
-          'tickets',
+      if (preflightOutcome.kind === 'interrupted') {
+        return this.finishInterruptedRun(
+          emitter,
+          projectId,
           ticketId,
-          preflightResult.questionsPath,
+          projectPath,
+          mirroredTicket,
+          preflightOutcome.stage,
+          preflightOutcome.message,
         );
-        const previous = mirroredTicket.subState;
-        const ticketFilePath = this.syncMirroredTicket(projectPath, {
-          ...mirroredTicket,
-          subState: SubState.BLOCKED,
-        });
-        mirroredTicket = { ...mirroredTicket, subState: SubState.BLOCKED };
-        this.gitGateway.commitFiles(
-          aeosDir,
-          [questionsAbsPath, ticketFilePath],
-          `[${ticketId}][QUESTIONS][v1][preflight][blocked]`,
+      }
+      if (preflightOutcome.kind === 'escalated') {
+        // Preflight already set BLOCKED, and `aeos ticket answer` keys on it.
+        // Overwriting with ESCALATED would make the escalation message ("answer
+        // them with ...") point at a command that then refuses.
+        return this.finishEscalatedRun(
+          ctx,
+          mirroredTicket,
+          preflightOutcome.escalation,
+          0,
+          SubState.BLOCKED,
         );
-        emitter.emit({
-          type: 'ticket-run.blocked',
-          phase: 'complete',
-          payload: {
-            blockers: [`Preflight questions written to ${preflightResult.questionsPath}`],
-          },
-        });
-        emitter.emit({
-          type: 'sub-state.changed',
-          phase: 'state',
-          payload: { from: previous, to: SubState.BLOCKED },
-        });
-        return {
-          status: 'blocked',
-          ticketId,
-          blockers: [`Preflight questions written to ${preflightResult.questionsPath}`],
-        };
       }
 
+      // ── WORKING ──────────────────────────────────────────────────
       const workingTransition = this.transitionSubState(
         projectId,
         ticketId,
@@ -287,475 +288,165 @@ export class TicketRunUseCase implements TicketRunPort {
         payload: { from: workingTransition.previous, to: SubState.WORKING },
       });
 
-      const prompt = this.buildPromptFn(assembledContext, workerAgentSpec);
-      const artifactFilename = `${ticketId}-${columnSpec.outputArtifact}`;
-      const artifactAbsPath = path.join(aeosDir, 'tickets', ticketId, artifactFilename);
+      // ── Revision loop ────────────────────────────────────────────
+      const loopConfig = this.resolveLoopConfig(columnSpec);
+      const blockerHistory: string[][] = [];
+      let feedback: string | undefined;
+      let attempt = 1;
 
-      this.emitStageEvent(emitter, 'stage.started', 'worker', 'Running worker executor', {
-        role: 'worker',
-        executor: resolvedWorkerConfig.executorType,
-        model: resolvedWorkerConfig.model,
-        mode: workerMode,
-      });
+      for (;;) {
+        emitter.emit({
+          type: 'run.attempt.started',
+          phase: 'worker',
+          payload: {
+            attempt,
+            maxAttempts: loopConfig.enabled ? Math.max(1, loopConfig.maxIterations) : 1,
+            carryingFeedback: feedback !== undefined,
+          },
+        });
 
-      let executorResult: ExecutorResult;
-      try {
-        this.currentExecutor = workerExecutor;
-        this.interruptStage = 'worker';
-        executorResult = await workerExecutor.run({
-          prompt,
-          outputPath: artifactAbsPath,
-          ticketId,
-          column,
-          mode: workerMode,
-          workingDirectory: workerMode === 'agentic' ? projectPath : undefined,
-          onChunk: this.createChunkObserver(emitter, 'worker'),
-        });
-      } catch (err) {
-        this.currentExecutor = null;
-        this.interruptStage = undefined;
-        const message = err instanceof Error ? err.message : String(err);
-        this.emitStageEvent(emitter, 'stage.failed', 'worker', message, {
-          role: 'worker',
-          executor: resolvedWorkerConfig.executorType,
-          model: resolvedWorkerConfig.model,
-          mode: workerMode,
-        });
-        if (this.isInterruptedReason(message)) {
+        const outcome = await this.runAttempt(ctx, attempt, feedback);
+
+        if (outcome.kind === 'interrupted') {
           return this.finishInterruptedRun(
             emitter,
             projectId,
             ticketId,
             projectPath,
             mirroredTicket,
-            'worker',
-            message,
-          );
-        }
-        const error = this.formatExecutorFailure('worker', column, message);
-        emitter.emit({
-          type: 'ticket-run.failed',
-          phase: 'complete',
-          payload: { message: error },
-        });
-        return { status: 'failed', ticketId, error };
-      }
-      this.currentExecutor = null;
-      this.interruptStage = undefined;
-
-      this.recordCost(
-        projectId,
-        ticketId,
-        column,
-        workerAgentSpec.name,
-        resolvedWorkerConfig.executorType,
-        resolvedWorkerConfig.model,
-        executorResult,
-      );
-      this.emitCostEvent(emitter, 'worker', executorResult);
-
-      if (!executorResult.ok) {
-        this.emitStageEvent(emitter, 'stage.failed', 'worker', executorResult.reason, {
-          role: 'worker',
-          executor: resolvedWorkerConfig.executorType,
-          model: resolvedWorkerConfig.model,
-          mode: workerMode,
-        });
-        this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
-        if (this.isInterruptedReason(executorResult.reason)) {
-          return this.finishInterruptedRun(
-            emitter,
-            projectId,
-            ticketId,
-            projectPath,
-            mirroredTicket,
-            'worker',
-            executorResult.reason,
+            outcome.stage,
+            outcome.message,
           );
         }
 
-        const failedTransition = this.transitionSubState(
-          projectId,
-          ticketId,
-          projectPath,
-          mirroredTicket,
-          SubState.FAILED,
-        );
-        if (!failedTransition.ok) {
-          emitter.emit({
-            type: 'ticket-run.failed',
-            phase: 'complete',
-            payload: { message: failedTransition.error },
-          });
-          return { status: 'failed', ticketId, error: failedTransition.error };
-        }
-        emitter.emit({
-          type: 'sub-state.changed',
-          phase: 'state',
-          payload: { from: failedTransition.previous, to: SubState.FAILED },
-        });
-        mirroredTicket = failedTransition.ticket;
-        const error = this.formatExecutorFailure('worker', column, executorResult.reason);
-        emitter.emit({
-          type: 'ticket-run.failed',
-          phase: 'complete',
-          payload: { message: error },
-        });
-        return { status: 'failed', ticketId, error };
-      }
-
-      this.emitStageEvent(emitter, 'stage.completed', 'worker', 'Worker completed', {
-        role: 'worker',
-        executor: resolvedWorkerConfig.executorType,
-        model: resolvedWorkerConfig.model,
-        mode: workerMode,
-      });
-
-      const content = executorResult.content ?? '';
-      this.emitStageEvent(emitter, 'stage.started', 'validation', 'Validating worker output');
-
-      if (workerMode === 'agentic') {
-        const repoDiff = this.gitGateway.diff(projectPath).trim();
-        if (repoDiff.length === 0) {
-          this.emitStageEvent(
-            emitter,
-            'stage.failed',
-            'validation',
-            'Agentic implementation produced no repository changes',
-          );
-          this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
-          const failedTransition = this.transitionSubState(
+        if (outcome.kind === 'failed') {
+          const failed = this.transitionSubState(
             projectId,
             ticketId,
             projectPath,
             mirroredTicket,
             SubState.FAILED,
           );
-          if (!failedTransition.ok) {
+          if (failed.ok) {
+            mirroredTicket = failed.ticket;
             emitter.emit({
-              type: 'ticket-run.failed',
-              phase: 'complete',
-              payload: { message: failedTransition.error },
+              type: 'sub-state.changed',
+              phase: 'state',
+              payload: { from: failed.previous, to: SubState.FAILED },
             });
-            return { status: 'failed', ticketId, error: failedTransition.error };
           }
-          emitter.emit({
-            type: 'sub-state.changed',
-            phase: 'state',
-            payload: { from: failedTransition.previous, to: SubState.FAILED },
-          });
-          mirroredTicket = failedTransition.ticket;
-          const error = 'Agentic implementation produced no repository changes';
+          const message = failed.ok ? outcome.error : failed.error;
           emitter.emit({
             type: 'ticket-run.failed',
             phase: 'complete',
-            payload: { message: error },
+            payload: { message },
           });
-          return { status: 'failed', ticketId, error };
+          return { status: 'failed', ticketId, error: message };
         }
-      }
 
-      const validation = validateOutput(content, columnSpec);
-      if (!validation.passed) {
-        const error = `Output validation failed: ${validation.violations.join('; ')}`;
-        this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
-        this.artifactStore.removeArtifact(projectPath, ticketId, artifactFilename);
-        const failedTransition = this.transitionSubState(
-          projectId,
-          ticketId,
-          projectPath,
-          mirroredTicket,
-          SubState.FAILED,
-        );
-        if (!failedTransition.ok) {
-          emitter.emit({
-            type: 'ticket-run.failed',
-            phase: 'complete',
-            payload: { message: failedTransition.error },
+        if (outcome.kind === 'escalated') {
+          return this.finishEscalatedRun(ctx, mirroredTicket, outcome.escalation, attempt);
+        }
+
+        const decision = decideNextAttempt({
+          verdict: outcome.verdict,
+          attempt,
+          config: loopConfig,
+          previousBlockerTopics: blockerHistory,
+          reviewPath: ctx.reviewAbsPath,
+        });
+
+        if (decision.action === 'advance') {
+          this.emitStageEvent(emitter, 'stage.completed', 'reviewer', decision.reason, {
+            role: 'reviewer',
+            executor: ctx.reviewerExecutorType,
+            model: ctx.reviewerModel,
+            mode: 'artifact',
           });
-          return { status: 'failed', ticketId, error: failedTransition.error };
+          break;
         }
-        emitter.emit({
-          type: 'sub-state.changed',
-          phase: 'state',
-          payload: { from: failedTransition.previous, to: SubState.FAILED },
-        });
-        mirroredTicket = failedTransition.ticket;
-        emitter.emit({
-          type: 'ticket-run.failed',
-          phase: 'complete',
-          payload: { message: error },
-        });
-        return { status: 'failed', ticketId, error };
-      }
 
-      this.emitStageEvent(emitter, 'stage.completed', 'validation', 'Validation passed');
-
-      const workerCommitMessage = `[${ticketId}][${columnSpec.outputArtifact}][v1][${workerAgentSpec.name}][create]`;
-      this.artifactStore.writeArtifact(projectPath, ticketId, artifactFilename, content);
-      emitter.emit({
-        type: 'artifact.written',
-        phase: 'artifact',
-        payload: { role: 'worker', path: artifactAbsPath },
-      });
-      this.gitGateway.commitFiles(aeosDir, [artifactAbsPath], workerCommitMessage);
-      emitter.emit({
-        type: 'artifact.committed',
-        phase: 'artifact',
-        payload: { role: 'worker', path: artifactAbsPath, commitMessage: workerCommitMessage },
-      });
-
-      const reviewFilename = `${ticketId}-${columnSpec.outputArtifact.replace('.md', '-review.md')}`;
-      const reviewAbsPath = path.join(aeosDir, 'tickets', ticketId, reviewFilename);
-
-      const rubricContents: string[] = [];
-      for (const rubricPath of columnSpec.reviewerRubrics) {
-        const rubricContent = await this.rubricLoader.load(rubricPath, projectPath);
-        if (rubricContent !== null) {
-          rubricContents.push(rubricContent);
-        }
-      }
-
-      const reviewContext = await this.contextAssembler.assemble(
-        ticketId,
-        projectPath,
-        columnSpec.column,
-      );
-
-      const enrichedContext =
-        rubricContents.length > 0
-          ? {
-              ...reviewContext,
-              priorArtifacts: [
-                ...reviewContext.priorArtifacts,
-                { name: 'reviewer-rubrics.md', content: rubricContents.join('\n\n---\n\n') },
-              ],
-            }
-          : reviewContext;
-
-      const resolvedReviewerConfig = this.executorConfigResolver.resolveExecutorConfig(
-        projectPath,
-        reviewerAgentSpec,
-        executorOverrides,
-      );
-
-      const resolvedReviewerAgentSpec: AgentSpec = {
-        ...reviewerAgentSpec,
-        executor: {
-          ...reviewerAgentSpec.executor,
-          type: resolvedReviewerConfig.executorType,
-          model: resolvedReviewerConfig.model,
-          timeoutSeconds: resolvedReviewerConfig.timeoutMs / 1000,
-        },
-      };
-
-      const reviewerPrompt = this.buildPromptFn(enrichedContext, reviewerAgentSpec);
-      const reviewerExecutor = this.createExecutor(resolvedReviewerAgentSpec);
-      this.emitStageEvent(emitter, 'stage.started', 'reviewer', 'Running reviewer executor', {
-        role: 'reviewer',
-        executor: resolvedReviewerConfig.executorType,
-        model: resolvedReviewerConfig.model,
-        mode: 'artifact',
-      });
-
-      let reviewResult: ExecutorResult;
-      try {
-        this.currentExecutor = reviewerExecutor;
-        this.interruptStage = 'reviewer';
-        reviewResult = await reviewerExecutor.run({
-          prompt: reviewerPrompt,
-          outputPath: reviewAbsPath,
-          ticketId,
-          column,
-          mode: 'artifact',
-          onChunk: this.createChunkObserver(emitter, 'reviewer'),
-        });
-      } catch (err) {
-        this.currentExecutor = null;
-        this.interruptStage = undefined;
-        const message = err instanceof Error ? err.message : String(err);
-        this.emitStageEvent(emitter, 'stage.failed', 'reviewer', message, {
-          role: 'reviewer',
-          executor: resolvedReviewerConfig.executorType,
-          model: resolvedReviewerConfig.model,
-          mode: 'artifact',
-        });
-        if (this.isInterruptedReason(message)) {
-          return this.finishInterruptedRun(
-            emitter,
-            projectId,
-            ticketId,
-            projectPath,
-            mirroredTicket,
-            'reviewer',
-            message,
-          );
-        }
-        reviewResult = { ok: false, reason: message };
-      }
-      this.currentExecutor = null;
-      this.interruptStage = undefined;
-
-      this.recordCost(
-        projectId,
-        ticketId,
-        column,
-        reviewerAgentSpec.name,
-        resolvedReviewerConfig.executorType,
-        resolvedReviewerConfig.model,
-        reviewResult,
-      );
-      this.emitCostEvent(emitter, 'reviewer', reviewResult);
-
-      if (!reviewResult.ok) {
-        this.emitStageEvent(emitter, 'stage.failed', 'reviewer', reviewResult.reason, {
-          role: 'reviewer',
-          executor: resolvedReviewerConfig.executorType,
-          model: resolvedReviewerConfig.model,
-          mode: 'artifact',
-        });
-        if (this.isInterruptedReason(reviewResult.reason)) {
-          return this.finishInterruptedRun(
-            emitter,
-            projectId,
-            ticketId,
-            projectPath,
-            mirroredTicket,
-            'reviewer',
-            reviewResult.reason,
-          );
-        }
-      } else {
-        this.emitStageEvent(emitter, 'stage.completed', 'reviewer', 'Reviewer completed', {
-          role: 'reviewer',
-          executor: resolvedReviewerConfig.executorType,
-          model: resolvedReviewerConfig.model,
-          mode: 'artifact',
-        });
-
-        const reviewContent = reviewResult.content ?? '';
-        const reviewCommitMessage = `[${ticketId}][REVIEW][v1][reviewer-agent][create]`;
-        this.artifactStore.writeArtifact(projectPath, ticketId, reviewFilename, reviewContent);
-        emitter.emit({
-          type: 'artifact.written',
-          phase: 'artifact',
-          payload: { role: 'reviewer', path: reviewAbsPath },
-        });
-        this.gitGateway.commitFiles(aeosDir, [reviewAbsPath], reviewCommitMessage);
-        emitter.emit({
-          type: 'artifact.committed',
-          phase: 'artifact',
-          payload: { role: 'reviewer', path: reviewAbsPath, commitMessage: reviewCommitMessage },
-        });
-
-        const normalizedReview = reviewContent.toUpperCase();
-        const isRejected =
-          normalizedReview.includes('REJECTED') ||
-          (normalizedReview.includes('FAIL') && !normalizedReview.includes('APPROVED'));
-
-        if (isRejected) {
+        if (decision.action === 'escalate') {
           emitter.emit({
             type: 'review.rejected',
             phase: 'reviewer',
             payload: {
-              reviewPath: reviewAbsPath,
-              reason: 'Reviewer rejected the artifact. See review for details.',
+              reviewPath: ctx.reviewAbsPath,
+              reason: decision.escalation.message,
             },
           });
-
-          const failedTransition = this.transitionSubState(
-            projectId,
-            ticketId,
-            projectPath,
-            mirroredTicket,
-            SubState.FAILED,
-          );
-          if (!failedTransition.ok) {
-            emitter.emit({
-              type: 'ticket-run.failed',
-              phase: 'complete',
-              payload: { message: failedTransition.error, reviewPath: reviewAbsPath },
-            });
-            return {
-              status: 'failed',
-              ticketId,
-              error: failedTransition.error,
-              reviewPath: reviewAbsPath,
-            };
-          }
-
-          emitter.emit({
-            type: 'sub-state.changed',
-            phase: 'state',
-            payload: { from: failedTransition.previous, to: SubState.FAILED },
-          });
-          mirroredTicket = failedTransition.ticket;
-          const error = 'Reviewer rejected the artifact. See review for details.';
-          emitter.emit({
-            type: 'ticket-run.failed',
-            phase: 'complete',
-            payload: { message: error, reviewPath: reviewAbsPath },
-          });
-          return { status: 'failed', ticketId, error, reviewPath: reviewAbsPath };
+          return this.finishEscalatedRun(ctx, mirroredTicket, decision.escalation, attempt);
         }
+
+        // Retry: carry the review forward so the worker revises rather than
+        // regenerating from scratch, and record blockers for stall detection.
+        emitter.emit({
+          type: 'review.rejected',
+          phase: 'reviewer',
+          payload: { reviewPath: ctx.reviewAbsPath, reason: decision.reason },
+        });
+        blockerHistory.push([...outcome.verdict.blockerTopics]);
+        feedback = outcome.reviewContent;
+        attempt = decision.nextAttempt;
       }
 
-      const inReviewTransition = this.transitionSubState(
+      // ── IN_REVIEW → SIGNED_OFF ───────────────────────────────────
+      const inReview = this.transitionSubState(
         projectId,
         ticketId,
         projectPath,
         mirroredTicket,
         SubState.IN_REVIEW,
       );
-      if (!inReviewTransition.ok) {
+      if (!inReview.ok) {
         emitter.emit({
           type: 'ticket-run.failed',
           phase: 'complete',
-          payload: { message: inReviewTransition.error },
+          payload: { message: inReview.error },
         });
-        return { status: 'failed', ticketId, error: inReviewTransition.error };
+        return { status: 'failed', ticketId, error: inReview.error };
       }
+      mirroredTicket = inReview.ticket;
       emitter.emit({
         type: 'sub-state.changed',
         phase: 'state',
-        payload: { from: inReviewTransition.previous, to: SubState.IN_REVIEW },
+        payload: { from: inReview.previous, to: SubState.IN_REVIEW },
       });
-      mirroredTicket = inReviewTransition.ticket;
 
       this.emitStageEvent(emitter, 'stage.started', 'sign-off', 'Signing off ticket');
-      const signedOffTransition = this.transitionSubState(
+      const signedOff = this.transitionSubState(
         projectId,
         ticketId,
         projectPath,
         mirroredTicket,
         SubState.SIGNED_OFF,
       );
-      if (!signedOffTransition.ok) {
+      if (!signedOff.ok) {
         emitter.emit({
           type: 'ticket-run.failed',
           phase: 'complete',
-          payload: { message: signedOffTransition.error },
+          payload: { message: signedOff.error },
         });
-        return { status: 'failed', ticketId, error: signedOffTransition.error };
+        return { status: 'failed', ticketId, error: signedOff.error };
       }
       emitter.emit({
         type: 'sub-state.changed',
         phase: 'state',
-        payload: { from: signedOffTransition.previous, to: SubState.SIGNED_OFF },
+        payload: { from: signedOff.previous, to: SubState.SIGNED_OFF },
       });
-      mirroredTicket = signedOffTransition.ticket;
       this.emitStageEvent(emitter, 'stage.completed', 'sign-off', 'Ticket signed off');
       emitter.emit({
         type: 'ticket-run.completed',
         phase: 'complete',
-        payload: { artifactPath: artifactAbsPath, reviewPath: reviewAbsPath },
+        payload: { artifactPath: ctx.artifactAbsPath, reviewPath: ctx.reviewAbsPath },
       });
 
       return {
         status: 'success',
         ticketId,
-        artifactPath: artifactAbsPath,
-        reviewPath: reviewAbsPath,
+        artifactPath: ctx.artifactAbsPath,
+        reviewPath: ctx.reviewAbsPath,
+        attempts: attempt,
       };
     } finally {
       this.currentExecutor = null;
@@ -771,11 +462,517 @@ export class TicketRunUseCase implements TicketRunPort {
     }
   }
 
-  private resolveColumn(columnString: string): Column | null {
-    if (isValidColumn(columnString)) {
-      return columnString;
+  // ── One worker → validate → review cycle ───────────────────────────
+
+  private async runAttempt(
+    ctx: RunContext,
+    attempt: number,
+    feedback: string | undefined,
+  ): Promise<AttemptOutcome> {
+    const { emitter, ticketId, projectPath, projectId, aeosDir, columnSpec, workerMode, column } =
+      ctx;
+
+    // ── Worker ───────────────────────────────────────────────────
+    // On a retry the context is re-assembled rather than reusing the one taken
+    // before the run: the worker is being asked to revise an artifact, and the
+    // pre-run snapshot does not contain it. The prior review is then attached
+    // under an unambiguous name, and its raw file dropped so it appears once.
+    let workerContext = ctx.baseContext;
+    if (feedback) {
+      const fresh = await this.contextAssembler.assemble(ticketId, projectPath, columnSpec.column);
+      workerContext = this.withExtraArtifact(
+        {
+          ...fresh,
+          priorArtifacts: fresh.priorArtifacts.filter(
+            (artifact) => artifact.name !== ctx.reviewFilename,
+          ),
+        },
+        'previous-review.md',
+        feedback,
+      );
     }
-    return null;
+    const prompt = this.buildPromptFn(workerContext, ctx.workerAgentSpec);
+
+    const attemptLabel = attempt > 1 ? ` (attempt ${attempt})` : '';
+    this.emitStageEvent(
+      emitter,
+      'stage.started',
+      'worker',
+      `Running worker executor${attemptLabel}`,
+      {
+        role: 'worker',
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: workerMode,
+      },
+    );
+
+    let executorResult: ExecutorResult;
+    try {
+      this.currentExecutor = ctx.workerExecutor;
+      this.interruptStage = 'worker';
+      executorResult = await ctx.workerExecutor.run({
+        prompt,
+        outputPath: ctx.artifactAbsPath,
+        ticketId,
+        column,
+        mode: workerMode,
+        workingDirectory: workerMode === 'agentic' ? projectPath : undefined,
+        onChunk: this.createChunkObserver(emitter, 'worker'),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emitStageEvent(emitter, 'stage.failed', 'worker', message, {
+        role: 'worker',
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: workerMode,
+      });
+      if (this.isInterruptedReason(message)) {
+        return { kind: 'interrupted', stage: 'worker', message };
+      }
+      return { kind: 'failed', error: this.formatExecutorFailure('worker', column, message) };
+    } finally {
+      this.currentExecutor = null;
+      this.interruptStage = undefined;
+    }
+
+    this.recordCost(
+      projectId,
+      ticketId,
+      column,
+      ctx.workerAgentSpec.name,
+      ctx.workerExecutorType,
+      ctx.workerModel,
+      executorResult,
+    );
+    this.emitCostEvent(emitter, 'worker', executorResult);
+
+    if (!executorResult.ok) {
+      this.emitStageEvent(emitter, 'stage.failed', 'worker', executorResult.reason, {
+        role: 'worker',
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: workerMode,
+      });
+      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+      if (this.isInterruptedReason(executorResult.reason)) {
+        return { kind: 'interrupted', stage: 'worker', message: executorResult.reason };
+      }
+      return {
+        kind: 'failed',
+        error: this.formatExecutorFailure('worker', column, executorResult.reason),
+      };
+    }
+
+    this.emitStageEvent(emitter, 'stage.completed', 'worker', 'Worker completed', {
+      role: 'worker',
+      executor: ctx.workerExecutorType,
+      model: ctx.workerModel,
+      mode: workerMode,
+    });
+
+    // ── Validation ───────────────────────────────────────────────
+    const content = executorResult.content ?? '';
+    this.emitStageEvent(emitter, 'stage.started', 'validation', 'Validating worker output');
+
+    if (workerMode === 'agentic') {
+      const repoDiff = this.gitGateway.diff(projectPath).trim();
+      if (repoDiff.length === 0) {
+        const error = 'Agentic implementation produced no repository changes';
+        this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
+        this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+        return { kind: 'failed', error };
+      }
+    }
+
+    const validation = validateOutput(content, columnSpec);
+    if (!validation.passed) {
+      const error = `Output validation failed: ${validation.violations.join('; ')}`;
+      this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
+      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+      return { kind: 'failed', error };
+    }
+
+    this.emitStageEvent(emitter, 'stage.completed', 'validation', 'Validation passed');
+
+    // ── Commit the artifact ──────────────────────────────────────
+    const revision = attempt > 1 ? `v${attempt}` : 'v1';
+    const workerCommitMessage = `[${ticketId}][${columnSpec.outputArtifact}][${revision}][${ctx.workerAgentSpec.name}][${attempt > 1 ? 'revise' : 'create'}]`;
+    this.artifactStore.writeArtifact(projectPath, ticketId, ctx.artifactFilename, content);
+    emitter.emit({
+      type: 'artifact.written',
+      phase: 'artifact',
+      payload: { role: 'worker', path: ctx.artifactAbsPath },
+    });
+    this.gitGateway.commitFiles(aeosDir, [ctx.artifactAbsPath], workerCommitMessage);
+    emitter.emit({
+      type: 'artifact.committed',
+      phase: 'artifact',
+      payload: {
+        role: 'worker',
+        path: ctx.artifactAbsPath,
+        commitMessage: workerCommitMessage,
+      },
+    });
+
+    // ── Reviewer ─────────────────────────────────────────────────
+    return this.runReview(ctx, attempt, revision);
+  }
+
+  private async runReview(
+    ctx: RunContext,
+    attempt: number,
+    revision: string,
+  ): Promise<AttemptOutcome> {
+    const { emitter, ticketId, projectPath, projectId, aeosDir, column } = ctx;
+
+    const rubricContents: string[] = [];
+    for (const rubricPath of ctx.columnSpec.reviewerRubrics) {
+      const rubricContent = await this.rubricLoader.load(rubricPath, projectPath);
+      if (rubricContent !== null) {
+        rubricContents.push(rubricContent);
+      }
+    }
+
+    // Re-assembled so the reviewer sees the artifact this attempt just wrote.
+    const reviewContext = await this.contextAssembler.assemble(
+      ticketId,
+      projectPath,
+      ctx.columnSpec.column,
+    );
+    const enrichedContext =
+      rubricContents.length > 0
+        ? this.withExtraArtifact(
+            reviewContext,
+            'reviewer-rubrics.md',
+            rubricContents.join('\n\n---\n\n'),
+          )
+        : reviewContext;
+
+    const reviewerPrompt = this.buildPromptFn(enrichedContext, ctx.reviewerAgentSpec);
+    const reviewerExecutor = this.createExecutor(ctx.reviewerAgentSpecResolved);
+
+    this.emitStageEvent(emitter, 'stage.started', 'reviewer', 'Running reviewer executor', {
+      role: 'reviewer',
+      executor: ctx.reviewerExecutorType,
+      model: ctx.reviewerModel,
+      mode: 'artifact',
+    });
+
+    let reviewResult: ExecutorResult;
+    try {
+      this.currentExecutor = reviewerExecutor;
+      this.interruptStage = 'reviewer';
+      reviewResult = await reviewerExecutor.run({
+        prompt: reviewerPrompt,
+        outputPath: ctx.reviewAbsPath,
+        ticketId,
+        column,
+        mode: 'artifact',
+        onChunk: this.createChunkObserver(emitter, 'reviewer'),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emitStageEvent(emitter, 'stage.failed', 'reviewer', message, {
+        role: 'reviewer',
+        executor: ctx.reviewerExecutorType,
+        model: ctx.reviewerModel,
+        mode: 'artifact',
+      });
+      if (this.isInterruptedReason(message)) {
+        return { kind: 'interrupted', stage: 'reviewer', message };
+      }
+      reviewResult = { ok: false, reason: message };
+    } finally {
+      this.currentExecutor = null;
+      this.interruptStage = undefined;
+    }
+
+    this.recordCost(
+      projectId,
+      ticketId,
+      column,
+      ctx.reviewerAgentSpec.name,
+      ctx.reviewerExecutorType,
+      ctx.reviewerModel,
+      reviewResult,
+    );
+    this.emitCostEvent(emitter, 'reviewer', reviewResult);
+
+    if (!reviewResult.ok) {
+      this.emitStageEvent(emitter, 'stage.failed', 'reviewer', reviewResult.reason, {
+        role: 'reviewer',
+        executor: ctx.reviewerExecutorType,
+        model: ctx.reviewerModel,
+        mode: 'artifact',
+      });
+      if (this.isInterruptedReason(reviewResult.reason)) {
+        return { kind: 'interrupted', stage: 'reviewer', message: reviewResult.reason };
+      }
+      // A reviewer that cannot run leaves us with no verdict. Escalate rather
+      // than advancing unreviewed work or looping on an unfixable condition.
+      return {
+        kind: 'escalated',
+        escalation: {
+          reason: EscalationReason.UNPARSEABLE_VERDICT,
+          message: `Reviewer executor failed, so the artifact is unreviewed: ${reviewResult.reason}`,
+          attempt,
+          artifactPath: ctx.artifactAbsPath,
+        },
+      };
+    }
+
+    const reviewContent = reviewResult.content ?? '';
+    const reviewCommitMessage = `[${ticketId}][REVIEW][${revision}][${ctx.reviewerAgentSpec.name}][create]`;
+    this.artifactStore.writeArtifact(projectPath, ticketId, ctx.reviewFilename, reviewContent);
+    emitter.emit({
+      type: 'artifact.written',
+      phase: 'artifact',
+      payload: { role: 'reviewer', path: ctx.reviewAbsPath },
+    });
+    this.gitGateway.commitFiles(aeosDir, [ctx.reviewAbsPath], reviewCommitMessage);
+    emitter.emit({
+      type: 'artifact.committed',
+      phase: 'artifact',
+      payload: {
+        role: 'reviewer',
+        path: ctx.reviewAbsPath,
+        commitMessage: reviewCommitMessage,
+      },
+    });
+
+    const parsed = parseVerdict(reviewContent);
+    if (!parsed.ok) {
+      this.emitStageEvent(emitter, 'stage.failed', 'reviewer', parsed.reason, {
+        role: 'reviewer',
+        executor: ctx.reviewerExecutorType,
+        model: ctx.reviewerModel,
+        mode: 'artifact',
+      });
+      return {
+        kind: 'escalated',
+        escalation: {
+          reason: EscalationReason.UNPARSEABLE_VERDICT,
+          message: parsed.reason,
+          attempt,
+          artifactPath: ctx.reviewAbsPath,
+        },
+      };
+    }
+
+    return { kind: 'reviewed', verdict: parsed.verdict, reviewContent };
+  }
+
+  private async runPreflight(
+    ctx: RunContext,
+  ): Promise<
+    | { kind: 'clear' }
+    | { kind: 'failed'; error: string }
+    | { kind: 'interrupted'; stage: TicketRunPhase; message: string }
+    | { kind: 'escalated'; escalation: Escalation }
+  > {
+    const { emitter, ticketId, projectId, projectPath, aeosDir } = ctx;
+
+    this.emitStageEvent(emitter, 'stage.started', 'preflight', 'Running preflight checks', {
+      role: 'preflight',
+      executor: ctx.workerExecutorType,
+      model: ctx.workerModel,
+      mode: 'artifact',
+    });
+
+    let preflightResult;
+    try {
+      this.currentExecutor = ctx.workerExecutor;
+      this.interruptStage = 'preflight';
+      preflightResult = await this.preflight.run(
+        ticketId,
+        projectId,
+        projectPath,
+        ctx.baseContext,
+        ctx.columnSpec,
+        ctx.workerAgentSpec,
+        ctx.workerExecutor,
+        this.createChunkObserver(emitter, 'preflight'),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emitStageEvent(emitter, 'stage.failed', 'preflight', message, {
+        role: 'preflight',
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: 'artifact',
+      });
+      if (this.isInterruptedReason(message)) {
+        return { kind: 'interrupted', stage: 'preflight', message };
+      }
+      return { kind: 'failed', error: message };
+    } finally {
+      this.currentExecutor = null;
+      this.interruptStage = undefined;
+    }
+
+    this.emitStageEvent(
+      emitter,
+      'stage.completed',
+      'preflight',
+      preflightResult.blocked ? 'Preflight found blockers' : 'Preflight passed',
+      {
+        role: 'preflight',
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: 'artifact',
+      },
+    );
+
+    if (!preflightResult.blocked) return { kind: 'clear' };
+
+    const questionsAbsPath = path.join(aeosDir, 'tickets', ticketId, preflightResult.questionsPath);
+    this.gitGateway.commitFiles(
+      aeosDir,
+      [questionsAbsPath],
+      `[${ticketId}][QUESTIONS][v1][preflight][blocked]`,
+    );
+
+    return {
+      kind: 'escalated',
+      escalation: {
+        reason: EscalationReason.PREFLIGHT_BLOCKERS,
+        message: `Preflight raised blocking questions. Answer them with \`aeos ticket answer ${ticketId}\`.`,
+        artifactPath: questionsAbsPath,
+      },
+    };
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────
+
+  private checkEligibility(
+    projectId: string,
+    ticketId: string,
+  ): { ok: true; ticket: Ticket } | { ok: false; result: TicketRunResult } {
+    const ticket = this.ticketRepo.findById(projectId, ticketId);
+    if (!ticket) {
+      return {
+        ok: false,
+        result: { status: 'failed', ticketId, error: `Ticket ${ticketId} not found` },
+      };
+    }
+    if (ticket.column === Column.BACKLOG) {
+      return {
+        ok: false,
+        result: {
+          status: 'failed',
+          ticketId,
+          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to PRODUCT_SCOPING first.`,
+        },
+      };
+    }
+    if (ticket.column === Column.DONE) {
+      return {
+        ok: false,
+        result: { status: 'failed', ticketId, error: `Ticket ${ticketId} is already DONE.` },
+      };
+    }
+    if (ticket.column === Column.DOD_GATE) {
+      return {
+        ok: false,
+        result: { status: 'failed', ticketId, error: 'DoD gate is human-only' },
+      };
+    }
+    if (ticket.subState === SubState.WORKING) {
+      return {
+        ok: false,
+        result: { status: 'failed', ticketId, error: 'Ticket is already running' },
+      };
+    }
+    if (ticket.subState === SubState.BLOCKED) {
+      return {
+        ok: false,
+        result: {
+          status: 'blocked',
+          ticketId,
+          blockers: ['Ticket is blocked — run `aeos ticket answer` first'],
+        },
+      };
+    }
+    return { ok: true, ticket };
+  }
+
+  /**
+   * Column setting wins when present; otherwise the global cap applies.
+   * `maxIterations` is optional in the column spec precisely so "unset" is
+   * distinguishable from an explicit value.
+   */
+  private resolveLoopConfig(columnSpec: ColumnSpec): LoopConfig {
+    const global = this.configStore.readConfig() ?? DEFAULT_GLOBAL_CONFIG;
+    return {
+      enabled: global.reviewLoop.enabled,
+      maxIterations: columnSpec.maxIterations ?? global.reviewLoop.maxIterations,
+      escalation: columnSpec.escalation,
+    };
+  }
+
+  private withExtraArtifact(
+    context: AssembledContext,
+    name: string,
+    content: string,
+  ): AssembledContext {
+    return {
+      ...context,
+      priorArtifacts: [...context.priorArtifacts, { name, content }],
+    };
+  }
+
+  /**
+   * `subState` defaults to ESCALATED but is overridable, because some
+   * escalations have a more specific state that other commands key on —
+   * preflight blockers stay BLOCKED so `aeos ticket answer` still accepts them.
+   */
+  private finishEscalatedRun(
+    ctx: RunContext,
+    ticket: Ticket,
+    escalation: Escalation,
+    attempt: number,
+    subState: (typeof SubState)[keyof typeof SubState] = SubState.ESCALATED,
+  ): TicketRunResult {
+    const transition = this.transitionSubState(
+      ctx.projectId,
+      ctx.ticketId,
+      ctx.projectPath,
+      ticket,
+      subState,
+    );
+    if (transition.ok) {
+      ctx.emitter.emit({
+        type: 'sub-state.changed',
+        phase: 'state',
+        payload: { from: transition.previous, to: subState },
+      });
+    }
+
+    ctx.emitter.emit({
+      type: 'ticket-run.escalated',
+      phase: 'complete',
+      payload: {
+        reason: escalation.reason,
+        message: escalation.message,
+        attempt,
+        artifactPath: escalation.artifactPath,
+      },
+    });
+
+    return {
+      status: 'escalated',
+      ticketId: ctx.ticketId,
+      reason: escalation.reason,
+      message: escalation.message,
+      attempts: attempt,
+      artifactPath: escalation.artifactPath,
+    };
+  }
+
+  private resolveColumn(columnString: string): Column | null {
+    return isValidColumn(columnString) ? columnString : null;
   }
 
   private resolveWorkerExecutorMode(
@@ -785,7 +982,6 @@ export class TicketRunUseCase implements TicketRunPort {
     if (columnSpec.executorMode) {
       return columnSpec.executorMode;
     }
-
     return column === Column.IMPLEMENTATION ? 'agentic' : 'artifact';
   }
 
@@ -822,10 +1018,13 @@ export class TicketRunUseCase implements TicketRunPort {
     });
   }
 
-  private syncMirroredTicket(projectPath: string, ticket: Ticket): string {
-    return syncTicketDocument(this.artifactStore, projectPath, ticket);
-  }
-
+  /**
+   * Syncs the ticket markdown to disk without committing.
+   *
+   * Sub-state is authoritative in SQLite; git carries artifacts. Committing on
+   * every transition produced hundreds of `[STATE]` commits per epic and buried
+   * the artifact history a human actually reads.
+   */
   private transitionSubState(
     projectId: string,
     ticketId: string,
@@ -840,18 +1039,8 @@ export class TicketRunUseCase implements TicketRunPort {
     }
 
     const nextTicket = { ...ticket, subState: nextSubState };
-    this.commitMirroredSubState(
-      projectPath,
-      nextTicket,
-      `[${ticketId}][STATE][v1][sub-state: ${nextSubState}]`,
-    );
+    syncTicketDocument(this.artifactStore, projectPath, nextTicket);
     return { ok: true, ticket: nextTicket, previous };
-  }
-
-  private commitMirroredSubState(projectPath: string, ticket: Ticket, message: string): void {
-    const aeosDir = path.join(projectPath, '.aeos');
-    const ticketFilePath = this.syncMirroredTicket(projectPath, ticket);
-    this.gitGateway.commitFiles(aeosDir, [ticketFilePath], message);
   }
 
   private formatExecutorFailure(
@@ -891,11 +1080,7 @@ export class TicketRunUseCase implements TicketRunPort {
     emitter.emit({
       type,
       phase: stage,
-      payload: {
-        stage,
-        message,
-        ...metadata,
-      },
+      payload: { stage, message, ...metadata },
     });
   }
 
@@ -930,17 +1115,16 @@ export class TicketRunUseCase implements TicketRunPort {
     stage: TicketRunPhase,
     reason: string,
   ): TicketRunResult {
-    const interruptedTransition = this.transitionSubState(
+    const interrupted = this.transitionSubState(
       projectId,
       ticketId,
       projectPath,
       ticket,
       SubState.INTERRUPTED,
     );
-    const message =
-      interruptedTransition.ok === false
-        ? interruptedTransition.error
-        : reason || 'Execution interrupted by operator';
+    const message = interrupted.ok
+      ? reason || 'Execution interrupted by operator'
+      : interrupted.error;
 
     emitter.emit({
       type: 'ticket-run.interrupted',
@@ -948,11 +1132,11 @@ export class TicketRunUseCase implements TicketRunPort {
       payload: { message, stage },
     });
 
-    if (interruptedTransition.ok) {
+    if (interrupted.ok) {
       emitter.emit({
         type: 'sub-state.changed',
         phase: 'state',
-        payload: { from: interruptedTransition.previous, to: SubState.INTERRUPTED },
+        payload: { from: interrupted.previous, to: SubState.INTERRUPTED },
       });
     }
 

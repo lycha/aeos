@@ -17,6 +17,7 @@ function createMockTicketRepo(): TicketRepository {
     deleteById: vi.fn(),
     findById: vi.fn().mockReturnValue(null),
     findByProject: vi.fn().mockReturnValue([]),
+    findChildren: vi.fn().mockReturnValue([]),
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
   };
@@ -73,6 +74,8 @@ function blockedTicket(updatedAt = '2025-01-01T10:00:00Z'): Ticket {
     id: TICKET_ID,
     projectId: PROJECT_ID,
     title: 'Test ticket',
+    kind: 'EPIC',
+    parentId: null,
     column: 'IMPLEMENTATION' as Ticket['column'],
     subState: 'BLOCKED',
     createdAt: '2025-01-01T09:00:00Z',
@@ -140,8 +143,8 @@ describe('TicketAnswerUseCase', () => {
     expect(gitGateway.commitFiles).toHaveBeenCalledWith(
       path.join(PROJECT_PATH, '.aeos'),
       [
+        // Artifacts only — the ticket document is state and is no longer committed.
         path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-questions.md`),
-        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-ticket.md`),
         path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-decisions.md`),
       ],
       `[${TICKET_ID}][QUESTIONS][v1][human][answered]`,
@@ -223,10 +226,7 @@ describe('TicketAnswerUseCase', () => {
     });
     expect(gitGateway.commitFiles).toHaveBeenCalledWith(
       path.join(PROJECT_PATH, '.aeos'),
-      [
-        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-questions.md`),
-        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-ticket.md`),
-      ],
+      [path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-questions.md`)],
       `[${TICKET_ID}][QUESTIONS][v1][human][answered]`,
     );
   });

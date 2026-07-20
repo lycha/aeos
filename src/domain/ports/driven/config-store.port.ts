@@ -1,9 +1,20 @@
 // Driven port — ConfigStore: global config, registry, and gitignore operations
 
+export interface ReviewLoopConfig {
+  /**
+   * When false, a REJECTED review ends the run immediately instead of giving
+   * the worker another attempt. The kill switch for autonomous revision.
+   */
+  enabled: boolean;
+  /** Hard ceiling on attempts per column, including the first. */
+  maxIterations: number;
+}
+
 export interface GlobalConfig {
   model: string;
   currency: string;
-  advanceMode: string;
+  advanceMode: 'manual' | 'auto';
+  reviewLoop: ReviewLoopConfig;
 }
 
 export interface ProjectRegistryEntry {

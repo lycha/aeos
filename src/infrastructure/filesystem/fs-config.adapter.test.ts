@@ -53,9 +53,10 @@ describe('FsConfigStore', () => {
 
   describe('writeConfigIfNotExists / readConfig', () => {
     const config: GlobalConfig = {
-      model: 'claude-opus-4-6',
+      model: 'claude-opus-4-8',
       currency: 'USD',
       advanceMode: 'manual',
+      reviewLoop: { enabled: true, maxIterations: 5 },
     };
 
     it('should write config.json when it does not exist', () => {
@@ -76,10 +77,38 @@ describe('FsConfigStore', () => {
         model: 'gpt-4',
         currency: 'EUR',
         advanceMode: 'auto',
+        reviewLoop: { enabled: false, maxIterations: 1 },
       });
 
       const result = store.readConfig();
       expect(result).toEqual(config); // Original preserved
+    });
+
+    it('should backfill reviewLoop defaults for configs written before it existed', () => {
+      store.ensureHomeDir();
+      const configPath = path.join(tmpDir, '.aeos', 'config.json');
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({ model: 'claude-opus-4-8', currency: 'USD', advanceMode: 'manual' }),
+        'utf-8',
+      );
+
+      const result = store.readConfig();
+
+      // A missing reviewLoop must not read as "looping disabled".
+      expect(result?.reviewLoop).toEqual({ enabled: true, maxIterations: 5 });
+    });
+
+    it('should fall back to a sane cap when maxIterations is nonsense', () => {
+      store.ensureHomeDir();
+      const configPath = path.join(tmpDir, '.aeos', 'config.json');
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({ reviewLoop: { enabled: true, maxIterations: 0 } }),
+        'utf-8',
+      );
+
+      expect(store.readConfig()?.reviewLoop.maxIterations).toBe(5);
     });
 
     it('should return null when config does not exist', () => {

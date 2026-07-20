@@ -1,11 +1,10 @@
 // Use case — TicketApprove (advance column)
 
-import * as path from 'node:path';
-import { Column, COLUMN_ORDER } from '../domain/model/column.js';
+import { Column, nextColumnFor } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
+import { TicketKind } from '../domain/model/ticket-kind.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
-import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type {
   TicketApprovePort,
@@ -18,17 +17,14 @@ export class TicketApproveUseCase implements TicketApprovePort {
     private readonly ticketRepo: TicketRepository,
     private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
-    private readonly gitGateway: GitGateway,
   ) {}
 
   execute(projectId: string, projectPath: string, ticketId: string): TicketApproveResult {
-    // 1. Load ticket
     const ticket = this.ticketRepo.findById(projectId, ticketId);
     if (!ticket) {
       return { status: 'error', ticketId, error: `Ticket ${ticketId} not found` };
     }
 
-    // 2. Verify sub-state
     // BACKLOG tickets can advance without sign-off (no agent pipeline in BACKLOG).
     // All other columns require SIGNED_OFF from the agent pipeline.
     const isBacklog = ticket.column === Column.BACKLOG;
@@ -42,24 +38,45 @@ export class TicketApproveUseCase implements TicketApprovePort {
       };
     }
 
-    // 3. Determine next column
     const currentColumn = ticket.column;
-    const currentIndex = COLUMN_ORDER.indexOf(currentColumn);
-
-    // 4. If current column is DONE, return already_done
     if (currentColumn === Column.DONE) {
       return { status: 'already_done', ticketId };
     }
 
-    const nextColumn = COLUMN_ORDER[currentIndex + 1];
+    // The epic join: an epic leaving TASK_BREAKDOWN is claiming its children
+    // are finished. Verify that rather than trusting it.
+    if (ticket.kind === TicketKind.EPIC && currentColumn === Column.TASK_BREAKDOWN) {
+      const children = this.ticketRepo.findChildren(projectId, ticketId);
+      const unfinished = children.filter((child) => child.column !== Column.DONE);
+      if (unfinished.length > 0) {
+        const summary = unfinished
+          .map((child) => `${child.id} (${child.column})`)
+          .slice(0, 5)
+          .join(', ');
+        const overflow = unfinished.length > 5 ? `, and ${unfinished.length - 5} more` : '';
+        return {
+          status: 'error',
+          ticketId,
+          error: `Epic ${ticketId} has ${unfinished.length} unfinished task(s): ${summary}${overflow}. Finish them before advancing to DOD_GATE.`,
+        };
+      }
+    }
 
-    // 5. Transition column
+    const nextColumn = nextColumnFor(ticket.kind, currentColumn);
+    if (!nextColumn) {
+      return {
+        status: 'error',
+        ticketId,
+        error: `Ticket ${ticketId} is a ${ticket.kind} in ${currentColumn}, which has no next column in that pipeline.`,
+      };
+    }
+
     const transitionResult = this.stateMachine.transition(projectId, ticketId, nextColumn);
     if (!transitionResult.ok) {
       return { status: 'error', ticketId, error: transitionResult.reason };
     }
 
-    // 6. Set sub-state to READY (new column awaits its first `ticket run`)
+    // Set sub-state to READY (new column awaits its first `ticket run`)
     const subStateResult = this.stateMachine.setSubState(projectId, ticketId, SubState.READY);
     if (!subStateResult.ok) {
       return {
@@ -69,29 +86,14 @@ export class TicketApproveUseCase implements TicketApprovePort {
       };
     }
 
-    // 7. Commit approval to git
-    const aeosDir = path.join(projectPath, '.aeos');
+    // Mirrored to disk; SQLite is authoritative for column and sub-state, so
+    // the advance is not committed to git.
     syncTicketDocument(this.artifactStore, projectPath, {
       ...ticket,
       column: nextColumn,
       subState: SubState.READY,
     });
-    try {
-      this.gitGateway.commit(
-        aeosDir,
-        `[${ticketId}][HUMAN][v1][advance: ${currentColumn} → ${nextColumn}]`,
-      );
-    } catch (err) {
-      // Compensate: revert column and sub-state
-      this.stateMachine.transition(projectId, ticketId, currentColumn);
-      if (!isBacklog) {
-        this.stateMachine.setSubState(projectId, ticketId, SubState.SIGNED_OFF);
-      }
-      syncTicketDocument(this.artifactStore, projectPath, ticket);
-      throw err;
-    }
 
-    // 8. Return success
     return { status: 'advanced', ticketId, fromColumn: currentColumn, toColumn: nextColumn };
   }
 }

@@ -81,11 +81,13 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
     // 7. Commit the answered questions file (and decisions file when promoted)
     const aeosDir = path.join(projectPath, '.aeos');
     const questionsFilePath = path.join(aeosDir, 'tickets', ticketId, questionsFilename);
-    const ticketFilePath = syncTicketDocument(this.artifactStore, projectPath, {
+    syncTicketDocument(this.artifactStore, projectPath, {
       ...ticket,
       subState: SubState.READY,
     });
-    const filesToCommit = [questionsFilePath, ticketFilePath];
+    // The answered questions (and any promoted decisions) are artifacts and
+    // stay in git. The ticket file is state — mirrored to disk, not committed.
+    const filesToCommit = [questionsFilePath];
     if (promotion.status === 'promoted' && promotion.decisionsPath !== null) {
       filesToCommit.push(path.join(aeosDir, 'tickets', ticketId, promotion.decisionsPath));
     }

@@ -37,10 +37,6 @@ describe('ColumnSpecSchema', () => {
     expect(ColumnSpecSchema.parse(validColumnInput()).minWordCount).toBe(50);
   });
 
-  it('applies default maxIterations of 3', () => {
-    expect(ColumnSpecSchema.parse(validColumnInput()).maxIterations).toBe(3);
-  });
-
   it('applies default escalation of escalate_to_human', () => {
     expect(ColumnSpecSchema.parse(validColumnInput()).escalation).toBe('escalate_to_human');
   });
@@ -61,18 +57,15 @@ describe('ColumnSpecSchema', () => {
     expect(result.preflight.questionsArtifact).toBe('questions.md');
   });
 
-  it('accepts optional phase field', () => {
-    expect(ColumnSpecSchema.parse(validColumnInput({ phase: 'PLAN' })).phase).toBe('PLAN');
+  it('leaves maxIterations unset so it can inherit the global cap', () => {
+    expect(ColumnSpecSchema.parse(validColumnInput({})).maxIterations).toBeUndefined();
+    expect(ColumnSpecSchema.parse(validColumnInput({ maxIterations: 2 })).maxIterations).toBe(2);
   });
 
   it('accepts optional executorMode field', () => {
     expect(ColumnSpecSchema.parse(validColumnInput({ executorMode: 'agentic' })).executorMode).toBe(
       'agentic',
     );
-  });
-
-  it('throws ZodError for invalid phase', () => {
-    expect(() => ColumnSpecSchema.parse(validColumnInput({ phase: 'INVALID' }))).toThrow(ZodError);
   });
 
   it('throws ZodError for invalid executorMode', () => {

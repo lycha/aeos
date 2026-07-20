@@ -17,6 +17,11 @@ export interface TicketRepository {
   findById(projectId: string, ticketId: string): Ticket | null;
   /** Returns all tickets for a project, optionally filtered by column, sorted by numeric ticket number */
   findByProject(projectId: string, columnFilter?: Column): Ticket[];
+  /**
+   * Returns the child tasks of an epic, sorted by numeric ticket number.
+   * Empty when the ticket has no children or is itself a task.
+   */
+  findChildren(projectId: string, parentTicketId: string): Ticket[];
   /** Updates a ticket's column and updated_at timestamp */
   updateColumn(projectId: string, ticketId: string, column: Column): void;
   /** Updates a ticket's sub-state and updated_at timestamp */

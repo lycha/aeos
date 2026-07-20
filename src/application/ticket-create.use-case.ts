@@ -9,6 +9,7 @@ import type {
   TicketCreateInput,
   TicketCreateResult,
 } from '../domain/ports/driving/ticket-create.port.js';
+import { TicketKind } from '../domain/model/ticket-kind.js';
 import { buildInitialTicketDocument } from './services/ticket-document.js';
 export class TicketCreateUseCase implements TicketCreatePort {
   constructor(
@@ -18,7 +19,22 @@ export class TicketCreateUseCase implements TicketCreatePort {
   ) {}
 
   execute(input: TicketCreateInput): TicketCreateResult {
-    const { title, projectId, projectKey, projectPath } = input;
+    const { title, projectId, projectKey, projectPath, parentId } = input;
+
+    // A parent makes this a task; without one it is an epic.
+    const kind = parentId ? TicketKind.TASK : TicketKind.EPIC;
+
+    if (parentId) {
+      const parent = this.ticketRepo.findById(projectId, parentId);
+      if (!parent) {
+        throw new Error(`Parent ticket ${parentId} not found`);
+      }
+      if (parent.kind !== TicketKind.EPIC) {
+        throw new Error(
+          `Parent ${parentId} is a ${parent.kind}; tasks may only hang off an EPIC (one level of nesting).`,
+        );
+      }
+    }
 
     // 1. Atomically allocate ID + insert in a single transaction (prevents race conditions)
     const ticket = this.ticketRepo.createAtomic(projectId, (nextNum) => {
@@ -28,6 +44,8 @@ export class TicketCreateUseCase implements TicketCreatePort {
         id: ticketId,
         projectId,
         title,
+        kind,
+        parentId: parentId ?? null,
         column: 'BACKLOG' as const,
         subState: null,
         createdAt: now,
@@ -60,6 +78,6 @@ export class TicketCreateUseCase implements TicketCreatePort {
     }
 
     // 6. Return result
-    return { ticketId, title };
+    return { ticketId, title, kind, parentId: parentId ?? null };
   }
 }
