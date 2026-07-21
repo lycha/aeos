@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { YamlAgentSpecLoader } from './yaml-agent-spec-loader.adapter.js';
+import { FsProjectRepository } from '../filesystem/fs-project.repository.js';
 import { AgentSpecNotFoundError } from '../../shared/errors.js';
 
 /** Minimal valid agent spec YAML content. */
@@ -120,11 +120,20 @@ describe('YamlAgentSpecLoader', () => {
 });
 
 describe('reviewer-agent.yaml integration', () => {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  // Load the committed template specs rather than the dogfood .aeos/, which is
+  // gitignored and therefore absent in a CI checkout. Scaffolding into a temp
+  // dir also tests exactly what `aeos project init` gives a real project.
+  let repoRoot: string;
   let loader: YamlAgentSpecLoader;
 
   beforeEach(() => {
+    repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-agent-int-'));
+    new FsProjectRepository().scaffoldDefaults(repoRoot);
     loader = new YamlAgentSpecLoader();
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
   });
 
   /**
@@ -183,11 +192,20 @@ describe('reviewer-agent.yaml integration', () => {
 });
 
 describe('architect-agent.yaml integration', () => {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  // Load the committed template specs rather than the dogfood .aeos/, which is
+  // gitignored and therefore absent in a CI checkout. Scaffolding into a temp
+  // dir also tests exactly what `aeos project init` gives a real project.
+  let repoRoot: string;
   let loader: YamlAgentSpecLoader;
 
   beforeEach(() => {
+    repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-agent-int-'));
+    new FsProjectRepository().scaffoldDefaults(repoRoot);
     loader = new YamlAgentSpecLoader();
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
   });
 
   /**
@@ -262,11 +280,20 @@ describe('architect-agent.yaml integration', () => {
 });
 
 describe('engineer-agent.yaml integration', () => {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  // Load the committed template specs rather than the dogfood .aeos/, which is
+  // gitignored and therefore absent in a CI checkout. Scaffolding into a temp
+  // dir also tests exactly what `aeos project init` gives a real project.
+  let repoRoot: string;
   let loader: YamlAgentSpecLoader;
 
   beforeEach(() => {
+    repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-agent-int-'));
+    new FsProjectRepository().scaffoldDefaults(repoRoot);
     loader = new YamlAgentSpecLoader();
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
   });
 
   /**
