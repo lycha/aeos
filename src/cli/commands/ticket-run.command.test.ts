@@ -29,7 +29,7 @@ function createMockProjectRepo(): ProjectRepository {
       created_at: '2026-01-01',
     }),
     writeProject: vi.fn(),
-    ensureColumnSpecsDir: vi.fn(),
+    scaffoldDefaults: vi.fn().mockReturnValue([]),
     findRoot: vi.fn().mockReturnValue('/test'),
     readExecutorConfig: vi.fn().mockReturnValue(null),
     readConstraints: vi.fn().mockReturnValue(null),

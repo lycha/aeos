@@ -66,9 +66,30 @@ export function registerTicketShowCommand(
       // eslint-disable-next-line no-console
       console.log(`Title:  ${result.ticket.title}`);
       // eslint-disable-next-line no-console
+      console.log(`Kind:   ${result.ticket.kind}`);
+      if (result.parent) {
+        // eslint-disable-next-line no-console
+        console.log(`Parent: ${result.parent.id} — ${result.parent.title}`);
+      }
+      // eslint-disable-next-line no-console
       console.log(`Column: ${result.ticket.column}`);
       // eslint-disable-next-line no-console
       console.log(`State:  ${subState}`);
+
+      if (result.children.length > 0) {
+        const done = result.children.filter((child) => child.column === 'DONE').length;
+        // eslint-disable-next-line no-console
+        console.log('');
+        // eslint-disable-next-line no-console
+        console.log(`Tasks (${done}/${result.children.length} done):`);
+        for (const child of result.children) {
+          const mark = child.column === 'DONE' ? '✓' : ' ';
+          // eslint-disable-next-line no-console
+          console.log(
+            `  ${mark} ${child.id.padEnd(10)} ${child.column.padEnd(16)} ${child.subState ?? '—'}  ${child.title}`,
+          );
+        }
+      }
 
       if (result.artifacts.length > 0) {
         // eslint-disable-next-line no-console

@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import { YamlAgentSpecLoader } from './yaml-agent-spec-loader.adapter.js';
+import { FsProjectRepository } from '../filesystem/fs-project.repository.js';
 import { AgentSpecNotFoundError } from '../../shared/errors.js';
 
 /** Minimal valid agent spec YAML content. */
@@ -120,11 +120,20 @@ describe('YamlAgentSpecLoader', () => {
 });
 
 describe('reviewer-agent.yaml integration', () => {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  // Load the committed template specs rather than the dogfood .aeos/, which is
+  // gitignored and therefore absent in a CI checkout. Scaffolding into a temp
+  // dir also tests exactly what `aeos project init` gives a real project.
+  let repoRoot: string;
   let loader: YamlAgentSpecLoader;
 
   beforeEach(() => {
+    repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-agent-int-'));
+    new FsProjectRepository().scaffoldDefaults(repoRoot);
     loader = new YamlAgentSpecLoader();
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
   });
 
   /**
@@ -169,9 +178,11 @@ describe('reviewer-agent.yaml integration', () => {
     expect(result.executor.type).toBe('claude-cli');
   });
 
-  it('executor.model is claude-sonnet-4-20250514', () => {
+  // Deliberately a different model from the workers: an independent model
+  // reduces correlated blind spots and self-preference bias in review.
+  it('executor.model differs from the worker agents', () => {
     const result = loader.load('agents/reviewer-agent.yaml', repoRoot);
-    expect(result.executor.model).toBe('claude-sonnet-4-20250514');
+    expect(result.executor.model).toBe('claude-sonnet-5');
   });
 
   it('executor.timeoutSeconds is 180', () => {
@@ -181,11 +192,20 @@ describe('reviewer-agent.yaml integration', () => {
 });
 
 describe('architect-agent.yaml integration', () => {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  // Load the committed template specs rather than the dogfood .aeos/, which is
+  // gitignored and therefore absent in a CI checkout. Scaffolding into a temp
+  // dir also tests exactly what `aeos project init` gives a real project.
+  let repoRoot: string;
   let loader: YamlAgentSpecLoader;
 
   beforeEach(() => {
+    repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-agent-int-'));
+    new FsProjectRepository().scaffoldDefaults(repoRoot);
     loader = new YamlAgentSpecLoader();
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
   });
 
   /**
@@ -212,16 +232,23 @@ describe('architect-agent.yaml integration', () => {
     expect(result.systemPrompt).toContain('testability');
   });
 
-  it('taskInstruction contains guidance for both ARCH_SPIKE and TECH_SPEC columns', () => {
+  it('taskInstruction contains guidance for both TECH_SPEC and TASK_BREAKDOWN columns', () => {
     const result = loader.load('agents/architect-agent.yaml', repoRoot);
-    expect(result.taskInstruction).toContain('### When running in ARCH_SPIKE');
     expect(result.taskInstruction).toContain('### When running in TECH_SPEC');
+    expect(result.taskInstruction).toContain('### When running in TASK_BREAKDOWN');
   });
 
   it('outputFormat contains inline template content for both columns', () => {
     const result = loader.load('agents/architect-agent.yaml', repoRoot);
-    expect(result.outputFormat).toContain('### ARCH_SPIKE output');
     expect(result.outputFormat).toContain('### TECH_SPEC output');
+    expect(result.outputFormat).toContain('### TASK_BREAKDOWN output');
+  });
+
+  it('no longer references the retired ARCH_SPIKE column', () => {
+    const result = loader.load('agents/architect-agent.yaml', repoRoot);
+    expect(result.taskInstruction).not.toContain('ARCH_SPIKE');
+    expect(result.outputFormat).not.toContain('ARCH_SPIKE');
+    expect(result.systemPrompt).not.toContain('ARCH_SPIKE');
   });
 
   it('selfVerificationChecklist contains at least 3 items', () => {
@@ -241,9 +268,9 @@ describe('architect-agent.yaml integration', () => {
     expect(result.executor.type).toBe('claude-cli');
   });
 
-  it('executor.model is claude-sonnet-4-20250514', () => {
+  it('executor.model is claude-opus-4-8', () => {
     const result = loader.load('agents/architect-agent.yaml', repoRoot);
-    expect(result.executor.model).toBe('claude-sonnet-4-20250514');
+    expect(result.executor.model).toBe('claude-opus-4-8');
   });
 
   it('executor.timeoutSeconds is 2340', () => {
@@ -253,11 +280,20 @@ describe('architect-agent.yaml integration', () => {
 });
 
 describe('engineer-agent.yaml integration', () => {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  // Load the committed template specs rather than the dogfood .aeos/, which is
+  // gitignored and therefore absent in a CI checkout. Scaffolding into a temp
+  // dir also tests exactly what `aeos project init` gives a real project.
+  let repoRoot: string;
   let loader: YamlAgentSpecLoader;
 
   beforeEach(() => {
+    repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-agent-int-'));
+    new FsProjectRepository().scaffoldDefaults(repoRoot);
     loader = new YamlAgentSpecLoader();
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
   });
 
   /**
@@ -324,8 +360,8 @@ describe('engineer-agent.yaml integration', () => {
     expect(result.executor.type).toBe('claude-cli');
   });
 
-  it('executor.model is claude-sonnet-4-20250514', () => {
+  it('executor.model is claude-opus-4-8', () => {
     const result = loader.load('agents/engineer-agent.yaml', repoRoot);
-    expect(result.executor.model).toBe('claude-sonnet-4-20250514');
+    expect(result.executor.model).toBe('claude-opus-4-8');
   });
 });

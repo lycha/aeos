@@ -43,6 +43,21 @@ export type TicketRunLifecycleEvent =
       type: 'ticket-run.interrupted';
       payload: { message: string; stage?: TicketRunPhase };
     })
+  // Terminal, and deliberately not a failure: the run completed correctly and
+  // needs a human decision. Renderers should present it as a pause, not an error.
+  | (TicketRunEventBase & {
+      type: 'ticket-run.escalated';
+      payload: {
+        reason: string;
+        message: string;
+        attempt: number;
+        artifactPath?: string;
+      };
+    })
+  | (TicketRunEventBase & {
+      type: 'run.attempt.started';
+      payload: { attempt: number; maxAttempts: number; carryingFeedback: boolean };
+    })
   | (TicketRunEventBase & {
       type: 'stage.started' | 'stage.completed' | 'stage.failed';
       payload: {

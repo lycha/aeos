@@ -18,6 +18,7 @@ import { registerTicketSignOffCommand } from './commands/ticket-sign-off.command
 import { registerTicketMoveCommand } from './commands/ticket-move.command.js';
 import { registerTicketReadyCommand } from './commands/ticket-ready.command.js';
 import { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
+import { registerOrchestratorCommand } from './commands/orchestrator.command.js';
 
 export { createContainer } from './container.js';
 export type { Container } from './container.js';
@@ -59,7 +60,8 @@ export function buildProgram(): Command {
         '  aeos ticket approve <id>                  Advance to next column\n' +
         '  aeos ticket sign-off <id>                 Manually mark as SIGNED_OFF\n' +
         '  aeos ticket move <id> <status>            Move ticket to any status\n' +
-        '  aeos ticket ready <id>                    Reset ticket sub-state to READY\n\n' +
+        '  aeos ticket ready <id>                    Reset ticket sub-state to READY\n' +
+        '  aeos orchestrator run <epicId>            Drive an epic autonomously\n\n' +
         'Environment variables:\n' +
         '  AEOS_EXECUTOR=stub    Use stub executor (default: claude CLI)',
     );
@@ -87,6 +89,7 @@ export function buildProgram(): Command {
     container.rubricLoader,
     container.artifactStore,
   );
+  registerOrchestratorCommand(program, () => container.orchestrator, container.projectRepo);
 
   return program;
 }

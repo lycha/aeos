@@ -12,6 +12,9 @@ import type { TicketSignOffPort } from '../domain/ports/driving/ticket-sign-off.
 import type { TicketMovePort } from '../domain/ports/driving/ticket-move.port.js';
 import type { TicketReadyPort } from '../domain/ports/driving/ticket-ready.port.js';
 import type { TicketDodApprovePort } from '../domain/ports/driving/ticket-dod-approve.port.js';
+import type { OrchestratorPort } from '../domain/ports/driving/orchestrator.port.js';
+import { OrchestratorUseCase } from '../application/orchestrator.use-case.js';
+import { SqliteOrchestratorStateRepository } from '../infrastructure/persistence/sqlite-orchestrator-state.repository.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
@@ -64,6 +67,7 @@ export interface Container {
   ticketMove: TicketMovePort;
   ticketReady: TicketReadyPort;
   ticketDodApprove: TicketDodApprovePort;
+  orchestrator: OrchestratorPort;
   projectRepo: ProjectRepository;
   rubricLoader: RubricLoader;
   artifactStore: ArtifactStore;
@@ -87,6 +91,10 @@ export function createContainer(): Container {
 
   let costRepo: SqliteCostRepository | null = null;
   const getCostRepo = (): SqliteCostRepository => (costRepo ??= new SqliteCostRepository(getDb()));
+
+  let orchestratorStateRepo: SqliteOrchestratorStateRepository | null = null;
+  const getOrchestratorStateRepo = (): SqliteOrchestratorStateRepository =>
+    (orchestratorStateRepo ??= new SqliteOrchestratorStateRepository(getDb()));
 
   let stateMachine: StateMachineService | null = null;
   const getStateMachine = (): StateMachineService =>
@@ -166,29 +174,31 @@ export function createContainer(): Container {
         preflight,
         getCostRepo(),
         executorConfigResolver,
+        configStore,
       );
     },
     get ticketApprove() {
-      return new TicketApproveUseCase(
-        getTicketRepo(),
-        artifactStore,
-        getStateMachine(),
-        gitGateway,
-      );
+      return new TicketApproveUseCase(getTicketRepo(), artifactStore, getStateMachine());
     },
     get ticketSignOff() {
-      return new TicketSignOffUseCase(
-        getTicketRepo(),
-        artifactStore,
-        getStateMachine(),
-        gitGateway,
-      );
+      return new TicketSignOffUseCase(getTicketRepo(), artifactStore, getStateMachine());
     },
     get ticketMove() {
       return new TicketMoveUseCase(getTicketRepo(), artifactStore, getStateMachine(), gitGateway);
     },
     get ticketReady() {
-      return new TicketReadyUseCase(getTicketRepo(), artifactStore, getStateMachine(), gitGateway);
+      return new TicketReadyUseCase(getTicketRepo(), artifactStore, getStateMachine());
+    },
+    get orchestrator() {
+      return new OrchestratorUseCase(
+        getTicketRepo(),
+        getCostRepo(),
+        getOrchestratorStateRepo(),
+        new YamlColumnSpecLoader(),
+        configStore,
+        this.ticketRun,
+        this.ticketApprove,
+      );
     },
     get ticketDodApprove() {
       return new TicketDodApproveUseCase(

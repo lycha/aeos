@@ -5,6 +5,9 @@ coverage/
 .env
 .env.local
 
+# OS
+.DS_Store
+
 # IDE
 .idea/
 /scripts/implementation-script.sh

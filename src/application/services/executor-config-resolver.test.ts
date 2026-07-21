@@ -7,7 +7,7 @@ function createMockProjectRepo(): ProjectRepository {
   return {
     read: vi.fn(),
     writeProject: vi.fn(),
-    ensureColumnSpecsDir: vi.fn(),
+    scaffoldDefaults: vi.fn().mockReturnValue([]),
     findRoot: vi.fn().mockReturnValue('/project'),
     readExecutorConfig: vi.fn().mockReturnValue(null),
     readConstraints: vi.fn().mockReturnValue(null),

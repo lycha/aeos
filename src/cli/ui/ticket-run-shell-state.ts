@@ -51,7 +51,18 @@ export interface TicketRunShellState {
   readonly mode: string;
   readonly subState: string | null;
   readonly activeStage: TicketRunPhase | null;
-  readonly finalStatus: string;
+  /**
+   * Union rather than `string` on purpose: as a bare string, adding a terminal
+   * outcome compiled fine and left the TUI reporting `running` after the run
+   * had ended.
+   */
+  readonly finalStatus:
+    | 'running'
+    | 'completed'
+    | 'blocked'
+    | 'failed'
+    | 'interrupted'
+    | 'escalated';
   readonly interruptRequested: boolean;
   readonly truncatedLines: number;
   readonly rawLines: string[];
@@ -207,6 +218,18 @@ export function applyTicketRunEvent(
       appendLogLine(
         `[run] interrupted${event.payload.stage ? ` at ${event.payload.stage}` : ''} | ${event.payload.message}`,
       );
+      break;
+    case 'ticket-run.escalated':
+      next = { ...flushAllBuffers(next, appendLogLine), finalStatus: 'escalated' };
+      appendLogLine(`[run] escalated | ${event.payload.reason} | ${event.payload.message}`);
+      break;
+    case 'run.attempt.started':
+      // Only worth a line on a retry; the first attempt is implied by the run.
+      if (event.payload.attempt > 1) {
+        appendLogLine(
+          `[run] revision attempt ${event.payload.attempt} of ${event.payload.maxAttempts}`,
+        );
+      }
       break;
   }
 

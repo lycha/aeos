@@ -41,13 +41,49 @@ describe('StubExecutor', () => {
   it('written file contains ticket ID and column', async () => {
     const invocation = makeInvocation({
       ticketId: 'PROJ-99',
-      column: Column.ARCH_SPIKE,
+      column: Column.TECH_SPEC,
     });
     await executor.run(invocation);
 
     const content = await fs.readFile(invocation.outputPath, 'utf8');
     expect(content).toContain('**Ticket:** PROJ-99');
-    expect(content).toContain('**Column:** ARCH_SPIKE');
+    expect(content).toContain('**Column:** TECH_SPEC');
+  });
+
+  it('emits a parseable verdict trailer when standing in for a reviewer', async () => {
+    // Without this, every AEOS_EXECUTOR=stub run escalates as
+    // UNPARSEABLE_VERDICT and the pipeline cannot be exercised offline.
+    const invocation = makeInvocation({ ticketId: 'PROJ-99', column: Column.TECH_SPEC });
+    const reviewInvocation = {
+      ...invocation,
+      outputPath: invocation.outputPath.replace(/\.md$/, '-review.md'),
+    };
+
+    const result = await executor.run(reviewInvocation);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.content).toContain('AEOS-VERDICT');
+    expect(result.ok && result.content).toContain('verdict: APPROVED');
+  });
+
+  it('answers NO_BLOCKERS when standing in for preflight', async () => {
+    // Anything else reads as blocking questions, which would strand every
+    // stub run at the first column with preflight enabled.
+    const invocation = makeInvocation({});
+    const preflight = {
+      ...invocation,
+      outputPath: path.join(path.dirname(invocation.outputPath), 'preflight-PROJ-1-abc.md'),
+    };
+
+    const result = await executor.run(preflight);
+
+    expect(result.ok && result.content).toBe('NO_BLOCKERS');
+  });
+
+  it('does not emit a verdict trailer for worker output', async () => {
+    const result = await executor.run(makeInvocation({ column: Column.TECH_SPEC }));
+
+    expect(result.ok && result.content).not.toContain('AEOS-VERDICT');
   });
 
   it('written file contains stub header and description', async () => {

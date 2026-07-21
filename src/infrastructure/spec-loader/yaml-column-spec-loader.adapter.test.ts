@@ -52,7 +52,8 @@ describe('YamlColumnSpecLoader', () => {
 
     const result = loader.load(Column.PRODUCT_SCOPING, tmpDir);
     expect(result.minWordCount).toBe(50);
-    expect(result.maxIterations).toBe(3);
+    // Unset in YAML so it inherits the global reviewLoop cap.
+    expect(result.maxIterations).toBeUndefined();
     expect(result.escalation).toBe('escalate_to_human');
     expect(result.advanceMode).toBe('manual');
     expect(result.requiredSections).toEqual([]);
@@ -68,12 +69,12 @@ describe('YamlColumnSpecLoader', () => {
     expect(result.executorMode).toBe('agentic');
   });
 
-  it('loads architecture-spike spec for ARCH_SPIKE column', () => {
-    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'architecture-spike.yaml');
-    fs.writeFileSync(specPath, validColumnSpecYaml({ column: 'ARCH_SPIKE' }), 'utf-8');
+  it('loads task-breakdown spec for TASK_BREAKDOWN column', () => {
+    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'task-breakdown.yaml');
+    fs.writeFileSync(specPath, validColumnSpecYaml({ column: 'TASK_BREAKDOWN' }), 'utf-8');
 
-    const result = loader.load(Column.ARCH_SPIKE, tmpDir);
-    expect(result.column).toBe('ARCH_SPIKE');
+    const result = loader.load(Column.TASK_BREAKDOWN, tmpDir);
+    expect(result.column).toBe('TASK_BREAKDOWN');
   });
 
   it('throws ColumnSpecNotFoundError for BACKLOG column', () => {
@@ -119,8 +120,8 @@ describe('YamlColumnSpecLoader', () => {
   it('maps all expected columns to correct filenames', () => {
     const mappings: Array<[Column, string]> = [
       [Column.PRODUCT_SCOPING, 'product-scoping'],
-      [Column.ARCH_SPIKE, 'architecture-spike'],
       [Column.TECH_SPEC, 'tech-spec'],
+      [Column.TASK_BREAKDOWN, 'task-breakdown'],
       [Column.IMPLEMENTATION, 'implementation'],
       [Column.CODE_REVIEW, 'code-review'],
       [Column.QA, 'qa'],

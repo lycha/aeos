@@ -17,6 +17,7 @@ function createMockTicketRepo(): TicketRepository {
     deleteById: vi.fn(),
     findById: vi.fn().mockReturnValue(null),
     findByProject: vi.fn().mockReturnValue([]),
+    findChildren: vi.fn().mockReturnValue([]),
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
   };
@@ -67,6 +68,8 @@ function dodGateTicket(): Ticket {
     id: TICKET_ID,
     projectId: PROJECT_ID,
     title: 'Test ticket',
+    kind: 'EPIC',
+    parentId: null,
     column: 'DOD_GATE',
     subState: 'SIGNED_OFF',
     createdAt: '2025-01-01T09:00:00Z',

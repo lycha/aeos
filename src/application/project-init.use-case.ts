@@ -30,16 +30,15 @@ export class ProjectInitUseCase implements ProjectInitPort {
 
     const now = new Date().toISOString();
 
-    // If already initialised, return existing project info (idempotent)
+    // If already initialised, return existing project info (idempotent).
+    // Re-running is also the repair path: anything missing is restored,
+    // anything present is left exactly as the user edited it.
     if (this.projectRepo.exists(cwd)) {
       const existing = this.projectRepo.read(cwd);
-      // Ensure registry is up-to-date even on re-run
       this.ensureRegistered(existing, cwd);
-      // Ensure column-specs dir exists
-      this.projectRepo.ensureColumnSpecsDir(cwd);
-      // Ensure CONSTRAINTS.md placeholder exists
+      const restored = this.projectRepo.scaffoldDefaults(cwd);
       this.projectRepo.writeConstraintsPlaceholder(cwd);
-      return { name: existing.name, key: existing.key };
+      return { name: existing.name, key: existing.key, scaffolded: restored };
     }
 
     const uuid = crypto.randomUUID();
@@ -60,8 +59,10 @@ export class ProjectInitUseCase implements ProjectInitPort {
     const aeosDir = path.join(cwd, '.aeos');
     this.gitGateway.init(aeosDir);
 
-    // 3. Create column-specs/ directory
-    this.projectRepo.ensureColumnSpecsDir(cwd);
+    // 3. Scaffold the default column specs, agents, and rubrics. Without these
+    //    the project has no pipeline to run — `ticket run` fails immediately
+    //    with a missing column spec.
+    const scaffolded = this.projectRepo.scaffoldDefaults(cwd);
 
     // 4. Write CONSTRAINTS.md placeholder
     this.projectRepo.writeConstraintsPlaceholder(cwd);
@@ -69,7 +70,7 @@ export class ProjectInitUseCase implements ProjectInitPort {
     // 5. Register in global registry
     this.ensureRegistered(project, cwd);
 
-    return { name, key };
+    return { name, key, scaffolded };
   }
 
   private ensureRegistered(project: Project, cwd: string): void {

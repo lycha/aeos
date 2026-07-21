@@ -1,0 +1,18 @@
+column: TASK_BREAKDOWN
+executorMode: artifact
+workerAgentFile: agents/architect-agent.yaml
+reviewerAgentFile: agents/reviewer-agent.yaml
+outputArtifact: tasks.md
+minWordCount: 100
+requiredSections: []
+reviewerRubrics:
+  - rubrics/structure/tech-spec-structure.md
+  - rubrics/drift/intent-drift.md
+# The breakdown is reviewed as ONE artifact, not per task. Atomicity, ordering,
+# and collective sufficiency are properties of the set — a per-task review
+# cannot see them, and would cost N review loops before any code is written.
+escalation: escalate_to_human
+advanceMode: manual
+preflight:
+  enabled: false
+  questionsArtifact: questions.md

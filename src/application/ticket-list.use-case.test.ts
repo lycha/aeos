@@ -11,6 +11,7 @@ function createMockTicketRepo(): TicketRepository {
     deleteById: vi.fn(),
     findById: vi.fn().mockReturnValue(null),
     findByProject: vi.fn().mockReturnValue([]),
+    findChildren: vi.fn().mockReturnValue([]),
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
   };
@@ -21,6 +22,8 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     id: 'AEOS-1',
     projectId: 'proj-1',
     title: 'Test ticket',
+    kind: 'EPIC',
+    parentId: null,
     column: 'BACKLOG',
     subState: null,
     createdAt: '2026-01-01T00:00:00.000Z',

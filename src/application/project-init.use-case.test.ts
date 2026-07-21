@@ -10,7 +10,7 @@ function createMockProjectRepo(): ProjectRepository {
     exists: vi.fn().mockReturnValue(false),
     read: vi.fn(),
     writeProject: vi.fn(),
-    ensureColumnSpecsDir: vi.fn(),
+    scaffoldDefaults: vi.fn().mockReturnValue([]),
     findRoot: vi.fn().mockReturnValue(null),
     readExecutorConfig: vi.fn().mockReturnValue(null),
     readConstraints: vi.fn().mockReturnValue(null),
@@ -55,7 +55,7 @@ describe('ProjectInitUseCase', () => {
   it('should create project with correct slug id from name', () => {
     const result = useCase.execute({ name: 'My Project', key: 'MYPR', cwd: '/tmp/my-project' });
 
-    expect(result).toEqual({ name: 'My Project', key: 'MYPR' });
+    expect(result).toEqual({ name: 'My Project', key: 'MYPR', scaffolded: [] });
 
     const writtenProject = (projectRepo.writeProject as ReturnType<typeof vi.fn>).mock
       .calls[0][0] as Project;
@@ -72,9 +72,9 @@ describe('ProjectInitUseCase', () => {
     expect(gitGateway.init).toHaveBeenCalledWith('/tmp/test/.aeos');
   });
 
-  it('should create column-specs directory', () => {
+  it('should scaffold default specs, agents, and rubrics', () => {
     useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test' });
-    expect(projectRepo.ensureColumnSpecsDir).toHaveBeenCalledWith('/tmp/test');
+    expect(projectRepo.scaffoldDefaults).toHaveBeenCalledWith('/tmp/test');
   });
 
   it('should write CONSTRAINTS.md placeholder on fresh init', () => {
@@ -109,7 +109,7 @@ describe('ProjectInitUseCase', () => {
 
     const result = useCase.execute({ name: 'Different', key: 'DIFF', cwd: '/tmp/existing' });
 
-    expect(result).toEqual({ name: 'Existing', key: 'EXST' });
+    expect(result).toEqual({ name: 'Existing', key: 'EXST', scaffolded: [] });
     expect(projectRepo.writeProject).not.toHaveBeenCalled();
     expect(gitGateway.init).not.toHaveBeenCalled();
     // writeConstraintsPlaceholder IS called on re-init (idempotent — skips if file exists)
@@ -154,8 +154,8 @@ describe('ProjectInitUseCase', () => {
     (gitGateway.init as ReturnType<typeof vi.fn>).mockImplementation(() =>
       callOrder.push('gitInit'),
     );
-    (projectRepo.ensureColumnSpecsDir as ReturnType<typeof vi.fn>).mockImplementation(() =>
-      callOrder.push('ensureColumnSpecsDir'),
+    (projectRepo.scaffoldDefaults as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      callOrder.push('scaffoldDefaults'),
     );
     (projectRepo.writeConstraintsPlaceholder as ReturnType<typeof vi.fn>).mockImplementation(() =>
       callOrder.push('writeConstraintsPlaceholder'),
@@ -170,7 +170,7 @@ describe('ProjectInitUseCase', () => {
     expect(callOrder).toEqual([
       'writeProject',
       'gitInit',
-      'ensureColumnSpecsDir',
+      'scaffoldDefaults',
       'writeConstraintsPlaceholder',
       'writeRegistry',
     ]);

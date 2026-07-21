@@ -37,7 +37,9 @@ export function registerTicketApproveCommand(
           case 'advanced':
             // eslint-disable-next-line no-console
             console.log(
-              `✓ Ticket ${result.ticketId} advanced: ${result.fromColumn} → ${result.toColumn} (sub-state: BLOCKED)`,
+              // READY, not BLOCKED — approve resets the new column to READY so
+              // it awaits its first `ticket run`.
+              `✓ Ticket ${result.ticketId} advanced: ${result.fromColumn} → ${result.toColumn} (sub-state: READY)`,
             );
             break;
           case 'already_done':

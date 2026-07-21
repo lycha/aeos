@@ -29,7 +29,8 @@ aeos install
 ## Quick Start
 
 ```bash
-# 1. Initialise a project
+# 1. Initialise a project — scaffolds .aeos/ with a working pipeline:
+#    column specs, agent specs, and reviewer rubrics
 aeos project init --name "My Project" --key MYPRJ
 
 # 2. Create a ticket
@@ -56,22 +57,57 @@ aeos ticket dod-approve MYPRJ-1
 
 ## How It Works
 
+A ticket is either an **epic** or a **task**, and each follows its own pipeline.
+
 ```
-BACKLOG → PRODUCT_SCOPING → ARCH_SPIKE → TECH_SPEC → IMPLEMENTATION → CODE_REVIEW → QA → DOD_GATE → DONE
-           PM Agent          Architect    Architect    Engineer         Engineer       QA     Human
-           ↓                 ↓            ↓            ↓                ↓              ↓      ↓
-           PRD               Spike        Tech Spec    Code + Summary   Code Review    Report  ✓
-           ↓                 ↓            ↓            ↓                ↓              ↓
-           Reviewer          Reviewer     Reviewer     Reviewer         Reviewer       Reviewer
+EPIC   BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN ─────────→ DOD_GATE → DONE
+                 PM Agent          Architect    Architect                 Human
+                 ↓                 ↓            ↓                           ▲
+                 PRD               Tech Spec    tasks.md                    │
+                 ↓                 ↓            ↓                           │
+                 Reviewer          Reviewer     Reviewer                    │
+                                                │                           │
+                                   fans out into child tasks    all children DONE
+                                                ▼                           │
+TASK   BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE ───────────────────┘
+                 Engineer          Engineer      QA
+                 ↓                 ↓             ↓
+                 Code + Summary    Code Review   Report
+                 ↓                 ↓             ↓
+                 Reviewer          Reviewer      Reviewer
 ```
 
+An epic is scoped, specced, and decomposed — it never implements anything itself.
+Its child tasks do that, and the epic cannot leave `TASK_BREAKDOWN` until every
+child reaches `DONE`.
+
 Each column follows the same cycle:
+
 1. **Pre-flight** — agent checks for blocking questions; if found, ticket is `BLOCKED` until answered via `aeos ticket answer`
 2. **Agent run** — specialised worker agent executes the current column. Most columns produce a markdown artifact; `IMPLEMENTATION` can run in agentic mode and modify the repository directly, then emit a concise implementation summary.
 3. **Validation** — rule-based structural checks (for example non-empty output, required sections, and column-specific constraints). Agentic `IMPLEMENTATION` runs must also leave a real repo diff.
-4. **Review** — reviewer agent evaluates against column-specific rubrics; `REJECTED` reviews set ticket to `FAILED`
-5. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
-6. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
+4. **Review** — a reviewer agent (on a _different model_ from the worker) evaluates against column-specific rubrics and emits a machine-readable verdict: `APPROVED`, `APPROVED_WITH_WARNINGS`, or `REJECTED`. Only `BLOCKER` findings gate; warnings are recorded on the artifact and do not block.
+5. **Revision loop** — a `REJECTED` review sends the artifact back to the worker with the review attached, up to the configured cap. See [Review Loop](#review-loop).
+6. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
+7. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
+
+## What `project init` creates
+
+```
+.aeos/
+├── project.json          project identity and optional executor defaults
+├── CONSTRAINTS.md         placeholder for your architecture/style/security rules
+├── column-specs/          one YAML per pipeline column
+├── agents/                worker and reviewer agent specs
+└── rubrics/               reviewer rubrics and artifact templates
+```
+
+Everything under `column-specs/`, `agents/`, and `rubrics/` is scaffolded from the
+templates shipped with AEOS and is **yours to edit** — changing pipeline behaviour
+usually means editing this YAML, not TypeScript.
+
+Re-running `aeos project init` is the repair path: it restores anything missing and
+never overwrites a file you have edited.
 
 ## Ticket State Machine
 
@@ -84,9 +120,15 @@ Think of the state machine as `column + sub-state`.
 
 ### Columns
 
-The forward pipeline order is:
+The forward order depends on the ticket's kind:
 
-`BACKLOG → PRODUCT_SCOPING → ARCH_SPIKE → TECH_SPEC → IMPLEMENTATION → CODE_REVIEW → QA → DOD_GATE → DONE`
+| Kind   | Pipeline                                                                   |
+| ------ | -------------------------------------------------------------------------- |
+| `EPIC` | `BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN → DOD_GATE → DONE` |
+| `TASK` | `BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE`                       |
+
+`aeos ticket approve` uses the kind to pick the next column, so a task never
+visits `PRODUCT_SCOPING` and an epic never visits `IMPLEMENTATION`.
 
 ### Sub-states
 
@@ -98,7 +140,15 @@ AEOS currently supports these sub-states:
 - `INTERRUPTED` — work was deliberately stopped before completion
 - `FAILED` — execution, validation, or review failed
 - `IN_REVIEW` — output exists and is being reviewed
+- `ESCALATED` — stopped cleanly and needs a human decision (**not** a failure)
 - `SIGNED_OFF` — the column passed review and is waiting for a human gate
+
+`FAILED` and `ESCALATED` are deliberately distinct. `FAILED` means something broke — the
+executor crashed, validation rejected the output. `ESCALATED` means the pipeline worked
+correctly and reached a point only a human can resolve: preflight raised blocking questions,
+the revision loop hit its cap, successive attempts stopped converging, or the reviewer
+produced no parseable verdict. Keeping them apart is what lets you answer "why did this
+stall?" from the transition log.
 
 ### Normal lifecycle inside an active column
 
@@ -118,17 +168,21 @@ After a human approves the ticket with `aeos ticket approve <id>`, it moves to t
 
 The normal persisted combinations are:
 
-| Column | Allowed sub-state values |
-|--------|--------------------------|
-| `BACKLOG` | `null` only |
-| `PRODUCT_SCOPING` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
-| `ARCH_SPIKE` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
-| `TECH_SPEC` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
-| `IMPLEMENTATION` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
-| `CODE_REVIEW` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
-| `QA` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
-| `DOD_GATE` | `READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `IN_REVIEW`, `SIGNED_OFF` |
-| `DONE` | `null` only |
+Every non-terminal column allows the same set:
+
+`READY`, `BLOCKED`, `WORKING`, `INTERRUPTED`, `FAILED`, `ESCALATED`, `IN_REVIEW`, `SIGNED_OFF`
+
+| Column            | Kind | Allowed sub-state values |
+| ----------------- | ---- | ------------------------ |
+| `BACKLOG`         | both | `null` only              |
+| `PRODUCT_SCOPING` | epic | all eight                |
+| `TECH_SPEC`       | epic | all eight                |
+| `TASK_BREAKDOWN`  | epic | all eight                |
+| `IMPLEMENTATION`  | task | all eight                |
+| `CODE_REVIEW`     | task | all eight                |
+| `QA`              | task | all eight                |
+| `DOD_GATE`        | epic | all eight                |
+| `DONE`            | both | `null` only              |
 
 In other words:
 
@@ -157,13 +211,13 @@ AEOS supports multiple executor backends. The effective executor for a run is re
 
 ### Supported executor types
 
-| Executor | Typical use | Agentic `IMPLEMENTATION` support |
-|---------|-------------|-----------------------------------|
-| `claude-cli` | Default cloud coding workflow | Yes |
-| `auggie-cli` | Augment/Auggie coding workflow | Yes |
-| `opencode-cli` | Local-model or alternative agent runtime | Yes |
-| `ollama-cli` | Simple local artifact generation | No — artifact-only |
-| `stub` | Tests / local dry runs | Yes (test stub only) |
+| Executor       | Typical use                              | Agentic `IMPLEMENTATION` support |
+| -------------- | ---------------------------------------- | -------------------------------- |
+| `claude-cli`   | Default cloud coding workflow            | Yes                              |
+| `auggie-cli`   | Augment/Auggie coding workflow           | Yes                              |
+| `opencode-cli` | Local-model or alternative agent runtime | Yes                              |
+| `ollama-cli`   | Simple local artifact generation         | No — artifact-only               |
+| `stub`         | Tests / local dry runs                   | Yes (test stub only)             |
 
 ### Project-level executor defaults
 
@@ -199,27 +253,209 @@ Notes:
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `aeos install` | One-time global setup (`~/.aeos/`, global gitignore) |
-| `aeos project init [--name] [--key]` | Initialise `.aeos/` in the current directory |
-| `aeos ticket create <title>` | Create a new ticket in BACKLOG |
-| `aeos ticket list [--column]` | List tickets, optionally filtered by column |
-| `aeos ticket show <id>` | Show ticket details, column, sub-state, artifacts, and recorded executions |
-| `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review |
-| `aeos ticket approve <id>` | Advance a SIGNED_OFF ticket to the next column |
-| `aeos ticket sign-off <id>` | Manual override — set a ticket sub-state to SIGNED_OFF |
-| `aeos ticket move <id> <status>` | Human override — move a ticket directly to any workflow status |
-| `aeos ticket answer <id>` | Unblock a ticket after answering pre-flight questions |
-| `aeos ticket dod-approve <id>` | Final human gate — mark ticket as DONE *(not yet implemented)* |
-| `aeos dashboard` | Cross-project Kanban summary *(not yet implemented)* |
-| `aeos costs [--project] [--ticket]` | LLM spend report *(not yet implemented)* |
+| Command                                                      | Description                                                                |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `aeos install`                                               | One-time global setup (`~/.aeos/`, global gitignore)                       |
+| `aeos project init [--name] [--key]`                         | Initialise `.aeos/` in the current directory                               |
+| `aeos ticket create <title> [--parent <epicId>]`             | Create a ticket in BACKLOG — an epic by default, a task with `--parent`    |
+| `aeos ticket list [--column]`                                | List tickets, optionally filtered by column                                |
+| `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, and recorded executions |
+| `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |
+| `aeos ticket approve <id>`                                   | Advance a SIGNED_OFF ticket to the next column                             |
+| `aeos ticket sign-off <id>`                                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
+| `aeos ticket move <id> <status>`                             | Human override — move a ticket directly to any workflow status             |
+| `aeos ticket answer <id>`                                    | Unblock a ticket after answering pre-flight questions                      |
+| `aeos ticket dod-approve <id>`                               | Final human gate — mark ticket as DONE _(not yet implemented)_             |
+| `aeos dashboard`                                             | Cross-project Kanban summary _(not yet implemented)_                       |
+| `aeos costs [--project] [--ticket]`                          | LLM spend report _(not yet implemented)_                                   |
+
+## Epics and Tasks
+
+A ticket created without a parent is an **epic**. It carries a requirement through
+scoping, spec, and decomposition, and its `TASK_BREAKDOWN` artifact (`tasks.md`)
+lists the atomic tasks that will implement it.
+
+```bash
+# 1. An epic
+aeos ticket create "Add user authentication"        # → AEOS-1 (EPIC)
+
+# 2. Run it through scoping, spec, and breakdown
+aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # PRD
+aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tech spec
+aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tasks.md
+
+# 3. Create the tasks the breakdown identified
+aeos ticket create "Add password hashing" --parent AEOS-1   # → AEOS-2 (TASK)
+aeos ticket create "Add session middleware" --parent AEOS-1 # → AEOS-3 (TASK)
+
+# 4. Each task runs its own build pipeline
+aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation
+...
+
+# 5. Only once every task is DONE can the epic advance
+aeos ticket approve AEOS-1                             # → DOD_GATE
+```
+
+Nesting is one level deep: tasks hang off epics, and a task cannot itself have
+children. Attempting to advance an epic out of `TASK_BREAKDOWN` while any child
+is unfinished reports which tasks are outstanding and refuses the transition.
+
+> Creating child tickets from `tasks.md` is a manual step today. Automating that
+> decomposition belongs with the orchestrator, which owns scheduling.
+
+## Orchestrator
+
+`aeos orchestrator run <epicId>` drives an epic and its tasks without a human in
+the loop, stopping the moment one is needed.
+
+```bash
+aeos orchestrator run AEOS-1 --budget 25
+```
+
+```
+  AEOS-1: advanced BACKLOG → PRODUCT_SCOPING
+  AEOS-1: run succeeded in 1 attempt(s)
+  AEOS-1: advanced PRODUCT_SCOPING → TECH_SPEC
+  AEOS-1: run succeeded in 2 attempt(s)
+  ...
+
+⏸ AEOS-1 — AWAITING_DECOMPOSITION
+  Epic AEOS-1 is decomposed but has no child tasks. Create them from its
+  tasks.md with `aeos ticket create <title> --parent AEOS-1`.
+  6 action(s), $3.41 spent
+```
+
+**The scheduler is deterministic, not an LLM.** Every decision it makes — is the
+budget spent, is this signed off, are all children done — is a predicate over
+stored state. Putting a model in the control path would add cost per tick, make
+control flow non-deterministic, and make "why did this advance?" unanswerable
+from the transition log. LLM judgment stays in the workers and reviewers it
+schedules.
+
+### Why a run stops
+
+Every exit is a named halt reason, including the successful ones.
+
+| Halt reason              | Meaning                                                  |
+| ------------------------ | -------------------------------------------------------- |
+| `COMPLETE`               | The epic reached `DONE`                                  |
+| `HUMAN_GATE`             | Reached `DOD_GATE` — final sign-off is human-only        |
+| `AWAITING_APPROVAL`      | A column is set to manual advance                        |
+| `AWAITING_DECOMPOSITION` | The breakdown is signed off but no child tasks exist yet |
+| `NEEDS_HUMAN`            | A ticket escalated, blocked, or was interrupted          |
+| `FAILED`                 | A ticket failed outright                                 |
+| `BUDGET_EXCEEDED`        | Spend reached the ceiling                                |
+
+### Controls
+
+| Command                                                             | Effect                                             |
+| ------------------------------------------------------------------- | -------------------------------------------------- |
+| `aeos orchestrator run <epicId> [--budget <usd>] [--max-steps <n>]` | Drive the epic; the budget persists for later runs |
+| `aeos orchestrator pause <epicId>`                                  | Refuse to schedule new work for this epic          |
+| `aeos orchestrator resume <epicId>`                                 | Allow scheduling again                             |
+| `aeos orchestrator status [epicId]`                                 | Show status, last halt reason, and budget          |
+
+### One driver per epic
+
+An epic is driven by one run at a time. A second `orchestrator run` against the
+same epic refuses rather than double-scheduling its tasks.
+
+The lock is a heartbeat, not a flag: a live run touches the epic's row
+continuously — riding the ticket run's own event stream, so even a 30-minute
+agentic build keeps it fresh. A row that goes quiet for five minutes is treated
+as abandoned and the next run takes over, so a crashed process cannot lock an
+epic out permanently. An unexpected error clears the lock on the way out.
+
+If you are certain a run is gone and do not want to wait, `aeos orchestrator
+resume <epicId>` clears the lock.
+
+**Turning it off is always safe.** All state lives in SQLite and git-committed
+markdown, so a paused or halted epic is just a set of tickets in ordinary
+sub-states that you can drive by hand with `aeos ticket run` / `approve`. The
+orchestrator adds auto-advance; it does not replace the manual path.
+
+Two things it will never do: advance past `DOD_GATE`, and merge a pull request.
+
+### Auto-advance
+
+The orchestrator only advances a column when that column permits it. Column
+specs win over the global setting:
+
+```yaml
+# .aeos/column-specs/tech-spec.yaml
+advanceMode: manual # gate the highest-leverage artifact, auto-advance the rest
+```
+
+```json
+// ~/.aeos/config.json
+{ "advanceMode": "auto" }
+```
+
+With the global default of `manual`, `orchestrator run` halts at the first
+sign-off with `AWAITING_APPROVAL` — safe by default, opt in to autonomy.
+
+## Review Loop
+
+A rejected review sends the artifact back to the worker with the review attached, rather
+than failing the ticket outright. Four independent guards keep the loop finite — "iterate
+until the reviewer has no comments" does not terminate on its own, because reviewers
+essentially always find something:
+
+| Guard                 | Behaviour                                                                                                                     |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Severity gate**     | Only `BLOCKER` findings block. `APPROVED_WITH_WARNINGS` advances; warnings are recorded on the artifact.                      |
+| **Iteration cap**     | Default 5 attempts including the first.                                                                                       |
+| **Convergence**       | If an attempt reproduces the previous attempt's blocker set, the loop stops early rather than burning its remaining attempts. |
+| **Escalation policy** | On exhaustion, the column's `escalation` setting applies: `escalate_to_human` (default) or `mark_done`.                       |
+
+Configure globally in `~/.aeos/config.json`:
+
+```json
+{
+  "model": "claude-opus-4-8",
+  "currency": "USD",
+  "advanceMode": "manual",
+  "reviewLoop": {
+    "enabled": true,
+    "maxIterations": 5
+  }
+}
+```
+
+Set `"enabled": false` to switch the loop off entirely — a rejected review then escalates
+immediately, with no revision attempt. A column spec may override the cap with its own
+`maxIterations`; omitting it inherits the global value.
+
+### Reviewer verdict contract
+
+Reviewers emit a prose review for humans **and** a machine-readable trailer that loop
+control reads. The prose is never parsed:
+
+```markdown
+<!-- AEOS-VERDICT
+verdict: REJECTED
+blockers: 2
+warnings: 1
+info: 0
+blocker-topics: missing-rollback-path, unbounded-retry
+-->
+```
+
+`blocker-topics` are stable kebab-case slugs reused across reviews when the same defect
+persists — that is what convergence detection compares. A missing or unparseable trailer
+is a hard escalation, never silently treated as approval.
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AEOS_EXECUTOR` | unset | Set to `stub` to force the stub executor for testing without real LLM/CLI calls |
+| Variable        | Default   | Description                                                                     |
+| --------------- | --------- | ------------------------------------------------------------------------------- |
+| `AEOS_EXECUTOR` | unset     | Set to `stub` to force the stub executor for testing without real LLM/CLI calls |
+| `AEOS_HOME`     | `~/.aeos` | Override the global state directory (config, registry, `state.db`)              |
+
+`AEOS_EXECUTOR=stub` drives the full pipeline offline: the stub clears preflight,
+satisfies structural validation, and emits an APPROVED verdict when standing in for
+a reviewer. The one thing it cannot do is agentic `IMPLEMENTATION` — it writes no
+code, so the required repo diff is absent and the run fails by design.
 
 ## Architecture
 

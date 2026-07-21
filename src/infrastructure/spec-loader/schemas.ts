@@ -5,7 +5,6 @@ import { z } from 'zod';
 
 export const ColumnSpecSchema = z.object({
   column: z.string().min(1),
-  phase: z.enum(['PLAN', 'PREPARE', 'BUILD', 'DEPLOY']).optional(),
   executorMode: z.enum(['artifact', 'agentic']).optional(),
   workerAgentFile: z.string().min(1),
   reviewerAgentFile: z.string().min(1),
@@ -13,7 +12,9 @@ export const ColumnSpecSchema = z.object({
   minWordCount: z.number().int().positive().default(50),
   requiredSections: z.array(z.string()).default([]),
   reviewerRubrics: z.array(z.string()).default([]),
-  maxIterations: z.number().int().positive().default(3),
+  // Optional on purpose: absent means "inherit the global reviewLoop cap".
+  // A schema default would make "unset" indistinguishable from an explicit value.
+  maxIterations: z.number().int().positive().optional(),
   escalation: z.enum(['escalate_to_human', 'mark_done']).default('escalate_to_human'),
   advanceMode: z.enum(['manual', 'auto']).default('manual'),
   preflight: z

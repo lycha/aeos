@@ -78,10 +78,29 @@ export function registerTicketListCommand(
         // eslint-disable-next-line no-console
         console.log(header);
 
+        // Nest tasks under their epic so hierarchy is visible at a glance.
+        // Under a column filter the parent may be absent from the result set,
+        // so anything whose parent is missing is rendered at top level.
+        const present = new Set(tickets.map((t) => t.id));
+        const childrenOf = new Map<string, typeof tickets>();
         for (const ticket of tickets) {
+          if (ticket.parentId && present.has(ticket.parentId)) {
+            const siblings = childrenOf.get(ticket.parentId) ?? [];
+            siblings.push(ticket);
+            childrenOf.set(ticket.parentId, siblings);
+          }
+        }
+        const ordered = tickets.flatMap((ticket) => {
+          if (ticket.parentId && present.has(ticket.parentId)) return [];
+          return [ticket, ...(childrenOf.get(ticket.id) ?? [])];
+        });
+
+        for (const ticket of ordered) {
+          const nested = ticket.parentId !== null && present.has(ticket.parentId);
           const subState = ticket.subState ?? '—';
+          const displayId = nested ? `└ ${ticket.id}` : ticket.id;
           const truncId =
-            ticket.id.length > COL_ID ? ticket.id.substring(0, COL_ID - 1) + '…' : ticket.id;
+            displayId.length > COL_ID ? displayId.substring(0, COL_ID - 1) + '…' : displayId;
           const truncTitle =
             ticket.title.length > COL_TITLE
               ? ticket.title.substring(0, COL_TITLE - 1) + '…'

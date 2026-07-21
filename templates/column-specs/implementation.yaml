@@ -1,0 +1,17 @@
+column: IMPLEMENTATION
+phase: BUILD
+executorMode: agentic
+workerAgentFile: agents/engineer-agent.yaml
+reviewerAgentFile: agents/reviewer-agent.yaml
+outputArtifact: implementation-notes.md
+minWordCount: 50
+requiredSections: []
+reviewerRubrics:
+  - rubrics/structure/impl-structure.md
+  - rubrics/drift/intent-drift.md
+maxIterations: 3
+escalation: escalate_to_human
+advanceMode: manual
+preflight:
+  enabled: true
+  questionsArtifact: questions.md

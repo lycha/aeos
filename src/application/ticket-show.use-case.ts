@@ -35,6 +35,13 @@ export class TicketShowUseCase implements TicketShowPort {
       recordedAt: record.recordedAt,
     }));
 
-    return { ok: true, ticket, artifacts, executions };
+    // Lineage: an epic shows what it decomposed into, a task shows what it
+    // belongs to. Without this a task is indistinguishable from an epic.
+    const children = this.ticketRepo.findChildren(input.projectId, ticket.id);
+    const parent = ticket.parentId
+      ? this.ticketRepo.findById(input.projectId, ticket.parentId)
+      : null;
+
+    return { ok: true, ticket, artifacts, executions, children, parent };
   }
 }

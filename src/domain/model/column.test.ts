@@ -19,8 +19,8 @@ describe('COLUMN_ORDER', () => {
     expect([...COLUMN_ORDER]).toEqual([
       'BACKLOG',
       'PRODUCT_SCOPING',
-      'ARCH_SPIKE',
       'TECH_SPEC',
+      'TASK_BREAKDOWN',
       'IMPLEMENTATION',
       'CODE_REVIEW',
       'QA',

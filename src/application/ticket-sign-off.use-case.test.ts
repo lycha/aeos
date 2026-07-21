@@ -16,6 +16,7 @@ function createMockTicketRepo(): TicketRepository {
     deleteById: vi.fn(),
     findById: vi.fn(),
     findByProject: vi.fn(),
+    findChildren: vi.fn().mockReturnValue([]),
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
   };
@@ -50,7 +51,9 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     id: TICKET_ID,
     projectId: PROJECT_ID,
     title: 'Test ticket',
-    column: 'ARCH_SPIKE',
+    kind: 'EPIC',
+    parentId: null,
+    column: 'TECH_SPEC',
     subState: 'FAILED',
     createdAt: '2025-01-01T09:00:00Z',
     updatedAt: '2025-01-01T10:00:00Z',
@@ -70,11 +73,11 @@ describe('TicketSignOffUseCase', () => {
     artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
-    useCase = new TicketSignOffUseCase(ticketRepo, artifactStore, stateMachine, gitGateway);
+    useCase = new TicketSignOffUseCase(ticketRepo, artifactStore, stateMachine);
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
   });
 
-  it('marks a ticket SIGNED_OFF and commits the mirrored ticket document', () => {
+  it('marks a ticket SIGNED_OFF and mirrors it to disk without committing', () => {
     const result = useCase.execute({
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
@@ -92,11 +95,8 @@ describe('TicketSignOffUseCase', () => {
       `${TICKET_ID}-ticket.md`,
       expect.stringContaining('- Sub-state: SIGNED_OFF'),
     );
-    expect(gitGateway.commitFiles).toHaveBeenCalledWith(
-      path.join(PROJECT_PATH, '.aeos'),
-      [path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, `${TICKET_ID}-ticket.md`)],
-      `[${TICKET_ID}][HUMAN][v1][sign-off: FAILED → SIGNED_OFF]`,
-    );
+    // Sub-state is authoritative in SQLite; git carries artifacts only.
+    expect(gitGateway.commitFiles).not.toHaveBeenCalled();
   });
 
   it('returns an error when the ticket is not found', () => {
@@ -150,19 +150,6 @@ describe('TicketSignOffUseCase', () => {
     });
   });
 
-  it('reverts the sub-state and ticket document when git commit fails', () => {
-    (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      throw new Error('git commit failed');
-    });
-    expect(() =>
-      useCase.execute({ projectId: PROJECT_ID, projectPath: PROJECT_PATH, ticketId: TICKET_ID }),
-    ).toThrow('git commit failed');
-    expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'FAILED');
-    expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
-      PROJECT_PATH,
-      TICKET_ID,
-      `${TICKET_ID}-ticket.md`,
-      expect.stringContaining('- Sub-state: FAILED'),
-    );
-  });
+  // The git-commit rollback that used to live here is gone with the commit
+  // itself: there is no longer a second write to fail after the state change.
 });

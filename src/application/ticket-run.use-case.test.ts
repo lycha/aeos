@@ -14,6 +14,7 @@ import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { ContextAssembler } from './services/context-assembler.js';
 import type { PreflightService } from './services/preflight.js';
 import type { ExecutorConfigResolver } from './services/executor-config-resolver.js';
+import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
 import type { Ticket } from '../domain/model/ticket.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
@@ -30,6 +31,7 @@ function createMockTicketRepo(): TicketRepository {
     deleteById: vi.fn(),
     findById: vi.fn().mockReturnValue(null),
     findByProject: vi.fn().mockReturnValue([]),
+    findChildren: vi.fn().mockReturnValue([]),
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
   };
@@ -68,7 +70,9 @@ function createMockExecutor(): Executor {
     run: vi.fn().mockResolvedValue({
       ok: true,
       artifactPath: '/tmp/artifact',
-      content: 'A '.repeat(60), // 60 words — passes min word count
+      // One stub serves both roles: 60 words clears the worker's min word
+      // count, and the trailer parses as an approval when read as a review.
+      content: `${'A '.repeat(60)}\n\n<!-- AEOS-VERDICT\nverdict: APPROVED\nblockers: 0\nwarnings: 0\ninfo: 0\n-->`,
     }),
     interrupt: vi.fn(),
   };
@@ -116,10 +120,59 @@ function createMockExecutorConfigResolver(): ExecutorConfigResolver {
   } as unknown as ExecutorConfigResolver;
 }
 
-function defaultColumnSpec(): ColumnSpec {
+function createMockConfigStore(
+  reviewLoop: { enabled: boolean; maxIterations: number } = { enabled: true, maxIterations: 5 },
+): ConfigStore {
+  return {
+    ensureHomeDir: vi.fn(),
+    readConfig: vi.fn().mockReturnValue({
+      model: 'claude-opus-4-8',
+      currency: 'USD',
+      advanceMode: 'manual',
+      reviewLoop,
+    }),
+    writeConfigIfNotExists: vi.fn(),
+    readRegistry: vi.fn().mockReturnValue([]),
+    writeRegistry: vi.fn(),
+    writeRegistryIfNotExists: vi.fn(),
+    ensureGlobalGitignore: vi.fn(),
+  } as unknown as ConfigStore;
+}
+
+/**
+ * Builds a review artifact carrying a parseable verdict trailer.
+ * Reviews without one are treated as unparseable by design — see verdict-parser.
+ */
+function reviewWith(
+  verdict: 'APPROVED' | 'APPROVED_WITH_WARNINGS' | 'REJECTED',
+  options: { blockers?: number; topics?: string[]; prose?: string } = {},
+): string {
+  const blockers = options.blockers ?? (verdict === 'REJECTED' ? 1 : 0);
+  const topics = options.topics ?? (verdict === 'REJECTED' ? ['unmet-criterion'] : []);
+  const lines = [
+    options.prose ?? '## Review\n\nEvaluated against the rubrics.',
+    '',
+    '<!-- AEOS-VERDICT',
+    `verdict: ${verdict}`,
+    `blockers: ${blockers}`,
+    'warnings: 0',
+    'info: 0',
+  ];
+  if (topics.length > 0) lines.push(`blocker-topics: ${topics.join(', ')}`);
+  lines.push('-->');
+  return lines.join('\n');
+}
+
+function defaultColumnSpec(overrides: Partial<ColumnSpec> = {}): ColumnSpec {
+  return {
+    ...baseColumnSpec(),
+    ...overrides,
+  };
+}
+
+function baseColumnSpec(): ColumnSpec {
   return {
     column: 'IMPLEMENTATION',
-    phase: 'BUILD',
     workerAgentFile: 'agents/worker.yaml',
     reviewerAgentFile: 'agents/reviewer.yaml',
     outputArtifact: 'impl.md',
@@ -160,6 +213,8 @@ function runnableTicket(overrides: Partial<Ticket> = {}): Ticket {
     id: TICKET_ID,
     projectId: PROJECT_ID,
     title: 'Test ticket',
+    kind: 'EPIC',
+    parentId: null,
     column: 'IMPLEMENTATION' as Ticket['column'],
     subState: null,
     createdAt: '2025-01-01T09:00:00Z',
@@ -171,14 +226,6 @@ function runnableTicket(overrides: Partial<Ticket> = {}): Ticket {
 const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
 const TICKET_ID = 'AEOS-1';
-const TICKET_FILE_PATH = path.join(
-  PROJECT_PATH,
-  '.aeos',
-  'tickets',
-  TICKET_ID,
-  `${TICKET_ID}-ticket.md`,
-);
-
 // --- Test suite ---
 
 describe('TicketRunUseCase', () => {
@@ -196,6 +243,7 @@ describe('TicketRunUseCase', () => {
   let preflight: ReturnType<typeof createMockPreflight>;
   let costRepo: ReturnType<typeof createMockCostRepo>;
   let executorConfigResolver: ReturnType<typeof createMockExecutorConfigResolver>;
+  let configStore: ConfigStore;
   let buildPromptFn: (context: AssembledContext, agentSpec: AgentSpec) => string;
   let useCase: TicketRunUseCase;
 
@@ -214,6 +262,7 @@ describe('TicketRunUseCase', () => {
     preflight = createMockPreflight();
     costRepo = createMockCostRepo();
     executorConfigResolver = createMockExecutorConfigResolver();
+    configStore = createMockConfigStore();
     buildPromptFn = vi.fn().mockReturnValue('assembled prompt') as unknown as (
       context: AssembledContext,
       agentSpec: AgentSpec,
@@ -221,7 +270,13 @@ describe('TicketRunUseCase', () => {
 
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(runnableTicket());
 
-    useCase = new TicketRunUseCase(
+    useCase = buildUseCase();
+  });
+
+  /** Rebuilds the use case against the current mocks — used by tests that
+   *  swap in a different config store or column spec before executing. */
+  function buildUseCase(): TicketRunUseCase {
+    return new TicketRunUseCase(
       ticketRepo,
       stateMachine,
       contextAssembler,
@@ -235,8 +290,9 @@ describe('TicketRunUseCase', () => {
       preflight,
       costRepo,
       executorConfigResolver,
+      configStore,
     );
-  });
+  }
 
   // --- Happy path ---
 
@@ -260,7 +316,9 @@ describe('TicketRunUseCase', () => {
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'WORKING');
     expect(executor.run).toHaveBeenCalledTimes(2); // worker + reviewer
     expect(artifactStore.writeArtifact).toHaveBeenCalledTimes(5); // 3 state mirrors + worker + review
-    expect(gitGateway.commitFiles).toHaveBeenCalledTimes(5);
+    // Artifacts only. The 3 state mirrors still sync to disk, but git carries
+    // just the worker artifact and the review.
+    expect(gitGateway.commitFiles).toHaveBeenCalledTimes(2);
   });
 
   it('should pass assembled context and worker agent spec into preflight', async () => {
@@ -296,7 +354,7 @@ describe('TicketRunUseCase', () => {
       }
 
       invocation.onChunk?.('stderr', 'review warning\n');
-      return { ok: true, artifactPath: '/tmp/review', content: 'APPROVED' };
+      return { ok: true, artifactPath: '/tmp/review', content: reviewWith('APPROVED') };
     });
 
     const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, undefined, {
@@ -534,27 +592,202 @@ describe('TicketRunUseCase', () => {
     expect(subStates).toContain('SIGNED_OFF');
   });
 
-  it('should mirror WORKING, IN_REVIEW, and SIGNED_OFF into git history on success', async () => {
+  it('should sync sub-state to disk without committing it to git', async () => {
     await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-    expect(gitGateway.commitFiles).toHaveBeenNthCalledWith(
-      1,
-      path.join(PROJECT_PATH, '.aeos'),
-      [TICKET_FILE_PATH],
-      `[${TICKET_ID}][STATE][v1][sub-state: WORKING]`,
+    // Every transition is mirrored into the ticket markdown on disk...
+    const mirroredStates = (
+      artifactStore.writeArtifact as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((call) => String(call[2]).endsWith('-ticket.md'));
+    expect(mirroredStates.length).toBe(3); // WORKING, IN_REVIEW, SIGNED_OFF
+
+    // ...but SQLite is authoritative for state, so none of it reaches git.
+    const commitMessages = (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => String(call[2]),
     );
-    expect(gitGateway.commitFiles).toHaveBeenNthCalledWith(
-      4,
-      path.join(PROJECT_PATH, '.aeos'),
-      [TICKET_FILE_PATH],
-      `[${TICKET_ID}][STATE][v1][sub-state: IN_REVIEW]`,
-    );
-    expect(gitGateway.commitFiles).toHaveBeenNthCalledWith(
-      5,
-      path.join(PROJECT_PATH, '.aeos'),
-      [TICKET_FILE_PATH],
-      `[${TICKET_ID}][STATE][v1][sub-state: SIGNED_OFF]`,
-    );
+    expect(commitMessages.some((message) => message.includes('[STATE]'))).toBe(false);
+    expect(commitMessages).toEqual([
+      `[${TICKET_ID}][impl.md][v1][test-agent][create]`,
+      `[${TICKET_ID}][REVIEW][v1][test-agent][create]`,
+    ]);
+  });
+
+  // --- Revision loop ---
+
+  describe('revision loop', () => {
+    /**
+     * Drives the reviewer through a scripted list of verdicts, one per review
+     * call. Worker calls always return a valid artifact.
+     */
+    function scriptReviews(verdicts: string[]): void {
+      let reviewIndex = 0;
+      (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (invocation: { outputPath: string }) => {
+          if (!invocation.outputPath.includes('-review.md')) {
+            return { ok: true, artifactPath: invocation.outputPath, content: 'A '.repeat(60) };
+          }
+          const content = verdicts[Math.min(reviewIndex, verdicts.length - 1)];
+          reviewIndex += 1;
+          return { ok: true, artifactPath: invocation.outputPath, content };
+        },
+      );
+    }
+
+    it('retries after a rejection and succeeds once the reviewer approves', async () => {
+      scriptReviews([
+        reviewWith('REJECTED', { topics: ['missing-error-handling'] }),
+        reviewWith('APPROVED'),
+      ]);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      if (result.status === 'success') {
+        expect(result.attempts).toBe(2);
+      }
+      expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'SIGNED_OFF');
+    });
+
+    it('feeds the previous review back to the worker on retry', async () => {
+      const firstReview = reviewWith('REJECTED', {
+        topics: ['missing-error-handling'],
+        prose: '## Review\n\nThe rollback path is undefined.',
+      });
+      scriptReviews([firstReview, reviewWith('APPROVED')]);
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // Prompts are built worker-then-reviewer per attempt, so calls 0 and 2
+      // are the two worker prompts.
+      const promptCalls = (buildPromptFn as ReturnType<typeof vi.fn>).mock.calls;
+      const firstWorkerContext = promptCalls[0][0] as AssembledContext;
+      const retryWorkerContext = promptCalls[2][0] as AssembledContext;
+
+      // First attempt has nothing to revise against...
+      expect(firstWorkerContext.priorArtifacts.some((a) => a.name === 'previous-review.md')).toBe(
+        false,
+      );
+
+      // ...the retry carries the review so the worker revises rather than
+      // regenerating blind.
+      const retryFeedback = retryWorkerContext.priorArtifacts.find(
+        (a) => a.name === 'previous-review.md',
+      );
+      expect(retryFeedback?.content).toContain('The rollback path is undefined.');
+    });
+
+    it('re-assembles context on retry so the worker sees the artifact it must revise', async () => {
+      scriptReviews([
+        reviewWith('REJECTED', { topics: ['missing-error-handling'] }),
+        reviewWith('APPROVED'),
+      ]);
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // Attempt 1 worker, attempt 1 reviewer, attempt 2 worker, attempt 2 reviewer.
+      // A stale pre-run snapshot would not contain the artifact under review.
+      expect(contextAssembler.assemble).toHaveBeenCalledTimes(4);
+    });
+
+    it('does not hand the worker the same review twice on retry', async () => {
+      (contextAssembler.assemble as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ticketContent: 'ticket',
+        settledDecisions: null,
+        constraints: null,
+        codeDiff: null,
+        // The reviewer artifact is on disk by the time a retry assembles context.
+        priorArtifacts: [{ name: 'AEOS-1-impl-review.md', content: 'stale review copy' }],
+      });
+      scriptReviews([reviewWith('REJECTED', { topics: ['alpha'] }), reviewWith('APPROVED')]);
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const retryWorkerContext = (buildPromptFn as ReturnType<typeof vi.fn>).mock
+        .calls[2][0] as AssembledContext;
+      const reviewCopies = retryWorkerContext.priorArtifacts.filter((a) =>
+        a.name.includes('review'),
+      );
+
+      expect(reviewCopies).toHaveLength(1);
+      expect(reviewCopies[0].name).toBe('previous-review.md');
+    });
+
+    it('escalates once the iteration cap is exhausted', async () => {
+      configStore = createMockConfigStore({ enabled: true, maxIterations: 3 });
+      useCase = buildUseCase();
+      // Distinct topics each round so convergence detection does not fire first.
+      scriptReviews([
+        reviewWith('REJECTED', { topics: ['alpha'] }),
+        reviewWith('REJECTED', { topics: ['beta'] }),
+        reviewWith('REJECTED', { topics: ['gamma'] }),
+      ]);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('escalated');
+      if (result.status === 'escalated') {
+        expect(result.reason).toBe('ITERATIONS_EXHAUSTED');
+        expect(result.attempts).toBe(3);
+      }
+      expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'ESCALATED');
+    });
+
+    it('escalates on the first rejection when the loop is disabled', async () => {
+      configStore = createMockConfigStore({ enabled: false, maxIterations: 5 });
+      useCase = buildUseCase();
+      scriptReviews([reviewWith('REJECTED', { topics: ['alpha'] })]);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('escalated');
+      if (result.status === 'escalated') {
+        expect(result.attempts).toBe(1);
+      }
+      // Exactly one worker run and one review — no revision was attempted.
+      expect(executor.run).toHaveBeenCalledTimes(2);
+    });
+
+    it('advances on APPROVED_WITH_WARNINGS without consuming a retry', async () => {
+      scriptReviews([reviewWith('APPROVED_WITH_WARNINGS')]);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      if (result.status === 'success') {
+        expect(result.attempts).toBe(1);
+      }
+    });
+
+    it('escalates when the reviewer emits no parseable verdict', async () => {
+      scriptReviews(['## Review\n\nLooks good to me, ship it.']);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // Silently treating this as approval would ship unreviewed work.
+      expect(result.status).toBe('escalated');
+      if (result.status === 'escalated') {
+        expect(result.reason).toBe('UNPARSEABLE_VERDICT');
+      }
+    });
+
+    it('honours a column-level cap over the global one', async () => {
+      configStore = createMockConfigStore({ enabled: true, maxIterations: 5 });
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ maxIterations: 2 }),
+      );
+      useCase = buildUseCase();
+      scriptReviews([
+        reviewWith('REJECTED', { topics: ['alpha'] }),
+        reviewWith('REJECTED', { topics: ['beta'] }),
+      ]);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('escalated');
+      if (result.status === 'escalated') {
+        expect(result.attempts).toBe(2);
+      }
+    });
   });
 
   // --- Guard clause: ticket not found ---
@@ -638,7 +871,7 @@ describe('TicketRunUseCase', () => {
 
   // --- Preflight blocked ---
 
-  it('should return blocked when preflight blocks', async () => {
+  it('should escalate when preflight raises blockers', async () => {
     (preflight.run as ReturnType<typeof vi.fn>).mockResolvedValue({
       blocked: true,
       questionsPath: 'AEOS-1-questions.md',
@@ -646,16 +879,20 @@ describe('TicketRunUseCase', () => {
 
     const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-    expect(result.status).toBe('blocked');
-    if (result.status === 'blocked') {
-      expect(result.blockers[0]).toContain('Preflight questions');
+    // Preflight blockers route through the same escalation path as iteration
+    // exhaustion, so an operator has one place to look for stalled runs.
+    expect(result.status).toBe('escalated');
+    if (result.status === 'escalated') {
+      expect(result.reason).toBe('PREFLIGHT_BLOCKERS');
+      expect(result.message).toContain('aeos ticket answer');
     }
+    // Stays BLOCKED, not ESCALATED: `aeos ticket answer` gates on BLOCKED, and
+    // the message above tells the operator to run exactly that command.
+    expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'BLOCKED');
+    expect(stateMachine.setSubState).not.toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'ESCALATED');
     expect(gitGateway.commitFiles).toHaveBeenCalledWith(
       path.join(PROJECT_PATH, '.aeos'),
-      [
-        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, 'AEOS-1-questions.md'),
-        TICKET_FILE_PATH,
-      ],
+      [path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, 'AEOS-1-questions.md')],
       `[${TICKET_ID}][QUESTIONS][v1][preflight][blocked]`,
     );
   });
@@ -677,11 +914,12 @@ describe('TicketRunUseCase', () => {
     }
     expect(artifactStore.removeArtifact).toHaveBeenCalled();
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'FAILED');
-    expect(gitGateway.commitFiles).toHaveBeenLastCalledWith(
-      path.join(PROJECT_PATH, '.aeos'),
-      [TICKET_FILE_PATH],
-      `[${TICKET_ID}][STATE][v1][sub-state: FAILED]`,
-    );
+    // FAILED is recorded in SQLite and mirrored to disk, never committed.
+    expect(
+      (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.some((call) =>
+        String(call[2]).includes('[STATE]'),
+      ),
+    ).toBe(false);
   });
 
   it('should surface timeout partial output from the worker executor', async () => {
@@ -720,16 +958,17 @@ describe('TicketRunUseCase', () => {
     }
     expect(artifactStore.removeArtifact).toHaveBeenCalled();
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'FAILED');
-    expect(gitGateway.commitFiles).toHaveBeenLastCalledWith(
-      path.join(PROJECT_PATH, '.aeos'),
-      [TICKET_FILE_PATH],
-      `[${TICKET_ID}][STATE][v1][sub-state: FAILED]`,
-    );
+    // FAILED is recorded in SQLite and mirrored to disk, never committed.
+    expect(
+      (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.some((call) =>
+        String(call[2]).includes('[STATE]'),
+      ),
+    ).toBe(false);
   });
 
   // --- Reviewer failure is best-effort ---
 
-  it('should still succeed when reviewer fails', async () => {
+  it('should escalate rather than advance when the reviewer cannot run', async () => {
     let callCount = 0;
     (executor.run as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       callCount++;
@@ -741,33 +980,46 @@ describe('TicketRunUseCase', () => {
 
     const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-    expect(result.status).toBe('success');
-    // WORKING + worker artifact + IN_REVIEW + SIGNED_OFF
-    expect(artifactStore.writeArtifact).toHaveBeenCalledTimes(4);
+    // A reviewer that never ran leaves the artifact unreviewed. Advancing it
+    // would ship unreviewed work under autonomy, so this stops for a human.
+    expect(result.status).toBe('escalated');
+    if (result.status === 'escalated') {
+      expect(result.reason).toBe('UNPARSEABLE_VERDICT');
+      expect(result.message).toContain('Reviewer timeout');
+    }
+    expect(stateMachine.setSubState).not.toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'SIGNED_OFF');
   });
 
-  it('should mirror FAILED when reviewer rejects the artifact', async () => {
-    let callCount = 0;
-    (executor.run as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return { ok: true, artifactPath: '/tmp/out', content: 'A '.repeat(60) };
-      }
-      return {
-        ok: true,
-        artifactPath: '/tmp/review',
-        content: 'REJECTED: missing acceptance criteria',
-      };
-    });
+  it('should escalate when repeated attempts reproduce the same blockers', async () => {
+    (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+      async (invocation: { mode?: string; outputPath: string }) => {
+        const isReview = invocation.outputPath.includes('-review.md');
+        return {
+          ok: true,
+          artifactPath: invocation.outputPath,
+          content: isReview
+            ? reviewWith('REJECTED', { topics: ['missing-acceptance-criteria'] })
+            : 'A '.repeat(60),
+        };
+      },
+    );
 
     const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-    expect(result.status).toBe('failed');
-    expect(gitGateway.commitFiles).toHaveBeenLastCalledWith(
-      path.join(PROJECT_PATH, '.aeos'),
-      [TICKET_FILE_PATH],
-      `[${TICKET_ID}][STATE][v1][sub-state: FAILED]`,
-    );
+    // Attempt 1 rejects and retries; attempt 2 reproduces the identical
+    // blocker set, so convergence detection stops the loop early rather than
+    // burning the remaining 3 attempts.
+    expect(result.status).toBe('escalated');
+    if (result.status === 'escalated') {
+      expect(result.reason).toBe('NOT_CONVERGING');
+      expect(result.attempts).toBe(2);
+    }
+    // FAILED is recorded in SQLite and mirrored to disk, never committed.
+    expect(
+      (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.some((call) =>
+        String(call[2]).includes('[STATE]'),
+      ),
+    ).toBe(false);
   });
 
   // --- Invalid column value in column spec ---

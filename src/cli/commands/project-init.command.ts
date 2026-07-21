@@ -41,9 +41,14 @@ export function registerProjectInitCommand(
 
         const result = projectInitUseCase.execute({ name, key, cwd });
 
+        const scaffoldNote =
+          result.scaffolded.length > 0
+            ? `\n  Scaffolded ${result.scaffolded.length} file(s) into .aeos/ — column specs, agents, and rubrics.`
+            : '\n  Everything was already in place; nothing scaffolded.';
+
         // eslint-disable-next-line no-console
         console.log(
-          `✓ Project '${result.name}' initialised. Key: ${result.key}. Run 'aeos ticket create <title>' to add your first ticket.`,
+          `✓ Project '${result.name}' initialised. Key: ${result.key}.${scaffoldNote}\n  Run 'aeos ticket create <title>' to add your first ticket.`,
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

@@ -10,8 +10,14 @@ export interface ProjectRepository {
   read(projectPath: string): Project;
   /** Creates .aeos/ directory and writes project.json */
   writeProject(project: Project): void;
-  /** Creates .aeos/column-specs/ directory */
-  ensureColumnSpecsDir(projectPath: string): void;
+  /**
+   * Writes the default column specs, agent specs, and rubrics into .aeos/.
+   *
+   * Never overwrites an existing file, so re-running `project init` restores
+   * anything deleted without discarding local edits. Returns the relative
+   * paths actually created.
+   */
+  scaffoldDefaults(projectPath: string): string[];
   /** Walk up from `startDir` to find the nearest directory containing .aeos/project.json. Returns the project root path, or null if not found. */
   findRoot(startDir: string): string | null;
   /** Reads project.json with any executor defaults needed for runtime selection. Returns null if missing or invalid. */

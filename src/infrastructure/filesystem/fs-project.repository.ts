@@ -11,6 +11,7 @@ import {
   ProjectConfigCorruptError,
 } from '../../shared/errors.js';
 import { CONSTRAINTS_PLACEHOLDER } from './defaults/constraints-placeholder.js';
+import { readTemplates } from './template-source.js';
 
 const AEOS_DIR = '.aeos';
 const PROJECT_JSON = 'project.json';
@@ -102,9 +103,22 @@ export class FsProjectRepository implements ProjectRepository {
     fs.writeFileSync(filePath, JSON.stringify(project, null, 2) + '\n', 'utf-8');
   }
 
-  ensureColumnSpecsDir(projectPath: string): void {
-    const dir = path.join(projectPath, AEOS_DIR, COLUMN_SPECS_DIR);
-    fs.mkdirSync(dir, { recursive: true });
+  scaffoldDefaults(projectPath: string): string[] {
+    const aeosRoot = path.join(projectPath, AEOS_DIR);
+    fs.mkdirSync(path.join(aeosRoot, COLUMN_SPECS_DIR), { recursive: true });
+
+    const created: string[] = [];
+    for (const template of readTemplates()) {
+      const target = path.join(aeosRoot, template.relativePath);
+      // Skip anything already present: a re-run must not clobber the edits a
+      // user has made to their own agents and rubrics.
+      if (fs.existsSync(target)) continue;
+
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, template.content, 'utf-8');
+      created.push(template.relativePath);
+    }
+    return created;
   }
 
   findRoot(startDir: string): string | null {

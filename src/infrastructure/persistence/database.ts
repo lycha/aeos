@@ -29,6 +29,12 @@ interface Migration {
   readonly apply: (db: BetterSqlite3.Database) => void;
 }
 
+/** Migrations must be idempotent; ALTER TABLE ADD COLUMN is not, so guard with this. */
+function hasColumn(db: BetterSqlite3.Database, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === column);
+}
+
 const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -76,14 +82,50 @@ CREATE TABLE IF NOT EXISTS cost_records (
       `);
     },
   },
+  {
+    version: 2,
+    description: 'Add epic/task hierarchy; retire ARCH_SPIKE column',
+    apply: (db) => {
+      // ALTER TABLE ADD COLUMN throws if the column already exists, so guard it —
+      // a legacy DB stamped at version 1 can re-enter this migration with the
+      // columns already present.
+      // Every pre-existing ticket is an epic: tasks did not exist before this.
+      if (!hasColumn(db, 'tickets', 'kind')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'EPIC'`);
+      }
+      if (!hasColumn(db, 'tickets', 'parent_id')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN parent_id TEXT DEFAULT NULL`);
+      }
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_parent ON tickets(project_id, parent_id)`);
+
+      // ARCH_SPIKE folded into TECH_SPEC — the architect now produces the spec
+      // and the implementation plan in one column. Tickets parked there move
+      // forward rather than becoming unroutable.
+      db.exec(`UPDATE tickets SET "column" = 'TECH_SPEC' WHERE "column" = 'ARCH_SPIKE'`);
+
+      // The transitions table is an append-only audit log; historical rows
+      // naming ARCH_SPIKE are left intact on purpose.
+    },
+  },
+  {
+    version: 3,
+    description: 'Add orchestrator_state for autonomous epic runs',
+    apply: (db) => {
+      db.exec(`
+CREATE TABLE IF NOT EXISTS orchestrator_state (
+  project_id  TEXT NOT NULL,
+  epic_id     TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'IDLE',
+  halt_reason TEXT,
+  message     TEXT,
+  budget_usd  REAL,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (project_id, epic_id)
+);
+      `);
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
-  // {
-  //   version: 2,
-  //   description: 'Add foo column to tickets',
-  //   apply: (db) => {
-  //     db.exec(`ALTER TABLE tickets ADD COLUMN foo TEXT DEFAULT NULL`);
-  //   },
-  // },
 ];
 
 // ── Schema version tracking ──────────────────────────────────────

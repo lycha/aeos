@@ -1,4 +1,4 @@
-// Value Object — SubState enum (7 sub-states)
+// Value Object — SubState enum (8 sub-states)
 
 export const SubState = {
   READY: 'READY',
@@ -6,6 +6,11 @@ export const SubState = {
   WORKING: 'WORKING',
   INTERRUPTED: 'INTERRUPTED',
   FAILED: 'FAILED',
+  /**
+   * Stopped cleanly, awaiting a human decision — not an error.
+   * See `EscalationReason` for the causes and why this is distinct from FAILED.
+   */
+  ESCALATED: 'ESCALATED',
   IN_REVIEW: 'IN_REVIEW',
   SIGNED_OFF: 'SIGNED_OFF',
 } as const;

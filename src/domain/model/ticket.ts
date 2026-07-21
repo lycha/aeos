@@ -1,7 +1,8 @@
-// Aggregate — Ticket (id, title, column, subState, createdAt, updatedAt)
+// Aggregate — Ticket (id, kind, parent, title, column, subState, timestamps)
 
 import type { Column } from './column.js';
 import type { SubStateOrNull } from './sub-state.js';
+import type { TicketKind } from './ticket-kind.js';
 
 export interface Ticket {
   /** Ticket identifier, e.g. "AEOS-1" */
@@ -10,6 +11,10 @@ export interface Ticket {
   projectId: string;
   /** Human-readable title */
   title: string;
+  /** EPIC or TASK — determines which column pipeline applies */
+  kind: TicketKind;
+  /** Parent epic ID for a TASK; null for an EPIC */
+  parentId: string | null;
   /** Pipeline column */
   column: Column;
   /** Sub-state within the column — null for BACKLOG tickets */
