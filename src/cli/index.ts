@@ -8,6 +8,7 @@ import { createContainer } from './container.js';
 import { runInkApp } from './ui/run-ink-app.js';
 import { registerInstallCommand } from './commands/install.command.js';
 import { registerProjectInitCommand } from './commands/project-init.command.js';
+import { registerProjectSyncCommand } from './commands/project-sync.command.js';
 import { registerTicketCreateCommand } from './commands/ticket-create.command.js';
 import { registerTicketListCommand } from './commands/ticket-list.command.js';
 import { registerTicketShowCommand } from './commands/ticket-show.command.js';
@@ -24,6 +25,7 @@ export { createContainer } from './container.js';
 export type { Container } from './container.js';
 export { registerInstallCommand } from './commands/install.command.js';
 export { registerProjectInitCommand } from './commands/project-init.command.js';
+export { registerProjectSyncCommand } from './commands/project-sync.command.js';
 export { registerTicketCreateCommand } from './commands/ticket-create.command.js';
 export { registerTicketListCommand } from './commands/ticket-list.command.js';
 export { registerTicketShowCommand } from './commands/ticket-show.command.js';
@@ -69,6 +71,7 @@ export function buildProgram(): Command {
   const container = createContainer();
   registerInstallCommand(program, container.install);
   registerProjectInitCommand(program, container.projectInit);
+  registerProjectSyncCommand(program, () => container.projectSync, container.projectRepo);
 
   // Ticket commands access the DB — resolve lazily inside the action callback,
   // not at program build time. This allows `aeos install` and `aeos project init`
