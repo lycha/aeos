@@ -183,7 +183,12 @@ export function createContainer(): Container {
       );
     },
     get ticketApprove() {
-      return new TicketApproveUseCase(getTicketRepo(), artifactStore, getStateMachine());
+      return new TicketApproveUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getStateMachine(),
+        gitGateway,
+      );
     },
     get ticketSignOff() {
       return new TicketSignOffUseCase(getTicketRepo(), artifactStore, getStateMachine());

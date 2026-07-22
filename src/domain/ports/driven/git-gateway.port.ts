@@ -23,6 +23,15 @@ export interface GitGateway {
    */
   stageAll(dir: string): void;
 
+  /**
+   * Stage everything in `dir` and commit it, if there is anything to commit.
+   * Returns true when a commit was created, false when the tree was clean.
+   *
+   * Unlike `commit`, this never creates an empty commit — it operates on a
+   * user's source repository, where empty commits are noise.
+   */
+  commitAll(dir: string, message: string): boolean;
+
   /** Return the output of `git diff HEAD` in the given directory. */
   diff(dir: string): string;
 }

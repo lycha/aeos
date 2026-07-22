@@ -4,6 +4,7 @@ import { Column, nextColumnFor } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
+import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type {
@@ -17,6 +18,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
     private readonly ticketRepo: TicketRepository,
     private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
+    private readonly gitGateway: GitGateway,
   ) {}
 
   execute(projectId: string, projectPath: string, ticketId: string): TicketApproveResult {
@@ -93,6 +95,15 @@ export class TicketApproveUseCase implements TicketApprovePort {
       column: nextColumn,
       subState: SubState.READY,
     });
+
+    // A finished task's work becomes one commit in the source repo. This is the
+    // only point it is safe to commit: CODE_REVIEW reads `git diff HEAD`, so
+    // committing any earlier would leave the reviewer with nothing to review.
+    // One commit per task also keeps the next task's diff free of this one's
+    // changes. Epics are skipped — they produce artifacts, not code.
+    if (nextColumn === Column.DONE && ticket.kind === TicketKind.TASK) {
+      this.gitGateway.commitAll(projectPath, `[${ticketId}] ${ticket.title}`);
+    }
 
     return { status: 'advanced', ticketId, fromColumn: currentColumn, toColumn: nextColumn };
   }

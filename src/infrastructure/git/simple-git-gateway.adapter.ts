@@ -51,6 +51,27 @@ export class SimpleGitGateway implements GitGateway {
     execFileSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' });
   }
 
+  commitAll(dir: string, message: string): boolean {
+    this.stageAll(dir);
+    // `git diff --cached --quiet` exits 1 when something is staged. Checking
+    // first keeps us from creating an empty commit in a user's source repo.
+    try {
+      execFileSync('git', ['diff', '--cached', '--quiet'], { cwd: dir, stdio: 'ignore' });
+      return false; // nothing staged — clean tree
+    } catch {
+      // non-zero exit means there are staged changes
+    }
+
+    try {
+      execFileSync('git', ['commit', '-m', message], { cwd: dir, stdio: 'ignore' });
+      return true;
+    } catch {
+      // A commit can still fail (e.g. a hook rejects it). Do not break the run
+      // over it — the changes remain staged and the pipeline continues.
+      return false;
+    }
+  }
+
   diff(dir: string): string {
     return execFileSync('git', ['diff', 'HEAD'], { cwd: dir, encoding: 'utf-8' });
   }

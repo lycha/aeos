@@ -493,6 +493,20 @@ export class TicketRunUseCase implements TicketRunPort {
     }
     const prompt = this.buildPromptFn(workerContext, ctx.workerAgentSpec);
 
+    // Baseline the repo before an agentic worker touches it, on the first
+    // attempt only. Whatever is already uncommitted — a previous task's work,
+    // or unrelated local edits — becomes its own commit, so `git diff HEAD`
+    // afterwards contains this task's changes and nothing else. Without this,
+    // CODE_REVIEW reviews the accumulated tree and rejects files the ticket
+    // never claimed ("orphan unacknowledged file"). Retries skip it, or the
+    // rejected attempt's own work would be baselined away mid-loop.
+    if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false && attempt === 1) {
+      this.gitGateway.commitAll(
+        ctx.projectPath,
+        `[${ctx.ticketId}][BASELINE] pre-existing changes before ${ctx.column}`,
+      );
+    }
+
     const attemptLabel = attempt > 1 ? ` (attempt ${attempt})` : '';
     this.emitStageEvent(
       emitter,

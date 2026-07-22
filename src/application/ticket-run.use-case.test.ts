@@ -55,6 +55,7 @@ function createMockGitGateway(): GitGateway {
     commit: vi.fn(),
     commitFiles: vi.fn(),
     stageAll: vi.fn(),
+    commitAll: vi.fn().mockReturnValue(false),
     diff: vi.fn().mockReturnValue('diff --git a/src/file.ts b/src/file.ts'),
   };
 }
@@ -567,6 +568,18 @@ describe('TicketRunUseCase', () => {
       TICKET_ID,
       'AEOS-1-impl.md',
       expect.anything(),
+    );
+  });
+
+  it('baselines pre-existing repo changes before an agentic worker runs', async () => {
+    // Otherwise the accumulated tree (a previous task's work, unrelated local
+    // edits) lands in this ticket's diff and CODE_REVIEW rejects files the
+    // ticket never claimed.
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(gitGateway.commitAll).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      expect.stringContaining('[AEOS-1][BASELINE]'),
     );
   });
 
