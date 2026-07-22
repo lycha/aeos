@@ -21,6 +21,7 @@ import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
 import type { OrchestratorStateRepository } from '../domain/ports/driven/orchestrator-state-repository.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
+import type { TicketRunObserver } from '../domain/model/ticket-run-event.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
 import type {
   OrchestratorPort,
@@ -140,8 +141,12 @@ export class OrchestratorUseCase implements OrchestratorPort {
           );
         }
 
-        const outcome = await this.perform(action, projectId, projectPath, () =>
-          this.heartbeat(projectId, epicId),
+        const outcome = await this.perform(
+          action,
+          projectId,
+          projectPath,
+          () => this.heartbeat(projectId, epicId),
+          observer?.ticketRunObserver,
         );
         const recorded: OrchestratorStep = {
           action: action.kind,
@@ -219,6 +224,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
     projectId: string,
     projectPath: string,
     onProgress: () => void,
+    ticketRunObserver: TicketRunObserver | undefined,
   ): Promise<string> {
     if (action.kind === 'advance') {
       const result = this.ticketApprove.execute(projectId, projectPath, action.ticketId);
@@ -238,7 +244,11 @@ export class OrchestratorUseCase implements OrchestratorPort {
       action.ticketId,
       undefined,
       {
-        onEvent: () => onProgress(),
+        // Heartbeat the lock, then forward to the caller's live view.
+        onEvent: (event) => {
+          onProgress();
+          ticketRunObserver?.onEvent?.(event);
+        },
       },
     );
     switch (result.status) {

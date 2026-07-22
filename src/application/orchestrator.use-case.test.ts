@@ -333,6 +333,32 @@ describe('OrchestratorUseCase', () => {
       expect(emit).toBeDefined();
       expect(stateRepo.touch).toHaveBeenCalled();
     });
+
+    it('forwards ticket-run events to the caller ticketRunObserver for the live view', async () => {
+      (ticketRun.execute as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_p, _pp, _t, _o, observer) => {
+          observer?.onEvent?.({ type: 'stage.started', ticketId: EPIC_ID });
+          return {
+            status: 'escalated',
+            ticketId: EPIC_ID,
+            reason: 'ITERATIONS_EXHAUSTED',
+            message: 'x',
+            attempts: 1,
+          };
+        },
+      );
+      const seen: unknown[] = [];
+
+      await useCase.run(
+        PROJECT_ID,
+        PROJECT_PATH,
+        EPIC_ID,
+        { maxSteps: 1 },
+        { ticketRunObserver: { onEvent: (event) => seen.push(event) } },
+      );
+
+      expect(seen).toContainEqual({ type: 'stage.started', ticketId: EPIC_ID });
+    });
   });
 
   describe('unexpected failure', () => {

@@ -109,11 +109,28 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
 
     switch (event.type) {
       case 'ticket-run.started':
+        // Reset the per-run panels so a display reused across an orchestrator's
+        // tickets reflects the current ticket, not the previous one. The raw log
+        // is intentionally kept so the whole epic's output scrolls back.
+        for (const phase of PHASE_ORDER) {
+          this.stageStates.set(phase, { status: 'pending' });
+        }
+        this.partialBuffers.clear();
+        this.activeStage = null;
+        this.subState = null;
+        this.finalStatus = 'running';
         this.executor = event.payload.executor;
         this.model = event.payload.model ?? '—';
         this.appendLogLine(
-          `[run] started | executor=${this.executor}${event.payload.model ? ` | model=${event.payload.model}` : ''}`,
+          `[run] started | ${event.ticketId} | executor=${this.executor}${event.payload.model ? ` | model=${event.payload.model}` : ''}`,
         );
+        break;
+      case 'run.attempt.started':
+        if (event.payload.attempt > 1) {
+          this.appendLogLine(
+            `[run] revision attempt ${event.payload.attempt} of ${event.payload.maxAttempts}`,
+          );
+        }
         break;
       case 'stage.started':
         this.activeStage = event.payload.stage;
@@ -193,6 +210,11 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
         this.appendLogLine(
           `[run] interrupted${event.payload.stage ? ` at ${event.payload.stage}` : ''} | ${event.payload.message}`,
         );
+        break;
+      case 'ticket-run.escalated':
+        this.finalStatus = 'escalated';
+        this.flushAllBuffers();
+        this.appendLogLine(`[run] escalated | ${event.payload.reason} | ${event.payload.message}`);
         break;
     }
 

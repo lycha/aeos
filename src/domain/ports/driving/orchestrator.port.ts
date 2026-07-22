@@ -2,6 +2,7 @@
 
 import type { HaltReason } from '../../services/orchestrator-policy.js';
 import type { OrchestratorState } from '../../model/orchestrator-state.js';
+import type { TicketRunObserver } from '../../model/ticket-run-event.js';
 
 export interface OrchestratorStep {
   readonly action: 'run' | 'advance';
@@ -27,6 +28,11 @@ export interface OrchestratorRunOptions {
 
 export interface OrchestratorObserver {
   onStep?(step: OrchestratorStep): void;
+  /**
+   * Forwarded the event stream of each ticket run the orchestrator drives, so a
+   * caller can render the same live view as a standalone `ticket run`.
+   */
+  ticketRunObserver?: TicketRunObserver;
 }
 
 export interface OrchestratorPort {
