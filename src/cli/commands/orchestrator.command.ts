@@ -3,6 +3,7 @@
 import type { Command } from 'commander';
 import type { OrchestratorPort } from '../../domain/ports/driving/orchestrator.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { createTicketRunDisplay } from '../ui/ticket-run-display.js';
 
 /** Halt reasons that mean "finished cleanly", as opposed to "stopped early". */
 const CLEAN_HALTS = new Set(['COMPLETE', 'HUMAN_GATE', 'AWAITING_APPROVAL']);
@@ -37,34 +38,76 @@ export function registerOrchestratorCommand(
       const project = resolveProject();
       if (!project) return;
 
+      // Reuse the ticket-run live view: each ticket the orchestrator drives
+      // renders the same pane as a standalone `aeos ticket run`. Started lazily
+      // on the first ticket-run event, so an immediate halt (no runs) prints
+      // its summary normally rather than flashing a blank screen.
+      const display = createTicketRunDisplay(process.stdout);
+      let displayStarted = false;
+
+      // Capture the instance so SIGINT interrupts the same run it started.
+      const orchestrator = getOrchestrator();
+      const interruptHandler = () => {
+        display.requestInterrupt();
+        orchestrator.interrupt();
+      };
+      process.once('SIGINT', interruptHandler);
+
       try {
-        const result = await getOrchestrator().run(
+        const result = await orchestrator.run(
           project.id,
           project.path,
           epicId,
           { budgetUsd: options.budget, maxSteps: options.maxSteps },
           {
+            ticketRunObserver: {
+              onEvent(event) {
+                if (!displayStarted) {
+                  displayStarted = true;
+                  display.start();
+                }
+                display.observer.onEvent?.(event);
+              },
+            },
             onStep(step) {
-              // eslint-disable-next-line no-console
-              console.log(`  ${step.ticketId}: ${step.outcome}`);
+              // In the live pane, interleaving plain lines would corrupt the
+              // alt-screen; the per-ticket view and the end-of-run summary carry
+              // it instead. Without a TTY, print each step as it happens.
+              if (!display.live) {
+                // eslint-disable-next-line no-console
+                console.log(`  ${step.ticketId} [${step.column}]: ${step.outcome}`);
+              }
             },
           },
         );
 
-        // eslint-disable-next-line no-console
-        console.log(
-          [
-            '',
-            `${CLEAN_HALTS.has(result.haltReason) ? '✓' : '⏸'} ${result.epicId} — ${result.haltReason}`,
-            `  ${result.message}`,
-            `  ${result.steps.length} action(s), $${result.spentUsd.toFixed(2)} spent`,
-          ].join('\n'),
+        process.removeListener('SIGINT', interruptHandler);
+        if (displayStarted) display.stop();
+
+        const summary: string[] = [];
+        // The live pane suppressed inline step lines — replay them after the
+        // screen is torn down so the run is legible in scroll-back.
+        if (display.live) {
+          for (const step of result.steps) {
+            summary.push(`  ${step.ticketId} [${step.column}]: ${step.outcome}`);
+          }
+        }
+        summary.push(
+          '',
+          `${CLEAN_HALTS.has(result.haltReason) ? '✓' : '⏸'} ${result.epicId} — ${result.haltReason}`,
+          `  ${result.message}`,
+          `  ${result.steps.length} action(s), $${result.spentUsd.toFixed(2)} spent`,
         );
+        // eslint-disable-next-line no-console
+        console.log(summary.join('\n'));
 
         if (!CLEAN_HALTS.has(result.haltReason)) {
-          process.exitCode = 1;
+          // 130 is the conventional "terminated by Ctrl+C" code.
+          process.exitCode = result.haltReason === 'INTERRUPTED' ? 130 : 1;
         }
       } catch (err) {
+        process.removeListener('SIGINT', interruptHandler);
+        if (displayStarted) display.stop();
         // eslint-disable-next-line no-console
         console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;

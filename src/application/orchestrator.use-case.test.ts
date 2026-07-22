@@ -55,6 +55,7 @@ describe('OrchestratorUseCase', () => {
       findChildren: vi.fn().mockReturnValue([]),
       updateColumn: vi.fn(),
       updateSubState: vi.fn(),
+      setEscalation: vi.fn(),
     };
     costRepo = {
       record: vi.fn(),
@@ -207,6 +208,8 @@ describe('OrchestratorUseCase', () => {
     expect(result.haltReason).toBe(HaltReason.NEEDS_HUMAN);
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0].outcome).toContain('escalated');
+    // The step records the column it drove, so the progress log can show it.
+    expect(result.steps[0].column).toBe(Column.PRODUCT_SCOPING);
     // One run attempted, then the escalated sub-state stops the loop.
     expect(ticketRun.execute).toHaveBeenCalledTimes(1);
   });
@@ -332,6 +335,88 @@ describe('OrchestratorUseCase', () => {
 
       expect(emit).toBeDefined();
       expect(stateRepo.touch).toHaveBeenCalled();
+    });
+
+    it('forwards ticket-run events to the caller ticketRunObserver for the live view', async () => {
+      (ticketRun.execute as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_p, _pp, _t, _o, observer) => {
+          observer?.onEvent?.({ type: 'stage.started', ticketId: EPIC_ID });
+          return {
+            status: 'escalated',
+            ticketId: EPIC_ID,
+            reason: 'ITERATIONS_EXHAUSTED',
+            message: 'x',
+            attempts: 1,
+          };
+        },
+      );
+      const seen: unknown[] = [];
+
+      await useCase.run(
+        PROJECT_ID,
+        PROJECT_PATH,
+        EPIC_ID,
+        { maxSteps: 1 },
+        { ticketRunObserver: { onEvent: (event) => seen.push(event) } },
+      );
+
+      expect(seen).toContainEqual({ type: 'stage.started', ticketId: EPIC_ID });
+    });
+  });
+
+  describe('interrupt', () => {
+    it('halts with INTERRUPTED and stops scheduling when interrupted mid-run', async () => {
+      let subState: SubState = SubState.READY;
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockImplementation(() =>
+        epic({ subState }),
+      );
+      (ticketRun.execute as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        // Operator hits Ctrl+C while this ticket run is in flight.
+        useCase.interrupt();
+        subState = SubState.INTERRUPTED;
+        return {
+          status: 'failed',
+          ticketId: EPIC_ID,
+          error: 'Execution interrupted by operator',
+        };
+      });
+
+      const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { maxSteps: 10 });
+
+      expect(result.haltReason).toBe(HaltReason.INTERRUPTED);
+      // Exactly one action ran; the loop did not schedule more.
+      expect(result.steps).toHaveLength(1);
+      expect(ticketRun.execute).toHaveBeenCalledTimes(1);
+      // The in-flight run was told to stop.
+      expect(ticketRun.interrupt).toHaveBeenCalled();
+    });
+
+    it('leaves the epic IDLE after an interrupt, not RUNNING', async () => {
+      (ticketRun.execute as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        useCase.interrupt();
+        return { status: 'failed', ticketId: EPIC_ID, error: 'Execution interrupted by operator' };
+      });
+
+      await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+      const lastWrite = (stateRepo.upsert as ReturnType<typeof vi.fn>).mock.calls
+        .map((call) => call[0])
+        .at(-1);
+      expect(lastWrite).toMatchObject({ status: OrchestratorStatus.IDLE });
+    });
+
+    it('a stale interrupt flag does not carry into the next run', async () => {
+      useCase.interrupt(); // interrupt fired with nothing running
+      let ran = false;
+      (ticketRun.execute as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        ran = true;
+        return { status: 'escalated', ticketId: EPIC_ID, reason: 'X', message: 'x', attempts: 1 };
+      });
+
+      await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { maxSteps: 1 });
+
+      // run() resets the flag, so this fresh run proceeds normally.
+      expect(ran).toBe(true);
     });
   });
 

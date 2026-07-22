@@ -125,6 +125,38 @@ CREATE TABLE IF NOT EXISTS orchestrator_state (
       `);
     },
   },
+  {
+    version: 4,
+    description: 'Add task_key for stable decomposition idempotency',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'task_key')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN task_key TEXT DEFAULT NULL`);
+      }
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_tickets_task_key
+         ON tickets(project_id, parent_id, task_key)`,
+      );
+    },
+  },
+  {
+    version: 5,
+    description: 'Persist escalation reason/message/artifact on tickets',
+    apply: (db) => {
+      // Why the reason lives on the ticket rather than only in the run event:
+      // the run emits the escalation once, live, then ends. An operator asking
+      // "why did this stall?" days later needs it queryable. These columns are
+      // cleared when the ticket leaves ESCALATED/BLOCKED (see updateSubState).
+      if (!hasColumn(db, 'tickets', 'escalation_reason')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN escalation_reason TEXT DEFAULT NULL`);
+      }
+      if (!hasColumn(db, 'tickets', 'escalation_message')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN escalation_message TEXT DEFAULT NULL`);
+      }
+      if (!hasColumn(db, 'tickets', 'escalation_artifact')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN escalation_artifact TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

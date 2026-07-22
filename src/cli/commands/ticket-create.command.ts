@@ -1,5 +1,6 @@
 // CLI command — aeos ticket create
 
+import * as fs from 'node:fs';
 import type { Command } from 'commander';
 import type { TicketCreatePort } from '../../domain/ports/driving/ticket-create.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
@@ -21,36 +22,81 @@ export function registerTicketCreateCommand(
       '--parent <epicId>',
       'Create this ticket as a task under the given epic, skipping scoping and spec',
     )
-    .action((title: string, options: { parent?: string }) => {
-      try {
-        const cwd = process.cwd();
-        const projectPath = projectRepo.findRoot(cwd);
+    .option(
+      '--key <taskKey>',
+      'Stable decomposition key (e.g. T-001); idempotency matches on it instead of the title',
+    )
+    .option(
+      '--body <markdown>',
+      'Markdown description for the ticket (e.g. a task breakdown block). Prefer --body-file for multi-line content',
+    )
+    .option(
+      '--body-file <path>',
+      'Read the ticket description from a file (robust for multi-line markdown)',
+    )
+    .action(
+      (
+        title: string,
+        options: { parent?: string; key?: string; body?: string; bodyFile?: string },
+      ) => {
+        try {
+          const cwd = process.cwd();
+          const projectPath = projectRepo.findRoot(cwd);
 
-        if (!projectPath) {
+          if (!projectPath) {
+            // eslint-disable-next-line no-console
+            console.error('Error: No AEOS project found. Run "aeos project init" first.');
+            process.exitCode = 1;
+            return;
+          }
+
+          if (options.body !== undefined && options.bodyFile !== undefined) {
+            // eslint-disable-next-line no-console
+            console.error('Error: pass either --body or --body-file, not both.');
+            process.exitCode = 1;
+            return;
+          }
+
+          let body = options.body;
+          if (options.bodyFile !== undefined) {
+            try {
+              body = fs.readFileSync(options.bodyFile, 'utf-8');
+            } catch {
+              // eslint-disable-next-line no-console
+              console.error(`Error: could not read --body-file "${options.bodyFile}".`);
+              process.exitCode = 1;
+              return;
+            }
+          }
+
+          const project = projectRepo.read(projectPath);
+
+          const result = getTicketCreateUseCase().execute({
+            title,
+            projectId: project.id,
+            projectKey: project.key,
+            projectPath,
+            parentId: options.parent,
+            taskKey: options.key,
+            body,
+          });
+
+          const lineage = result.parentId ? ` (task of ${result.parentId})` : '';
+          if (result.alreadyExisted) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `= ${result.kind} ${result.ticketId} already exists: "${result.title}"${lineage} — left as is`,
+            );
+          } else {
+            // eslint-disable-next-line no-console
+            console.log(`✓ Created ${result.kind} ${result.ticketId}: "${result.title}"${lineage}`);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
           // eslint-disable-next-line no-console
-          console.error('Error: No AEOS project found. Run "aeos project init" first.');
+          console.error(`Error: ${message}`);
           process.exitCode = 1;
-          return;
         }
-
-        const project = projectRepo.read(projectPath);
-
-        const result = getTicketCreateUseCase().execute({
-          title,
-          projectId: project.id,
-          projectKey: project.key,
-          projectPath,
-          parentId: options.parent,
-        });
-
-        const lineage = result.parentId ? ` (task of ${result.parentId})` : '';
-        // eslint-disable-next-line no-console
-        console.log(`✓ Created ${result.kind} ${result.ticketId}: "${result.title}"${lineage}`);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        // eslint-disable-next-line no-console
-        console.error(`Error: ${message}`);
-        process.exitCode = 1;
-      }
-    });
+      },
+    );
 }

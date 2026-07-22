@@ -43,7 +43,7 @@ export function registerProjectInitCommand(
 
         const scaffoldNote =
           result.scaffolded.length > 0
-            ? `\n  Scaffolded ${result.scaffolded.length} file(s) into .aeos/ — column specs, agents, and rubrics.`
+            ? `\n  Scaffolded ${result.scaffolded.length} file(s) into .aeos/ — column specs, agents, rubrics, and the aeos skill.`
             : '\n  Everything was already in place; nothing scaffolded.';
 
         // eslint-disable-next-line no-console

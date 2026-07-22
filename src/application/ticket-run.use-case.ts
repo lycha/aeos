@@ -501,6 +501,7 @@ export class TicketRunUseCase implements TicketRunPort {
       `Running worker executor${attemptLabel}`,
       {
         role: 'worker',
+        agent: ctx.workerAgentSpec.name,
         executor: ctx.workerExecutorType,
         model: ctx.workerModel,
         mode: workerMode,
@@ -576,7 +577,10 @@ export class TicketRunUseCase implements TicketRunPort {
     const content = executorResult.content ?? '';
     this.emitStageEvent(emitter, 'stage.started', 'validation', 'Validating worker output');
 
-    if (workerMode === 'agentic') {
+    // An agentic run must change the repo — unless the column opts out, because
+    // its work is not a repo edit (TASK_BREAKDOWN creates tickets). Undefined
+    // means true, so IMPLEMENTATION keeps the guarantee without stating it.
+    if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false) {
       const repoDiff = this.gitGateway.diff(projectPath).trim();
       if (repoDiff.length === 0) {
         const error = 'Agentic implementation produced no repository changes';
@@ -655,6 +659,7 @@ export class TicketRunUseCase implements TicketRunPort {
 
     this.emitStageEvent(emitter, 'stage.started', 'reviewer', 'Running reviewer executor', {
       role: 'reviewer',
+      agent: ctx.reviewerAgentSpec.name,
       executor: ctx.reviewerExecutorType,
       model: ctx.reviewerModel,
       mode: 'artifact',
@@ -776,6 +781,7 @@ export class TicketRunUseCase implements TicketRunPort {
 
     this.emitStageEvent(emitter, 'stage.started', 'preflight', 'Running preflight checks', {
       role: 'preflight',
+      agent: ctx.workerAgentSpec.name,
       executor: ctx.workerExecutorType,
       model: ctx.workerModel,
       mode: 'artifact',
@@ -950,6 +956,15 @@ export class TicketRunUseCase implements TicketRunPort {
       });
     }
 
+    // Persist the reason so `aeos ticket show` and the orchestrator can explain
+    // the stall after the run ends — the event below is live-only. Written after
+    // the sub-state transition, which retains escalation for ESCALATED/BLOCKED.
+    this.ticketRepo.setEscalation(ctx.projectId, ctx.ticketId, {
+      reason: escalation.reason,
+      message: escalation.message,
+      artifactPath: escalation.artifactPath ?? null,
+    });
+
     ctx.emitter.emit({
       type: 'ticket-run.escalated',
       phase: 'complete',
@@ -1072,6 +1087,7 @@ export class TicketRunUseCase implements TicketRunPort {
     message: string,
     metadata?: {
       role?: 'preflight' | 'worker' | 'reviewer';
+      agent?: string;
       executor?: string;
       model?: string;
       mode?: 'artifact' | 'agentic';

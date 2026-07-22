@@ -26,6 +26,8 @@ export const HaltReason = {
   BUDGET_EXCEEDED: 'BUDGET_EXCEEDED',
   /** A column is set to manual advance, so the operator must approve. */
   AWAITING_APPROVAL: 'AWAITING_APPROVAL',
+  /** The operator interrupted the run (Ctrl+C); the in-flight ticket was stopped. */
+  INTERRUPTED: 'INTERRUPTED',
   /**
    * The epic is decomposed but has no child tasks yet.
    * Creating them from `tasks.md` is still a human step.
@@ -50,6 +52,14 @@ export interface OrchestratorPolicyInput {
   readonly budgetUsd: number | null;
   /** Whether the given column may advance without a human. */
   readonly autoAdvance: (column: Column) => boolean;
+}
+
+/** Appends the recorded escalation reason to a halt message, when present. */
+function withEscalationDetail(base: string, ticket: Ticket): string {
+  const esc = ticket.escalation;
+  if (!esc) return base;
+  const artifact = esc.artifactPath ? ` See: ${esc.artifactPath}` : '';
+  return `${base}\n  Reason: ${esc.reason} — ${esc.message}${artifact}`;
 }
 
 /** Sub-states that mean "a human must look at this before work continues". */
@@ -80,7 +90,10 @@ function decideForTicket(
     return {
       kind: 'halt',
       reason: halt,
-      message: `${ticket.id} is ${ticket.subState} in ${ticket.column} and needs a human before work continues.`,
+      message: withEscalationDetail(
+        `${ticket.id} is ${ticket.subState} in ${ticket.column} and needs a human before work continues.`,
+        ticket,
+      ),
     };
   }
 
@@ -104,6 +117,18 @@ function decideForTicket(
       kind: 'run',
       ticketId: ticket.id,
       reason: `Running ${ticket.column} for ${ticket.id}.`,
+    };
+  }
+
+  // WORKING / IN_REVIEW mean a run is mid-flight — or was killed before it could
+  // transition (a hard crash or pre-graceful interrupt). The orchestrator can't
+  // tell a live run apart from an orphan, so it stops; but the recovery is
+  // concrete, so name it rather than falling through to the generic message.
+  if (ticket.subState === SubState.WORKING || ticket.subState === SubState.IN_REVIEW) {
+    return {
+      kind: 'halt',
+      reason: HaltReason.NEEDS_HUMAN,
+      message: `${ticket.id} is ${ticket.subState} in ${ticket.column} — a run is in progress, or one was interrupted before it finished. If no run is active, reset it with \`aeos ticket ready ${ticket.id}\` and re-run.`,
     };
   }
 
@@ -149,7 +174,10 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
     return {
       kind: 'halt',
       reason: epicHalt,
-      message: `Epic ${epic.id} is ${epic.subState} in ${epic.column} and needs a human before work continues.`,
+      message: withEscalationDetail(
+        `Epic ${epic.id} is ${epic.subState} in ${epic.column} and needs a human before work continues.`,
+        epic,
+      ),
     };
   }
 
@@ -173,7 +201,10 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
         return {
           kind: 'halt',
           reason: childHalt,
-          message: `Task ${child.id} is ${child.subState} in ${child.column} and needs a human before the epic continues.`,
+          message: withEscalationDetail(
+            `Task ${child.id} is ${child.subState} in ${child.column} and needs a human before the epic continues.`,
+            child,
+          ),
         };
       }
     }

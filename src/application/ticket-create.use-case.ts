@@ -19,10 +19,16 @@ export class TicketCreateUseCase implements TicketCreatePort {
   ) {}
 
   execute(input: TicketCreateInput): TicketCreateResult {
-    const { title, projectId, projectKey, projectPath, parentId } = input;
+    const { title, projectId, projectKey, projectPath, parentId, taskKey, body } = input;
 
     // A parent makes this a task; without one it is an epic.
     const kind = parentId ? TicketKind.TASK : TicketKind.EPIC;
+
+    // A key only identifies a task under a parent; an epic never carries one,
+    // matching the port contract ("ignored without a parent").
+    const resolvedTaskKey = parentId ? taskKey?.trim() || null : null;
+    const titleMatches = (child: { title: string }): boolean =>
+      child.title.trim().toLowerCase() === title.trim().toLowerCase();
 
     if (parentId) {
       const parent = this.ticketRepo.findById(projectId, parentId);
@@ -33,6 +39,34 @@ export class TicketCreateUseCase implements TicketCreatePort {
         throw new Error(
           `Parent ${parentId} is a ${parent.kind}; tasks may only hang off an EPIC (one level of nesting).`,
         );
+      }
+
+      // Idempotent: decomposition creates tasks during an agentic run, which the
+      // review loop may retry. A matching child short-circuits rather than
+      // duplicating.
+      const children = this.ticketRepo.findChildren(projectId, parentId);
+      let existing: (typeof children)[number] | undefined;
+      if (resolvedTaskKey) {
+        const wanted = resolvedTaskKey.toLowerCase();
+        // Match on the key — a retry may rephrase the title, so keying on title
+        // alone would miss and duplicate. Secondarily match a KEYLESS child with
+        // the same title: that is the same task from a pre-key attempt, and
+        // pairing it here avoids duplicating when key usage started mid-stream.
+        existing =
+          children.find((child) => child.taskKey?.trim().toLowerCase() === wanted) ??
+          children.find((child) => !child.taskKey && titleMatches(child));
+      } else {
+        existing = children.find(titleMatches);
+      }
+      if (existing) {
+        return {
+          ticketId: existing.id,
+          title: existing.title,
+          kind: existing.kind,
+          parentId: existing.parentId,
+          taskKey: existing.taskKey ?? null,
+          alreadyExisted: true,
+        };
       }
     }
 
@@ -46,6 +80,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
         title,
         kind,
         parentId: parentId ?? null,
+        taskKey: resolvedTaskKey,
         column: 'BACKLOG' as const,
         subState: null,
         createdAt: now,
@@ -56,7 +91,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
     const ticketId = ticket.id;
 
     // 2. Build ticket markdown content
-    const content = buildInitialTicketDocument(ticket);
+    const content = buildInitialTicketDocument(ticket, body);
 
     // 4. Write artifact file; compensate on failure
     const filename = `${ticketId}-ticket.md`;
@@ -78,6 +113,13 @@ export class TicketCreateUseCase implements TicketCreatePort {
     }
 
     // 6. Return result
-    return { ticketId, title, kind, parentId: parentId ?? null };
+    return {
+      ticketId,
+      title,
+      kind,
+      parentId: parentId ?? null,
+      taskKey: resolvedTaskKey,
+      alreadyExisted: false,
+    };
   }
 }

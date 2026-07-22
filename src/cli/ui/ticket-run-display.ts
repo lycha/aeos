@@ -75,6 +75,7 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
 
   protected ticketId = '—';
   protected column = '—';
+  protected agent = '—';
   protected executor = '—';
   protected model = '—';
   protected mode = '—';
@@ -109,11 +110,29 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
 
     switch (event.type) {
       case 'ticket-run.started':
+        // Reset the per-run panels so a display reused across an orchestrator's
+        // tickets reflects the current ticket, not the previous one. The raw log
+        // is intentionally kept so the whole epic's output scrolls back.
+        for (const phase of PHASE_ORDER) {
+          this.stageStates.set(phase, { status: 'pending' });
+        }
+        this.partialBuffers.clear();
+        this.activeStage = null;
+        this.subState = null;
+        this.finalStatus = 'running';
+        this.agent = '—';
         this.executor = event.payload.executor;
         this.model = event.payload.model ?? '—';
         this.appendLogLine(
-          `[run] started | executor=${this.executor}${event.payload.model ? ` | model=${event.payload.model}` : ''}`,
+          `[run] started | ${event.ticketId} | ${event.column} | executor=${this.executor}${event.payload.model ? ` | model=${event.payload.model}` : ''}`,
         );
+        break;
+      case 'run.attempt.started':
+        if (event.payload.attempt > 1) {
+          this.appendLogLine(
+            `[run] revision attempt ${event.payload.attempt} of ${event.payload.maxAttempts}`,
+          );
+        }
         break;
       case 'stage.started':
         this.activeStage = event.payload.stage;
@@ -121,10 +140,14 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
           status: 'active',
           message: event.payload.message,
         });
+        this.agent = event.payload.agent ?? this.agent;
         this.executor = event.payload.executor ?? this.executor;
         this.model = event.payload.model ?? this.model;
         this.mode = event.payload.mode ?? this.mode;
-        this.appendLogLine(`[stage:${event.payload.stage}] started | ${event.payload.message}`);
+        this.appendLogLine(
+          `[stage:${event.payload.stage}] started | ${event.payload.message}` +
+            (event.payload.agent ? ` | agent=${event.payload.agent}` : ''),
+        );
         break;
       case 'stage.completed':
         this.stageStates.set(event.payload.stage, {
@@ -193,6 +216,11 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
         this.appendLogLine(
           `[run] interrupted${event.payload.stage ? ` at ${event.payload.stage}` : ''} | ${event.payload.message}`,
         );
+        break;
+      case 'ticket-run.escalated':
+        this.finalStatus = 'escalated';
+        this.flushAllBuffers();
+        this.appendLogLine(`[run] escalated | ${event.payload.reason} | ${event.payload.message}`);
         break;
     }
 
@@ -357,6 +385,7 @@ class LiveTicketRunDisplay extends BaseTicketRunDisplay {
   private buildMetaLine(): string {
     return [
       `Stage: ${this.activeStage ? PHASE_LABELS[this.activeStage] : this.finalStatus}`,
+      `Agent: ${this.agent}`,
       `Executor: ${this.executor}`,
       `Model: ${this.model}`,
       `Mode: ${this.mode}`,
@@ -400,6 +429,7 @@ class LiveTicketRunDisplay extends BaseTicketRunDisplay {
     const metadata = [
       'Stages',
       `Current: ${this.activeStage ? PHASE_LABELS[this.activeStage] : this.finalStatus}`,
+      `Agent: ${this.agent}`,
       `Executor: ${this.executor}`,
       `Model: ${this.model}`,
       `Mode: ${this.mode}`,

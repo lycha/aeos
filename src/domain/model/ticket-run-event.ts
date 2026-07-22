@@ -64,6 +64,8 @@ export type TicketRunLifecycleEvent =
         stage: TicketRunPhase;
         message: string;
         role?: 'preflight' | 'worker' | 'reviewer';
+        /** The agent spec driving this stage, e.g. "architect-agent". */
+        agent?: string;
         executor?: string;
         model?: string;
         mode?: 'artifact' | 'agentic';

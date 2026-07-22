@@ -34,6 +34,7 @@ function createMockTicketRepo(): TicketRepository {
     findChildren: vi.fn().mockReturnValue([]),
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
+    setEscalation: vi.fn(),
   };
 }
 
@@ -566,6 +567,33 @@ describe('TicketRunUseCase', () => {
       'AEOS-1-impl.md',
       expect.anything(),
     );
+  });
+
+  it('skips the repo-diff check for an agentic column that opts out', async () => {
+    // TASK_BREAKDOWN is agentic (it calls the CLI to create tasks) but its work
+    // is not a repo edit, so requiresRepoDiff:false must let a no-diff run pass.
+    (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+      defaultColumnSpec({ executorMode: 'agentic', requiresRepoDiff: false }),
+    );
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('');
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result.status).toBe('success');
+  });
+
+  it('still enforces the repo-diff check for a default agentic column', async () => {
+    // Undefined requiresRepoDiff must behave as true — IMPLEMENTATION's guarantee.
+    (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+      defaultColumnSpec({ executorMode: 'agentic' }),
+    );
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('');
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') return;
+    expect(result.error).toContain('no repository changes');
   });
 
   it('should reuse the first assembled context for the worker prompt', async () => {

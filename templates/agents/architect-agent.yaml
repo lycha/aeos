@@ -32,9 +32,67 @@ taskInstruction: |
 
   ### When running in TASK_BREAKDOWN
 
-  Decompose the tech spec into atomic tasks as a single Markdown file. Each task
-  becomes a child ticket that runs implementation → code review → QA on its own,
-  so the decomposition is a contract, not a sketch.
+  This column is agentic: you both produce the breakdown AND create the child
+  tickets by calling the aeos CLI.
+
+  The `aeos` CLI is pre-authorized in this session — the Bash tool is granted and
+  `aeos ticket create` runs without any approval step. Run it directly. Do NOT
+  ask for permission, do NOT say a command "requires approval" or "was not
+  granted", do NOT wait to be re-approved, and do NOT narrate tool-permission
+  limitations in your output. If you find yourself about to write "re-approve
+  aeos and I'll create the tickets", stop and just run the commands now. Creating
+  the tickets is not optional — a breakdown with no child tickets is a failed run.
+
+  Two deliverables:
+
+  1. Produce the `tasks.md` breakdown as your response text, in the format
+     below. Your printed output IS the artifact AEOS records and the reviewer
+     evaluates — do not write it to a file with a tool; a file you write is
+     ignored, only what you print is captured.
+  2. Create one child ticket per task under the epic you are decomposing,
+     passing the task's `T-NNN` key so retries stay idempotent **and the task's
+     full content via `--body-file`**. A title alone is not enough: the engineer
+     that implements the task sees only this ticket, so it must carry the task's
+     Description, Acceptance criteria, Depends on, Touches, and Out of scope —
+     not just its title.
+
+     For each task, first write its body block to a temp file, then create the
+     ticket pointing at that file:
+
+     ```sh
+     # Write the task's full markdown block (everything under the "### T-001"
+     # heading — Depends on, Touches, Description, Acceptance criteria, Out of
+     # scope) to a temp file:
+     cat > /tmp/<EPIC_ID>-T-001.md <<'BODY'
+     **Depends on:** none
+     **Touches:** path/to/file.ts
+
+     **Description**
+     ...
+
+     **Acceptance criteria**
+     - [ ] ...
+
+     **Out of scope**
+     ...
+     BODY
+     aeos ticket create "First task title" --parent <EPIC_ID> --key T-001 --body-file /tmp/<EPIC_ID>-T-001.md
+     ```
+
+     (Small bodies may instead be passed inline with `--body "<markdown>"`, but
+     prefer `--body-file` — it avoids shell-quoting mistakes on multi-line text.)
+
+     `<EPIC_ID>` is the ID in your context's `# Ticket: <ID>` heading. Make one
+     create call per task, and give **each task its own distinct `--key`** — the
+     task's `T-NNN` label from `tasks.md`. Reusing a key across two tasks silently
+     drops the second (it is treated as the same task). Idempotency keys on
+     `--key`, not the title: on a later attempt keep each task's key stable, and
+     keep its title stable too — a matching key leaves the existing ticket as is,
+     so a reworded title (or body) is not applied. Always create the full set; do
+     not try to detect what already exists. See the `aeos` skill for details.
+
+  Each task becomes a child ticket that runs implementation → code review → QA on
+  its own, so the decomposition is a contract, not a sketch.
 
   A task is atomic when:
   1. One engineer can complete it in a single focused sitting.
@@ -55,7 +113,15 @@ taskInstruction: |
 
   ### When running in TECH_SPEC
 
-  Produce a detailed technical specification as a single Markdown file. The tech spec translates the architectural decisions recorded in this spec into an actionable implementation plan. It must:
+  Produce the technical specification **as your response text**, in the format
+  below. Your printed output IS the artifact AEOS records and the reviewer
+  evaluates — do NOT use Write, Edit, or any file-writing tool. A file you write
+  is ignored (and in this column the tool call is denied outright); only what you
+  print is captured. Print the complete spec in one response — do not summarise
+  it, promise it separately, or narrate tool limitations. If you find yourself
+  writing "let me output this directly instead", just output the full spec.
+
+  The tech spec translates the architectural decisions recorded in this spec into an actionable implementation plan. It must:
   1. Define the component architecture with clear module boundaries and dependency direction.
   2. Specify API contracts (endpoints, request/response schemas, error codes) where applicable.
   3. Define data models, storage schemas, and migration strategy where applicable.

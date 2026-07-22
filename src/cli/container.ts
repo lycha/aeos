@@ -2,6 +2,7 @@
 
 import type { InstallPort } from '../domain/ports/driving/install.port.js';
 import type { ProjectInitPort } from '../domain/ports/driving/project-init.port.js';
+import type { ProjectSyncPort } from '../domain/ports/driving/project-sync.port.js';
 import type { TicketCreatePort } from '../domain/ports/driving/ticket-create.port.js';
 import type { TicketListPort } from '../domain/ports/driving/ticket-list.port.js';
 import type { TicketShowPort } from '../domain/ports/driving/ticket-show.port.js';
@@ -26,6 +27,8 @@ import { SqliteTicketRepository } from '../infrastructure/persistence/sqlite-tic
 import { getDb } from '../infrastructure/persistence/database.js';
 import { InstallUseCase } from '../application/install.use-case.js';
 import { ProjectInitUseCase } from '../application/project-init.use-case.js';
+import { ProjectSyncUseCase } from '../application/project-sync.use-case.js';
+import { FsTemplateCatalog } from '../infrastructure/filesystem/fs-template-catalog.js';
 import { TicketCreateUseCase } from '../application/ticket-create.use-case.js';
 import { TicketListUseCase } from '../application/ticket-list.use-case.js';
 import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
@@ -57,6 +60,7 @@ import type { AgentSpec } from '../domain/model/agent-spec.js';
 export interface Container {
   install: InstallPort;
   projectInit: ProjectInitPort;
+  projectSync: ProjectSyncPort;
   ticketCreate: TicketCreatePort;
   ticketList: TicketListPort;
   ticketShow: TicketShowPort;
@@ -135,6 +139,7 @@ export function createContainer(): Container {
   return {
     install: new InstallUseCase(configStore),
     projectInit: new ProjectInitUseCase(projectRepo, configStore, gitGateway),
+    projectSync: new ProjectSyncUseCase(new FsTemplateCatalog()),
     get ticketCreate() {
       return new TicketCreateUseCase(getTicketRepo(), artifactStore, gitGateway);
     },

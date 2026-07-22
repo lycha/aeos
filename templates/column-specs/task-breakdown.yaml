@@ -1,5 +1,10 @@
 column: TASK_BREAKDOWN
-executorMode: artifact
+# Agentic so the architect can call `aeos ticket create --parent` to decompose
+# the epic into child tasks. requiresRepoDiff is false because that work writes
+# tickets and a gitignored artifact, not a repo change — the IMPLEMENTATION
+# diff guarantee does not apply here.
+executorMode: agentic
+requiresRepoDiff: false
 workerAgentFile: agents/architect-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml
 outputArtifact: tasks.md

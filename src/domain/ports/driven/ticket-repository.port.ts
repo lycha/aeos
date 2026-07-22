@@ -2,7 +2,7 @@
 
 import type { Column } from '../../model/column.js';
 import type { SubStateOrNull } from '../../model/sub-state.js';
-import type { Ticket } from '../../model/ticket.js';
+import type { Ticket, TicketEscalation } from '../../model/ticket.js';
 
 export interface TicketRepository {
   /** Returns the next auto-incrementing ticket number for the given project */
@@ -24,6 +24,15 @@ export interface TicketRepository {
   findChildren(projectId: string, parentTicketId: string): Ticket[];
   /** Updates a ticket's column and updated_at timestamp */
   updateColumn(projectId: string, ticketId: string, column: Column): void;
-  /** Updates a ticket's sub-state and updated_at timestamp */
+  /**
+   * Updates a ticket's sub-state and updated_at timestamp. Clears any recorded
+   * escalation when the new sub-state is neither ESCALATED nor BLOCKED — a
+   * ticket that has moved on is no longer "stalled for this reason".
+   */
   updateSubState(projectId: string, ticketId: string, subState: SubStateOrNull): void;
+  /**
+   * Records (or clears, when passed null) the ticket's latest escalation.
+   * Called right after the sub-state is set to ESCALATED/BLOCKED.
+   */
+  setEscalation(projectId: string, ticketId: string, escalation: TicketEscalation | null): void;
 }

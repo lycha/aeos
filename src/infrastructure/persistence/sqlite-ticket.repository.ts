@@ -2,12 +2,14 @@
 
 import type BetterSqlite3 from 'better-sqlite3';
 import type { Column } from '../../domain/model/column.js';
-import type { Ticket } from '../../domain/model/ticket.js';
+import type { Ticket, TicketEscalation } from '../../domain/model/ticket.js';
+import type { EscalationReason } from '../../domain/model/escalation.js';
+import { SubState } from '../../domain/model/sub-state.js';
 import type { SubStateOrNull } from '../../domain/model/sub-state.js';
 import type { TicketKind } from '../../domain/model/ticket-kind.js';
 import type { TicketRepository } from '../../domain/ports/driven/ticket-repository.port.js';
 
-const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, "column", sub_state, created_at, updated_at`;
+const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, escalation_reason, escalation_message, escalation_artifact`;
 
 interface TicketRow {
   id: string;
@@ -15,10 +17,14 @@ interface TicketRow {
   title: string;
   kind: TicketKind;
   parent_id: string | null;
+  task_key: string | null;
   column: Column;
   sub_state: string | null;
   created_at: string;
   updated_at: string;
+  escalation_reason: string | null;
+  escalation_message: string | null;
+  escalation_artifact: string | null;
 }
 
 export class SqliteTicketRepository implements TicketRepository {
@@ -32,10 +38,18 @@ export class SqliteTicketRepository implements TicketRepository {
       // Rows written before the hierarchy migration are epics by definition.
       kind: row.kind ?? 'EPIC',
       parentId: row.parent_id ?? null,
+      taskKey: row.task_key ?? null,
       column: row.column,
       subState: (row.sub_state as SubStateOrNull) ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      escalation: row.escalation_reason
+        ? {
+            reason: row.escalation_reason as EscalationReason,
+            message: row.escalation_message ?? '',
+            artifactPath: row.escalation_artifact,
+          }
+        : null,
     };
   }
 
@@ -52,8 +66,8 @@ export class SqliteTicketRepository implements TicketRepository {
   save(ticket: Ticket): void {
     this.db
       .prepare(
-        `INSERT INTO tickets (id, project_id, title, kind, parent_id, "column", sub_state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         ticket.id,
@@ -61,6 +75,7 @@ export class SqliteTicketRepository implements TicketRepository {
         ticket.title,
         ticket.kind,
         ticket.parentId,
+        ticket.taskKey ?? null,
         ticket.column,
         ticket.subState,
         ticket.createdAt,
@@ -132,8 +147,40 @@ export class SqliteTicketRepository implements TicketRepository {
   }
 
   updateSubState(projectId: string, ticketId: string, subState: SubStateOrNull): void {
+    // A ticket that has moved off ESCALATED/BLOCKED is no longer stalled for the
+    // recorded reason, so drop it in the same write. Keeping it would let
+    // `ticket show` report a stale "why" against a READY/WORKING ticket.
+    const retainEscalation = subState === SubState.ESCALATED || subState === SubState.BLOCKED;
+    if (retainEscalation) {
+      this.db
+        .prepare(`UPDATE tickets SET sub_state = ?, updated_at = ? WHERE project_id = ? AND id = ?`)
+        .run(subState, new Date().toISOString(), projectId, ticketId);
+    } else {
+      this.db
+        .prepare(
+          `UPDATE tickets
+           SET sub_state = ?, updated_at = ?,
+               escalation_reason = NULL, escalation_message = NULL, escalation_artifact = NULL
+           WHERE project_id = ? AND id = ?`,
+        )
+        .run(subState, new Date().toISOString(), projectId, ticketId);
+    }
+  }
+
+  setEscalation(projectId: string, ticketId: string, escalation: TicketEscalation | null): void {
     this.db
-      .prepare(`UPDATE tickets SET sub_state = ?, updated_at = ? WHERE project_id = ? AND id = ?`)
-      .run(subState, new Date().toISOString(), projectId, ticketId);
+      .prepare(
+        `UPDATE tickets
+         SET escalation_reason = ?, escalation_message = ?, escalation_artifact = ?, updated_at = ?
+         WHERE project_id = ? AND id = ?`,
+      )
+      .run(
+        escalation?.reason ?? null,
+        escalation?.message ?? null,
+        escalation?.artifactPath ?? null,
+        new Date().toISOString(),
+        projectId,
+        ticketId,
+      );
   }
 }

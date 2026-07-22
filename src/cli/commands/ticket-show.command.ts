@@ -76,6 +76,18 @@ export function registerTicketShowCommand(
       // eslint-disable-next-line no-console
       console.log(`State:  ${subState}`);
 
+      // The whole point of ESCALATED/BLOCKED is "a human must look" — so tell the
+      // human why, right here, instead of making them open the review artifact.
+      const escalation = result.ticket.escalation;
+      if (escalation) {
+        // eslint-disable-next-line no-console
+        console.log(`Reason: ${escalation.reason} — ${escalation.message}`);
+        if (escalation.artifactPath) {
+          // eslint-disable-next-line no-console
+          console.log(`        See: ${escalation.artifactPath}`);
+        }
+      }
+
       if (result.children.length > 0) {
         const done = result.children.filter((child) => child.column === 'DONE').length;
         // eslint-disable-next-line no-console
