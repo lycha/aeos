@@ -54,6 +54,14 @@ export interface OrchestratorPolicyInput {
   readonly autoAdvance: (column: Column) => boolean;
 }
 
+/** Appends the recorded escalation reason to a halt message, when present. */
+function withEscalationDetail(base: string, ticket: Ticket): string {
+  const esc = ticket.escalation;
+  if (!esc) return base;
+  const artifact = esc.artifactPath ? ` See: ${esc.artifactPath}` : '';
+  return `${base}\n  Reason: ${esc.reason} — ${esc.message}${artifact}`;
+}
+
 /** Sub-states that mean "a human must look at this before work continues". */
 function needsHuman(ticket: Ticket): HaltReason | null {
   if (ticket.subState === SubState.ESCALATED) return HaltReason.NEEDS_HUMAN;
@@ -82,7 +90,10 @@ function decideForTicket(
     return {
       kind: 'halt',
       reason: halt,
-      message: `${ticket.id} is ${ticket.subState} in ${ticket.column} and needs a human before work continues.`,
+      message: withEscalationDetail(
+        `${ticket.id} is ${ticket.subState} in ${ticket.column} and needs a human before work continues.`,
+        ticket,
+      ),
     };
   }
 
@@ -163,7 +174,10 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
     return {
       kind: 'halt',
       reason: epicHalt,
-      message: `Epic ${epic.id} is ${epic.subState} in ${epic.column} and needs a human before work continues.`,
+      message: withEscalationDetail(
+        `Epic ${epic.id} is ${epic.subState} in ${epic.column} and needs a human before work continues.`,
+        epic,
+      ),
     };
   }
 
@@ -187,7 +201,10 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
         return {
           kind: 'halt',
           reason: childHalt,
-          message: `Task ${child.id} is ${child.subState} in ${child.column} and needs a human before the epic continues.`,
+          message: withEscalationDetail(
+            `Task ${child.id} is ${child.subState} in ${child.column} and needs a human before the epic continues.`,
+            child,
+          ),
         };
       }
     }

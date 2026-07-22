@@ -80,6 +80,15 @@ class StubTicketRepository implements TicketRepository {
     }
   }
 
+  setEscalation(projectId: string, ticketId: string, escalation: Ticket['escalation']): void {
+    const ticket = this.findById(projectId, ticketId);
+    if (ticket) {
+      ticket.escalation = escalation ?? null;
+      ticket.updatedAt = new Date().toISOString();
+      this.store.set(this.key(projectId, ticketId), ticket);
+    }
+  }
+
   createAtomic(projectId: string, buildTicket: (nextNum: number) => Ticket): Ticket {
     const nextNum = this.nextId(projectId);
     const ticket = buildTicket(nextNum);

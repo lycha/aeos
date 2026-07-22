@@ -953,6 +953,15 @@ export class TicketRunUseCase implements TicketRunPort {
       });
     }
 
+    // Persist the reason so `aeos ticket show` and the orchestrator can explain
+    // the stall after the run ends — the event below is live-only. Written after
+    // the sub-state transition, which retains escalation for ESCALATED/BLOCKED.
+    this.ticketRepo.setEscalation(ctx.projectId, ctx.ticketId, {
+      reason: escalation.reason,
+      message: escalation.message,
+      artifactPath: escalation.artifactPath ?? null,
+    });
+
     ctx.emitter.emit({
       type: 'ticket-run.escalated',
       phase: 'complete',

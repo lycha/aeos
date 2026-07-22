@@ -1,8 +1,23 @@
 // Aggregate — Ticket (id, kind, parent, title, column, subState, timestamps)
 
 import type { Column } from './column.js';
+import type { EscalationReason } from './escalation.js';
 import type { SubStateOrNull } from './sub-state.js';
 import type { TicketKind } from './ticket-kind.js';
+
+/**
+ * The most recent escalation recorded against a ticket, or absent when it has
+ * never escalated (or has since moved on). Persisted so `aeos ticket show` and
+ * the orchestrator can answer "why did this stall?" after the run has ended —
+ * the live run event is gone by then.
+ */
+export interface TicketEscalation {
+  reason: EscalationReason;
+  /** Operator-facing explanation. */
+  message: string;
+  /** Artifact the operator should read first (review, questions, …). */
+  artifactPath?: string | null;
+}
 
 export interface Ticket {
   /** Ticket identifier, e.g. "AEOS-1" */
@@ -31,4 +46,9 @@ export interface Ticket {
   createdAt: string;
   /** ISO-8601 last-updated timestamp */
   updatedAt: string;
+  /**
+   * The last escalation, when the ticket is (or recently was) ESCALATED/BLOCKED.
+   * Cleared automatically once the ticket returns to any other sub-state.
+   */
+  escalation?: TicketEscalation | null;
 }

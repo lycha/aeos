@@ -138,6 +138,25 @@ CREATE TABLE IF NOT EXISTS orchestrator_state (
       );
     },
   },
+  {
+    version: 5,
+    description: 'Persist escalation reason/message/artifact on tickets',
+    apply: (db) => {
+      // Why the reason lives on the ticket rather than only in the run event:
+      // the run emits the escalation once, live, then ends. An operator asking
+      // "why did this stall?" days later needs it queryable. These columns are
+      // cleared when the ticket leaves ESCALATED/BLOCKED (see updateSubState).
+      if (!hasColumn(db, 'tickets', 'escalation_reason')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN escalation_reason TEXT DEFAULT NULL`);
+      }
+      if (!hasColumn(db, 'tickets', 'escalation_message')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN escalation_message TEXT DEFAULT NULL`);
+      }
+      if (!hasColumn(db, 'tickets', 'escalation_artifact')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN escalation_artifact TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

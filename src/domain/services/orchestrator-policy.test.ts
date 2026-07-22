@@ -101,6 +101,26 @@ describe('decideNextAction', () => {
       expect(action.reason).toBe(expected);
     });
 
+    it('surfaces the recorded escalation reason in the halt message', () => {
+      const action = decide({
+        epic: epic({
+          subState: SubState.ESCALATED,
+          escalation: {
+            reason: 'ITERATIONS_EXHAUSTED',
+            message: 'Reviewer never cleared its blockers.',
+            artifactPath: 'AEOS-1-tech-spec-review.md',
+          },
+        }),
+      });
+
+      expect(action.kind).toBe('halt');
+      if (action.kind !== 'halt') return;
+      // The operator learns *why* without opening the artifact.
+      expect(action.message).toContain('ITERATIONS_EXHAUSTED');
+      expect(action.message).toContain('Reviewer never cleared its blockers.');
+      expect(action.message).toContain('AEOS-1-tech-spec-review.md');
+    });
+
     it.each([SubState.WORKING, SubState.IN_REVIEW])(
       'halts with an actionable message for a stuck %s epic',
       (subState) => {

@@ -14,6 +14,7 @@ function createMockTicketRepo(): TicketRepository {
     findChildren: vi.fn().mockReturnValue([]),
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
+    setEscalation: vi.fn(),
   };
 }
 
