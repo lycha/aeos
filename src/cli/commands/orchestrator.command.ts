@@ -45,8 +45,16 @@ export function registerOrchestratorCommand(
       const display = createTicketRunDisplay(process.stdout);
       let displayStarted = false;
 
+      // Capture the instance so SIGINT interrupts the same run it started.
+      const orchestrator = getOrchestrator();
+      const interruptHandler = () => {
+        display.requestInterrupt();
+        orchestrator.interrupt();
+      };
+      process.once('SIGINT', interruptHandler);
+
       try {
-        const result = await getOrchestrator().run(
+        const result = await orchestrator.run(
           project.id,
           project.path,
           epicId,
@@ -73,6 +81,7 @@ export function registerOrchestratorCommand(
           },
         );
 
+        process.removeListener('SIGINT', interruptHandler);
         if (displayStarted) display.stop();
 
         const summary: string[] = [];
@@ -93,9 +102,11 @@ export function registerOrchestratorCommand(
         console.log(summary.join('\n'));
 
         if (!CLEAN_HALTS.has(result.haltReason)) {
-          process.exitCode = 1;
+          // 130 is the conventional "terminated by Ctrl+C" code.
+          process.exitCode = result.haltReason === 'INTERRUPTED' ? 130 : 1;
         }
       } catch (err) {
+        process.removeListener('SIGINT', interruptHandler);
         if (displayStarted) display.stop();
         // eslint-disable-next-line no-console
         console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);

@@ -49,6 +49,7 @@ const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 
 export class OrchestratorUseCase implements OrchestratorPort {
   private lastHeartbeatMs = 0;
+  private interruptRequested = false;
 
   constructor(
     private readonly ticketRepo: TicketRepository,
@@ -76,6 +77,8 @@ export class OrchestratorUseCase implements OrchestratorPort {
         `${epicId} is a ${epic.kind}. The orchestrator drives epics; a task is scheduled as part of its parent.`,
       );
     }
+
+    this.interruptRequested = false;
 
     const existing = this.stateRepo.find(projectId, epicId);
 
@@ -111,6 +114,13 @@ export class OrchestratorUseCase implements OrchestratorPort {
 
     try {
       for (let step = 0; step < maxSteps; step += 1) {
+        // An interrupt that arrived between actions stops before scheduling the
+        // next one.
+        if (this.interruptRequested) {
+          settled = true;
+          return this.interruptedHalt(projectId, epicId, steps);
+        }
+
         // Re-read every tick: the previous action changed the world, and a
         // stale view is how a scheduler double-runs a ticket.
         const current = this.ticketRepo.findById(projectId, epicId);
@@ -156,6 +166,14 @@ export class OrchestratorUseCase implements OrchestratorPort {
         steps.push(recorded);
         observer?.onStep?.(recorded);
         this.heartbeat(projectId, epicId, true);
+
+        // The action just finished — if the operator interrupted during it, the
+        // in-flight ticket was already stopped; halt now rather than scheduling
+        // more work.
+        if (this.interruptRequested) {
+          settled = true;
+          return this.interruptedHalt(projectId, epicId, steps);
+        }
       }
 
       settled = true;
@@ -183,6 +201,13 @@ export class OrchestratorUseCase implements OrchestratorPort {
         );
       }
     }
+  }
+
+  interrupt(): void {
+    // Stop scheduling, and kill whatever ticket run is in flight. interrupt() on
+    // the ticket-run use case is a no-op when nothing is running.
+    this.interruptRequested = true;
+    void this.ticketRun.interrupt();
   }
 
   pause(projectId: string, epicId: string): OrchestratorState {
@@ -338,6 +363,22 @@ export class OrchestratorUseCase implements OrchestratorPort {
     };
     this.stateRepo.upsert(state);
     return state;
+  }
+
+  private interruptedHalt(
+    projectId: string,
+    epicId: string,
+    steps: OrchestratorStep[],
+  ): OrchestratorRunResult {
+    return this.haltWith(
+      projectId,
+      epicId,
+      HaltReason.INTERRUPTED,
+      `Interrupted by operator after ${steps.length} action(s). The in-flight ticket was stopped and left INTERRUPTED; re-run the epic to resume.`,
+      steps,
+      this.spendFor(projectId, epicId),
+      OrchestratorStatus.IDLE,
+    );
   }
 
   private haltWith(

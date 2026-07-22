@@ -44,6 +44,12 @@ export interface OrchestratorPort {
     observer?: OrchestratorObserver,
   ): Promise<OrchestratorRunResult>;
 
+  /**
+   * Stop the active run gracefully: halt the in-flight ticket and stop
+   * scheduling once it unwinds. No-op if nothing is running.
+   */
+  interrupt(): void;
+
   pause(projectId: string, epicId: string): OrchestratorState;
   resume(projectId: string, epicId: string): OrchestratorState;
   status(projectId: string, epicId?: string): OrchestratorState[];

@@ -26,6 +26,8 @@ export const HaltReason = {
   BUDGET_EXCEEDED: 'BUDGET_EXCEEDED',
   /** A column is set to manual advance, so the operator must approve. */
   AWAITING_APPROVAL: 'AWAITING_APPROVAL',
+  /** The operator interrupted the run (Ctrl+C); the in-flight ticket was stopped. */
+  INTERRUPTED: 'INTERRUPTED',
   /**
    * The epic is decomposed but has no child tasks yet.
    * Creating them from `tasks.md` is still a human step.
