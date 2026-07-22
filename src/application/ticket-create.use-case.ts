@@ -34,6 +34,23 @@ export class TicketCreateUseCase implements TicketCreatePort {
           `Parent ${parentId} is a ${parent.kind}; tasks may only hang off an EPIC (one level of nesting).`,
         );
       }
+
+      // Idempotent by (parent, title): decomposition creates tasks during an
+      // agentic run, which the review loop may retry. Re-running must not
+      // duplicate a task the previous attempt already created, so a matching
+      // child short-circuits to the existing ticket rather than a new one.
+      const existing = this.ticketRepo
+        .findChildren(projectId, parentId)
+        .find((child) => child.title.trim().toLowerCase() === title.trim().toLowerCase());
+      if (existing) {
+        return {
+          ticketId: existing.id,
+          title: existing.title,
+          kind: existing.kind,
+          parentId: existing.parentId,
+          alreadyExisted: true,
+        };
+      }
     }
 
     // 1. Atomically allocate ID + insert in a single transaction (prevents race conditions)
@@ -78,6 +95,6 @@ export class TicketCreateUseCase implements TicketCreatePort {
     }
 
     // 6. Return result
-    return { ticketId, title, kind, parentId: parentId ?? null };
+    return { ticketId, title, kind, parentId: parentId ?? null, alreadyExisted: false };
   }
 }

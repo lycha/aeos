@@ -12,6 +12,7 @@ import {
 } from '../../shared/errors.js';
 import { CONSTRAINTS_PLACEHOLDER } from './defaults/constraints-placeholder.js';
 import { readTemplates } from './template-source.js';
+import { scaffoldSkill } from './skill-source.js';
 
 const AEOS_DIR = '.aeos';
 const PROJECT_JSON = 'project.json';
@@ -118,6 +119,9 @@ export class FsProjectRepository implements ProjectRepository {
       fs.writeFileSync(target, template.content, 'utf-8');
       created.push(template.relativePath);
     }
+
+    // The aeos skill lets agentic executors drive the CLI (task decomposition).
+    created.push(...scaffoldSkill(projectPath));
     return created;
   }
 

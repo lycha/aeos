@@ -6,6 +6,7 @@ import { z } from 'zod';
 export const ColumnSpecSchema = z.object({
   column: z.string().min(1),
   executorMode: z.enum(['artifact', 'agentic']).optional(),
+  requiresRepoDiff: z.boolean().optional(),
   workerAgentFile: z.string().min(1),
   reviewerAgentFile: z.string().min(1),
   outputArtifact: z.string().min(1),

@@ -32,9 +32,24 @@ taskInstruction: |
 
   ### When running in TASK_BREAKDOWN
 
-  Decompose the tech spec into atomic tasks as a single Markdown file. Each task
-  becomes a child ticket that runs implementation → code review → QA on its own,
-  so the decomposition is a contract, not a sketch.
+  This column is agentic: you both write the breakdown AND create the child
+  tickets by calling the aeos CLI. Two deliverables:
+
+  1. Write the `tasks.md` artifact at your output path (format below).
+  2. Create one child ticket per task under the epic you are decomposing:
+
+     ```sh
+     aeos ticket create "<task title>" --parent <EPIC_ID>
+     ```
+
+     `<EPIC_ID>` is the ID in your context's `# Ticket: <ID>` heading. Make one
+     call per task; the titles must match the tasks in `tasks.md`. Creating a
+     task is idempotent — if a matching child already exists it is left as is —
+     so always create the full set; do not try to detect what already exists.
+     See the `aeos` skill for details.
+
+  Each task becomes a child ticket that runs implementation → code review → QA on
+  its own, so the decomposition is a contract, not a sketch.
 
   A task is atomic when:
   1. One engineer can complete it in a single focused sitting.

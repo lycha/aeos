@@ -20,6 +20,8 @@ export interface TicketCreateResult {
   title: string;
   kind: TicketKind;
   parentId: string | null;
+  /** True when a child with this title already existed under the parent. */
+  alreadyExisted: boolean;
 }
 
 export interface TicketCreatePort {

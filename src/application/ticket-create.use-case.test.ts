@@ -76,6 +76,7 @@ describe('TicketCreateUseCase', () => {
       // No parent supplied, so this is a top-level epic.
       kind: 'EPIC',
       parentId: null,
+      alreadyExisted: false,
     });
   });
 
@@ -189,5 +190,91 @@ describe('TicketCreateUseCase', () => {
     expect(r2.ticketId).toBe('AEOS-2');
     expect(artifactStore.writeArtifact).toHaveBeenCalledTimes(2);
     expect(ticketRepo.createAtomic).toHaveBeenCalledTimes(2);
+  });
+
+  describe('child tasks', () => {
+    const epic = {
+      id: 'AEOS-1',
+      projectId: 'startup-a',
+      title: 'Epic',
+      kind: 'EPIC' as const,
+      parentId: null,
+      column: 'TASK_BREAKDOWN' as const,
+      subState: 'WORKING' as const,
+      createdAt: 'x',
+      updatedAt: 'y',
+    };
+
+    it('creates a task under an epic', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+
+      const result = useCase.execute({
+        ...defaultInput,
+        title: 'Hash passwords',
+        parentId: 'AEOS-1',
+      });
+
+      expect(result).toMatchObject({
+        kind: 'TASK',
+        parentId: 'AEOS-1',
+        alreadyExisted: false,
+      });
+    });
+
+    it('rejects a task whose parent is another task (one level of nesting)', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...epic,
+        id: 'AEOS-2',
+        kind: 'TASK',
+        parentId: 'AEOS-1',
+      });
+
+      expect(() =>
+        useCase.execute({ ...defaultInput, title: 'Nested', parentId: 'AEOS-2' }),
+      ).toThrow('tasks may only hang off an EPIC');
+    });
+
+    it('is idempotent — a matching child short-circuits without creating a duplicate', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
+        {
+          ...epic,
+          id: 'AEOS-2',
+          kind: 'TASK',
+          parentId: 'AEOS-1',
+          title: 'Hash passwords',
+          column: 'IMPLEMENTATION',
+        },
+      ]);
+
+      const result = useCase.execute({
+        // Whitespace/case differences must still match — a retry rephrases nothing.
+        ...defaultInput,
+        title: '  hash passwords ',
+        parentId: 'AEOS-1',
+      });
+
+      expect(result).toMatchObject({ ticketId: 'AEOS-2', alreadyExisted: true });
+      // The whole point: no new row, no new artifact, no commit.
+      expect(ticketRepo.createAtomic).not.toHaveBeenCalled();
+      expect(artifactStore.writeArtifact).not.toHaveBeenCalled();
+      expect(gitGateway.commit).not.toHaveBeenCalled();
+    });
+
+    it('creates a genuinely new task even when the epic has other children', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
+        { ...epic, id: 'AEOS-2', kind: 'TASK', parentId: 'AEOS-1', title: 'Hash passwords' },
+      ]);
+
+      const result = useCase.execute({
+        ...defaultInput,
+        title: 'Add session middleware',
+        parentId: 'AEOS-1',
+      });
+
+      expect(result.alreadyExisted).toBe(false);
+      expect(ticketRepo.createAtomic).toHaveBeenCalledOnce();
+    });
   });
 });

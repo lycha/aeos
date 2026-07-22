@@ -44,8 +44,15 @@ export function registerTicketCreateCommand(
         });
 
         const lineage = result.parentId ? ` (task of ${result.parentId})` : '';
-        // eslint-disable-next-line no-console
-        console.log(`✓ Created ${result.kind} ${result.ticketId}: "${result.title}"${lineage}`);
+        if (result.alreadyExisted) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `= ${result.kind} ${result.ticketId} already exists: "${result.title}"${lineage} — left as is`,
+          );
+        } else {
+          // eslint-disable-next-line no-console
+          console.log(`✓ Created ${result.kind} ${result.ticketId}: "${result.title}"${lineage}`);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         // eslint-disable-next-line no-console

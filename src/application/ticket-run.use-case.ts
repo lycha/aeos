@@ -576,7 +576,10 @@ export class TicketRunUseCase implements TicketRunPort {
     const content = executorResult.content ?? '';
     this.emitStageEvent(emitter, 'stage.started', 'validation', 'Validating worker output');
 
-    if (workerMode === 'agentic') {
+    // An agentic run must change the repo — unless the column opts out, because
+    // its work is not a repo edit (TASK_BREAKDOWN creates tickets). Undefined
+    // means true, so IMPLEMENTATION keeps the guarantee without stating it.
+    if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false) {
       const repoDiff = this.gitGateway.diff(projectPath).trim();
       if (repoDiff.length === 0) {
         const error = 'Agentic implementation produced no repository changes';
