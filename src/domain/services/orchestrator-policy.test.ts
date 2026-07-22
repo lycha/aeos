@@ -101,6 +101,20 @@ describe('decideNextAction', () => {
       expect(action.reason).toBe(expected);
     });
 
+    it.each([SubState.WORKING, SubState.IN_REVIEW])(
+      'halts with an actionable message for a stuck %s epic',
+      (subState) => {
+        const action = decide({ epic: epic({ column: Column.TECH_SPEC, subState }) });
+
+        expect(action.kind).toBe('halt');
+        if (action.kind !== 'halt') return;
+        expect(action.reason).toBe(HaltReason.NEEDS_HUMAN);
+        // The recovery is named, not the generic "no action for" fallback.
+        expect(action.message).toContain('aeos ticket ready AEOS-1');
+        expect(action.message).not.toContain('no action for');
+      },
+    );
+
     it('halts at DOD_GATE — final sign-off is human-only', () => {
       const action = decide({
         epic: epic({ column: Column.DOD_GATE, subState: SubState.READY }),

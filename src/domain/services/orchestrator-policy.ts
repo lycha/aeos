@@ -109,6 +109,18 @@ function decideForTicket(
     };
   }
 
+  // WORKING / IN_REVIEW mean a run is mid-flight — or was killed before it could
+  // transition (a hard crash or pre-graceful interrupt). The orchestrator can't
+  // tell a live run apart from an orphan, so it stops; but the recovery is
+  // concrete, so name it rather than falling through to the generic message.
+  if (ticket.subState === SubState.WORKING || ticket.subState === SubState.IN_REVIEW) {
+    return {
+      kind: 'halt',
+      reason: HaltReason.NEEDS_HUMAN,
+      message: `${ticket.id} is ${ticket.subState} in ${ticket.column} — a run is in progress, or one was interrupted before it finished. If no run is active, reset it with \`aeos ticket ready ${ticket.id}\` and re-run.`,
+    };
+  }
+
   return null;
 }
 
