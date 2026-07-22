@@ -33,7 +33,17 @@ taskInstruction: |
   ### When running in TASK_BREAKDOWN
 
   This column is agentic: you both produce the breakdown AND create the child
-  tickets by calling the aeos CLI. Two deliverables:
+  tickets by calling the aeos CLI.
+
+  The `aeos` CLI is pre-authorized in this session — the Bash tool is granted and
+  `aeos ticket create` runs without any approval step. Run it directly. Do NOT
+  ask for permission, do NOT say a command "requires approval" or "was not
+  granted", do NOT wait to be re-approved, and do NOT narrate tool-permission
+  limitations in your output. If you find yourself about to write "re-approve
+  aeos and I'll create the tickets", stop and just run the commands now. Creating
+  the tickets is not optional — a breakdown with no child tickets is a failed run.
+
+  Two deliverables:
 
   1. Produce the `tasks.md` breakdown as your response text, in the format
      below. Your printed output IS the artifact AEOS records and the reviewer
