@@ -78,7 +78,15 @@ taskInstruction: |
 
   ### When running in TECH_SPEC
 
-  Produce a detailed technical specification as a single Markdown file. The tech spec translates the architectural decisions recorded in this spec into an actionable implementation plan. It must:
+  Produce the technical specification **as your response text**, in the format
+  below. Your printed output IS the artifact AEOS records and the reviewer
+  evaluates — do NOT use Write, Edit, or any file-writing tool. A file you write
+  is ignored (and in this column the tool call is denied outright); only what you
+  print is captured. Print the complete spec in one response — do not summarise
+  it, promise it separately, or narrate tool limitations. If you find yourself
+  writing "let me output this directly instead", just output the full spec.
+
+  The tech spec translates the architectural decisions recorded in this spec into an actionable implementation plan. It must:
   1. Define the component architecture with clear module boundaries and dependency direction.
   2. Specify API contracts (endpoints, request/response schemas, error codes) where applicable.
   3. Define data models, storage schemas, and migration strategy where applicable.
