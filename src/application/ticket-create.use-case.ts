@@ -24,6 +24,12 @@ export class TicketCreateUseCase implements TicketCreatePort {
     // A parent makes this a task; without one it is an epic.
     const kind = parentId ? TicketKind.TASK : TicketKind.EPIC;
 
+    // A key only identifies a task under a parent; an epic never carries one,
+    // matching the port contract ("ignored without a parent").
+    const resolvedTaskKey = parentId ? taskKey?.trim() || null : null;
+    const titleMatches = (child: { title: string }): boolean =>
+      child.title.trim().toLowerCase() === title.trim().toLowerCase();
+
     if (parentId) {
       const parent = this.ticketRepo.findById(projectId, parentId);
       if (!parent) {
@@ -37,14 +43,21 @@ export class TicketCreateUseCase implements TicketCreatePort {
 
       // Idempotent: decomposition creates tasks during an agentic run, which the
       // review loop may retry. A matching child short-circuits rather than
-      // duplicating. When a stable key is given, match on it — a retry may
-      // rephrase the title, so keying on title alone would miss and duplicate.
-      // Without a key, fall back to title.
+      // duplicating.
       const children = this.ticketRepo.findChildren(projectId, parentId);
-      const key = taskKey?.trim();
-      const existing = key
-        ? children.find((child) => child.taskKey?.trim().toLowerCase() === key.toLowerCase())
-        : children.find((child) => child.title.trim().toLowerCase() === title.trim().toLowerCase());
+      let existing: (typeof children)[number] | undefined;
+      if (resolvedTaskKey) {
+        const wanted = resolvedTaskKey.toLowerCase();
+        // Match on the key — a retry may rephrase the title, so keying on title
+        // alone would miss and duplicate. Secondarily match a KEYLESS child with
+        // the same title: that is the same task from a pre-key attempt, and
+        // pairing it here avoids duplicating when key usage started mid-stream.
+        existing =
+          children.find((child) => child.taskKey?.trim().toLowerCase() === wanted) ??
+          children.find((child) => !child.taskKey && titleMatches(child));
+      } else {
+        existing = children.find(titleMatches);
+      }
       if (existing) {
         return {
           ticketId: existing.id,
@@ -67,7 +80,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
         title,
         kind,
         parentId: parentId ?? null,
-        taskKey: taskKey?.trim() || null,
+        taskKey: resolvedTaskKey,
         column: 'BACKLOG' as const,
         subState: null,
         createdAt: now,
@@ -105,7 +118,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
       title,
       kind,
       parentId: parentId ?? null,
-      taskKey: taskKey?.trim() || null,
+      taskKey: resolvedTaskKey,
       alreadyExisted: false,
     };
   }

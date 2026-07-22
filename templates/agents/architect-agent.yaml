@@ -40,15 +40,18 @@ taskInstruction: |
      passing the task's `T-NNN` key so retries stay idempotent:
 
      ```sh
-     aeos ticket create "<task title>" --parent <EPIC_ID> --key T-001
+     aeos ticket create "First task title"  --parent <EPIC_ID> --key T-001
+     aeos ticket create "Second task title" --parent <EPIC_ID> --key T-002
      ```
 
      `<EPIC_ID>` is the ID in your context's `# Ticket: <ID>` heading. Make one
-     call per task; the `--key` must be the task's `T-NNN` label from `tasks.md`.
-     Idempotency keys on `--key`, not the title — so if you revise a task's
-     wording on a later attempt, keep its key the same and it updates in place
-     instead of duplicating. Always create the full set; do not try to detect
-     what already exists. See the `aeos` skill for details.
+     call per task, and give **each task its own distinct `--key`** — the task's
+     `T-NNN` label from `tasks.md`. Reusing a key across two tasks silently drops
+     the second (it is treated as the same task). Idempotency keys on `--key`,
+     not the title: on a later attempt keep each task's key stable, and keep its
+     title stable too — a matching key leaves the existing ticket as is, so a
+     reworded title is not applied. Always create the full set; do not try to
+     detect what already exists. See the `aeos` skill for details.
 
   Each task becomes a child ticket that runs implementation → code review → QA on
   its own, so the decomposition is a contract, not a sketch.

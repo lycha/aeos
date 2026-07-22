@@ -326,6 +326,74 @@ describe('TicketCreateUseCase', () => {
       expect(result.taskKey).toBe('T-001');
     });
 
+    it('bridges an unkeyed prior child: a keyed retry matches it by title, no duplicate', () => {
+      // A pre-key attempt created the task title-only; the retry now supplies a
+      // key. Without the keyless-title bridge, the keyed lookup would miss the
+      // keyless child and duplicate.
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
+        {
+          ...epic,
+          id: 'AEOS-2',
+          kind: 'TASK',
+          parentId: 'AEOS-1',
+          title: 'Hash passwords',
+          taskKey: null,
+        },
+      ]);
+
+      const result = useCase.execute({
+        ...defaultInput,
+        title: 'Hash passwords',
+        parentId: 'AEOS-1',
+        taskKey: 'T-001',
+      });
+
+      expect(result).toMatchObject({ ticketId: 'AEOS-2', alreadyExisted: true });
+      expect(ticketRepo.createAtomic).not.toHaveBeenCalled();
+    });
+
+    it('the keyless bridge only matches keyless children, not a differently-keyed task', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
+        // Same title, but already owns a different key — a distinct task.
+        {
+          ...epic,
+          id: 'AEOS-2',
+          kind: 'TASK',
+          parentId: 'AEOS-1',
+          title: 'Setup',
+          taskKey: 'T-001',
+        },
+      ]);
+
+      const result = useCase.execute({
+        ...defaultInput,
+        title: 'Setup',
+        parentId: 'AEOS-1',
+        taskKey: 'T-009',
+      });
+
+      expect(result.alreadyExisted).toBe(false);
+      expect(ticketRepo.createAtomic).toHaveBeenCalledOnce();
+    });
+
+    it('does not store a stray key on an epic (no parent)', () => {
+      let built: import('../domain/model/ticket.js').Ticket | undefined;
+      (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mockImplementation(
+        (_projectId: string, build: (n: number) => import('../domain/model/ticket.js').Ticket) => {
+          built = build(1);
+          return built;
+        },
+      );
+
+      // --key with no --parent: the key is meaningless for an epic and must not persist.
+      const result = useCase.execute({ ...defaultInput, taskKey: 'T-001' });
+
+      expect(built?.taskKey).toBeNull();
+      expect(result.taskKey).toBeNull();
+    });
+
     it('a different key is a different task even with an identical title', () => {
       (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
       (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([

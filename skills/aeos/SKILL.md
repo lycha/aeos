@@ -38,14 +38,16 @@ heading in the ticket document (e.g. `AEOS-1`). Use that exact ID.
 
 Rules:
 
-- **One `ticket create` call per task in your breakdown**, each with its
-  `--key T-NNN` matching the task's label in `tasks.md`.
+- **One `ticket create` call per task in your breakdown**, each with its own
+  **distinct** `--key T-NNN` matching the task's label in `tasks.md`. Reusing a
+  key across two tasks silently drops the second — they are treated as one task.
 - **Creating a task is idempotent, keyed on `--key`.** If a child with the same
-  key already exists under the epic, the command leaves it as is and prints
-  `= ... already exists`. Keying on the label rather than the title means a
-  retry that rephrases a task's wording still matches — so re-running after a
-  rejected review never duplicates tasks. Always create the full set with stable
-  keys; do not try to detect what already exists.
+  key already exists under the epic, the command leaves it **unchanged** and
+  prints `= ... already exists` — a reworded title is not applied, so keep each
+  task's title stable across attempts too. Keying on the label rather than the
+  title means a retry still matches, so re-running after a rejected review never
+  duplicates tasks. Always create the full set with stable keys; do not try to
+  detect what already exists.
 - **Do not create tasks under a task.** Nesting is one level deep; `--parent`
   must always be an epic.
 - Keep titles short and imperative — they become ticket titles.
