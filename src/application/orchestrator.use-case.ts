@@ -151,6 +151,11 @@ export class OrchestratorUseCase implements OrchestratorPort {
           );
         }
 
+        // Capture the column before performing — an 'advance' moves the ticket
+        // on, so reading it afterwards would report the destination, not the
+        // stage this step drove.
+        const actingColumn = this.ticketRepo.findById(projectId, action.ticketId)?.column ?? '—';
+
         const outcome = await this.perform(
           action,
           projectId,
@@ -161,6 +166,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
         const recorded: OrchestratorStep = {
           action: action.kind,
           ticketId: action.ticketId,
+          column: actingColumn,
           outcome,
         };
         steps.push(recorded);

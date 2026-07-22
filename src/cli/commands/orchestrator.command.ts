@@ -75,7 +75,7 @@ export function registerOrchestratorCommand(
               // it instead. Without a TTY, print each step as it happens.
               if (!display.live) {
                 // eslint-disable-next-line no-console
-                console.log(`  ${step.ticketId}: ${step.outcome}`);
+                console.log(`  ${step.ticketId} [${step.column}]: ${step.outcome}`);
               }
             },
           },
@@ -89,7 +89,7 @@ export function registerOrchestratorCommand(
         // screen is torn down so the run is legible in scroll-back.
         if (display.live) {
           for (const step of result.steps) {
-            summary.push(`  ${step.ticketId}: ${step.outcome}`);
+            summary.push(`  ${step.ticketId} [${step.column}]: ${step.outcome}`);
           }
         }
         summary.push(

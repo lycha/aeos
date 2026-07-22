@@ -7,6 +7,8 @@ import type { TicketRunObserver } from '../../model/ticket-run-event.js';
 export interface OrchestratorStep {
   readonly action: 'run' | 'advance';
   readonly ticketId: string;
+  /** The column the action acted on — which pipeline stage this step drove. */
+  readonly column: string;
   /** One-line outcome, suitable for a progress log. */
   readonly outcome: string;
 }

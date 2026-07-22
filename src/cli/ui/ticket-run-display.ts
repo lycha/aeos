@@ -124,7 +124,7 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
         this.executor = event.payload.executor;
         this.model = event.payload.model ?? '—';
         this.appendLogLine(
-          `[run] started | ${event.ticketId} | executor=${this.executor}${event.payload.model ? ` | model=${event.payload.model}` : ''}`,
+          `[run] started | ${event.ticketId} | ${event.column} | executor=${this.executor}${event.payload.model ? ` | model=${event.payload.model}` : ''}`,
         );
         break;
       case 'run.attempt.started':

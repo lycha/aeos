@@ -208,6 +208,8 @@ describe('OrchestratorUseCase', () => {
     expect(result.haltReason).toBe(HaltReason.NEEDS_HUMAN);
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0].outcome).toContain('escalated');
+    // The step records the column it drove, so the progress log can show it.
+    expect(result.steps[0].column).toBe(Column.PRODUCT_SCOPING);
     // One run attempted, then the escalated sub-state stops the loop.
     expect(ticketRun.execute).toHaveBeenCalledTimes(1);
   });
