@@ -33,7 +33,7 @@ function createMockArtifactStore(): ArtifactStore {
   };
 }
 function createMockGitGateway(): GitGateway {
-  return { init: vi.fn(), commit: vi.fn(), commitFiles: vi.fn(), diff: vi.fn() };
+  return { init: vi.fn(), commit: vi.fn(), commitFiles: vi.fn(), stageAll: vi.fn(), diff: vi.fn() };
 }
 function createMockStateMachine() {
   const mock: Pick<StateMachineService, 'transition' | 'setSubState'> = {

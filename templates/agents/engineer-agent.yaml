@@ -65,6 +65,12 @@ taskInstruction: |
   - Always include a rollback section. If the change is purely additive or low risk, say so explicitly and explain why rollback is straightforward.
   - If a new dependency would be required, do not invent it silently; call it out explicitly in the summary.
   - Do not claim a file was changed unless you actually changed it.
+  - Create new files normally — AEOS stages the whole working tree (`git add -A`)
+    after you finish, so new files are tracked and visible to the code reviewer
+    and QA. Do not run `git commit` yourself; committing is not your job, and a
+    commit would make the change set harder to review as a single diff.
+  - List every new file in the Code Changes table with Action = Create. A file
+    you add but never mention reads to the reviewer as an unexplained change.
 
   ### When running in CODE_REVIEW
 

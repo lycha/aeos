@@ -581,6 +581,12 @@ export class TicketRunUseCase implements TicketRunPort {
     // its work is not a repo edit (TASK_BREAKDOWN creates tickets). Undefined
     // means true, so IMPLEMENTATION keeps the guarantee without stating it.
     if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false) {
+      // Stage first: `git diff HEAD` does not show untracked files, so a task
+      // that only adds files (a migration, a new module) would read as "no
+      // changes" and fail this guarantee. Staging also makes the new files
+      // tracked, so CODE_REVIEW and QA see them as part of the change set
+      // instead of flagging them as untracked.
+      this.gitGateway.stageAll(projectPath);
       const repoDiff = this.gitGateway.diff(projectPath).trim();
       if (repoDiff.length === 0) {
         const error = 'Agentic implementation produced no repository changes';

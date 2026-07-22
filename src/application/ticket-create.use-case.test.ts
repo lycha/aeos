@@ -44,6 +44,7 @@ function createMockGitGateway(): GitGateway {
     init: vi.fn(),
     commit: vi.fn(),
     commitFiles: vi.fn(),
+    stageAll: vi.fn(),
     diff: vi.fn().mockReturnValue(''),
   };
 }

@@ -47,6 +47,10 @@ export class SimpleGitGateway implements GitGateway {
     }
   }
 
+  stageAll(dir: string): void {
+    execFileSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' });
+  }
+
   diff(dir: string): string {
     return execFileSync('git', ['diff', 'HEAD'], { cwd: dir, encoding: 'utf-8' });
   }
