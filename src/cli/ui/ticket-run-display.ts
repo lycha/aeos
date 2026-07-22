@@ -75,6 +75,7 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
 
   protected ticketId = '—';
   protected column = '—';
+  protected agent = '—';
   protected executor = '—';
   protected model = '—';
   protected mode = '—';
@@ -119,6 +120,7 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
         this.activeStage = null;
         this.subState = null;
         this.finalStatus = 'running';
+        this.agent = '—';
         this.executor = event.payload.executor;
         this.model = event.payload.model ?? '—';
         this.appendLogLine(
@@ -138,10 +140,14 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
           status: 'active',
           message: event.payload.message,
         });
+        this.agent = event.payload.agent ?? this.agent;
         this.executor = event.payload.executor ?? this.executor;
         this.model = event.payload.model ?? this.model;
         this.mode = event.payload.mode ?? this.mode;
-        this.appendLogLine(`[stage:${event.payload.stage}] started | ${event.payload.message}`);
+        this.appendLogLine(
+          `[stage:${event.payload.stage}] started | ${event.payload.message}` +
+            (event.payload.agent ? ` | agent=${event.payload.agent}` : ''),
+        );
         break;
       case 'stage.completed':
         this.stageStates.set(event.payload.stage, {
@@ -379,6 +385,7 @@ class LiveTicketRunDisplay extends BaseTicketRunDisplay {
   private buildMetaLine(): string {
     return [
       `Stage: ${this.activeStage ? PHASE_LABELS[this.activeStage] : this.finalStatus}`,
+      `Agent: ${this.agent}`,
       `Executor: ${this.executor}`,
       `Model: ${this.model}`,
       `Mode: ${this.mode}`,
@@ -422,6 +429,7 @@ class LiveTicketRunDisplay extends BaseTicketRunDisplay {
     const metadata = [
       'Stages',
       `Current: ${this.activeStage ? PHASE_LABELS[this.activeStage] : this.finalStatus}`,
+      `Agent: ${this.agent}`,
       `Executor: ${this.executor}`,
       `Model: ${this.model}`,
       `Mode: ${this.mode}`,

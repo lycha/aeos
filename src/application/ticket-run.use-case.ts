@@ -501,6 +501,7 @@ export class TicketRunUseCase implements TicketRunPort {
       `Running worker executor${attemptLabel}`,
       {
         role: 'worker',
+        agent: ctx.workerAgentSpec.name,
         executor: ctx.workerExecutorType,
         model: ctx.workerModel,
         mode: workerMode,
@@ -658,6 +659,7 @@ export class TicketRunUseCase implements TicketRunPort {
 
     this.emitStageEvent(emitter, 'stage.started', 'reviewer', 'Running reviewer executor', {
       role: 'reviewer',
+      agent: ctx.reviewerAgentSpec.name,
       executor: ctx.reviewerExecutorType,
       model: ctx.reviewerModel,
       mode: 'artifact',
@@ -779,6 +781,7 @@ export class TicketRunUseCase implements TicketRunPort {
 
     this.emitStageEvent(emitter, 'stage.started', 'preflight', 'Running preflight checks', {
       role: 'preflight',
+      agent: ctx.workerAgentSpec.name,
       executor: ctx.workerExecutorType,
       model: ctx.workerModel,
       mode: 'artifact',
@@ -1084,6 +1087,7 @@ export class TicketRunUseCase implements TicketRunPort {
     message: string,
     metadata?: {
       role?: 'preflight' | 'worker' | 'reviewer';
+      agent?: string;
       executor?: string;
       model?: string;
       mode?: 'artifact' | 'agentic';
