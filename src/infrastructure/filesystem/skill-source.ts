@@ -16,18 +16,31 @@ const SKILLS_SUBDIR = 'skills';
 const SKILL_NAME = 'aeos';
 
 /**
- * Where each agentic executor discovers skills, relative to the project root.
- *
- * Claude Code reads `.claude/skills`, Augment/auggie reads `.augment/skills`.
- * ollama-cli is artifact-only (no tools, no skills) and is intentionally
- * absent. Extend this list as other backends gain a skills mechanism.
+ * Executor skill directories the skill is linked into, relative to the project
+ * root. This is *reinforcement*, not the load-bearing path: the decomposition
+ * instruction lives in the architect agent's taskInstruction, which reaches
+ * every executor through the prompt (see templates/agents/architect-agent.yaml).
+ * So a backend absent from this list — opencode-cli, or ollama-cli, which is
+ * artifact-only anyway — still gets the instruction and is not silently broken;
+ * it just lacks the skill's extra reference. Claude Code reads `.claude/skills`,
+ * Augment/auggie reads `.augment/skills`. Extend as other backends gain a
+ * skills mechanism.
  */
 const EXECUTOR_SKILL_DIRS = ['.claude/skills', '.augment/skills'] as const;
 
 /** Package root is three levels up from this module, in both src/ and dist/. */
 function packagedSkillDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, '..', '..', '..', SKILLS_SUBDIR, SKILL_NAME);
+  const dir = path.resolve(here, '..', '..', '..', SKILLS_SUBDIR, SKILL_NAME);
+  // Fail loudly on a packaging fault, as template-source does — otherwise the
+  // copy below throws a cryptic ENOENT after templates are already written,
+  // leaving a half-scaffolded project.
+  if (!fs.existsSync(dir)) {
+    throw new Error(
+      `aeos skill not found at ${dir}. This is an AEOS packaging fault — reinstall, or run \`npm run build\` from source.`,
+    );
+  }
+  return dir;
 }
 
 function copyDir(from: string, to: string): void {

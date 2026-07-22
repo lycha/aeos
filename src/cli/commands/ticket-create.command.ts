@@ -21,7 +21,11 @@ export function registerTicketCreateCommand(
       '--parent <epicId>',
       'Create this ticket as a task under the given epic, skipping scoping and spec',
     )
-    .action((title: string, options: { parent?: string }) => {
+    .option(
+      '--key <taskKey>',
+      'Stable decomposition key (e.g. T-001); idempotency matches on it instead of the title',
+    )
+    .action((title: string, options: { parent?: string; key?: string }) => {
       try {
         const cwd = process.cwd();
         const projectPath = projectRepo.findRoot(cwd);
@@ -41,6 +45,7 @@ export function registerTicketCreateCommand(
           projectKey: project.key,
           projectPath,
           parentId: options.parent,
+          taskKey: options.key,
         });
 
         const lineage = result.parentId ? ` (task of ${result.parentId})` : '';

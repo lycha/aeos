@@ -15,6 +15,14 @@ export interface Ticket {
   kind: TicketKind;
   /** Parent epic ID for a TASK; null for an EPIC */
   parentId: string | null;
+  /**
+   * Stable decomposition key for a TASK (e.g. "T-001"), or null.
+   *
+   * Set when a task is created via `--key` during decomposition. It is the
+   * idempotency identity a review-loop retry keys on, so re-creating a task
+   * survives the architect rephrasing its title between attempts.
+   */
+  taskKey?: string | null;
   /** Pipeline column */
   column: Column;
   /** Sub-state within the column — null for BACKLOG tickets */

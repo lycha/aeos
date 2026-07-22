@@ -19,7 +19,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
   ) {}
 
   execute(input: TicketCreateInput): TicketCreateResult {
-    const { title, projectId, projectKey, projectPath, parentId } = input;
+    const { title, projectId, projectKey, projectPath, parentId, taskKey } = input;
 
     // A parent makes this a task; without one it is an epic.
     const kind = parentId ? TicketKind.TASK : TicketKind.EPIC;
@@ -35,19 +35,23 @@ export class TicketCreateUseCase implements TicketCreatePort {
         );
       }
 
-      // Idempotent by (parent, title): decomposition creates tasks during an
-      // agentic run, which the review loop may retry. Re-running must not
-      // duplicate a task the previous attempt already created, so a matching
-      // child short-circuits to the existing ticket rather than a new one.
-      const existing = this.ticketRepo
-        .findChildren(projectId, parentId)
-        .find((child) => child.title.trim().toLowerCase() === title.trim().toLowerCase());
+      // Idempotent: decomposition creates tasks during an agentic run, which the
+      // review loop may retry. A matching child short-circuits rather than
+      // duplicating. When a stable key is given, match on it — a retry may
+      // rephrase the title, so keying on title alone would miss and duplicate.
+      // Without a key, fall back to title.
+      const children = this.ticketRepo.findChildren(projectId, parentId);
+      const key = taskKey?.trim();
+      const existing = key
+        ? children.find((child) => child.taskKey?.trim().toLowerCase() === key.toLowerCase())
+        : children.find((child) => child.title.trim().toLowerCase() === title.trim().toLowerCase());
       if (existing) {
         return {
           ticketId: existing.id,
           title: existing.title,
           kind: existing.kind,
           parentId: existing.parentId,
+          taskKey: existing.taskKey ?? null,
           alreadyExisted: true,
         };
       }
@@ -63,6 +67,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
         title,
         kind,
         parentId: parentId ?? null,
+        taskKey: taskKey?.trim() || null,
         column: 'BACKLOG' as const,
         subState: null,
         createdAt: now,
@@ -95,6 +100,13 @@ export class TicketCreateUseCase implements TicketCreatePort {
     }
 
     // 6. Return result
-    return { ticketId, title, kind, parentId: parentId ?? null, alreadyExisted: false };
+    return {
+      ticketId,
+      title,
+      kind,
+      parentId: parentId ?? null,
+      taskKey: taskKey?.trim() || null,
+      alreadyExisted: false,
+    };
   }
 }

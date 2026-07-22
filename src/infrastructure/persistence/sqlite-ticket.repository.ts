@@ -7,7 +7,7 @@ import type { SubStateOrNull } from '../../domain/model/sub-state.js';
 import type { TicketKind } from '../../domain/model/ticket-kind.js';
 import type { TicketRepository } from '../../domain/ports/driven/ticket-repository.port.js';
 
-const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, "column", sub_state, created_at, updated_at`;
+const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at`;
 
 interface TicketRow {
   id: string;
@@ -15,6 +15,7 @@ interface TicketRow {
   title: string;
   kind: TicketKind;
   parent_id: string | null;
+  task_key: string | null;
   column: Column;
   sub_state: string | null;
   created_at: string;
@@ -32,6 +33,7 @@ export class SqliteTicketRepository implements TicketRepository {
       // Rows written before the hierarchy migration are epics by definition.
       kind: row.kind ?? 'EPIC',
       parentId: row.parent_id ?? null,
+      taskKey: row.task_key ?? null,
       column: row.column,
       subState: (row.sub_state as SubStateOrNull) ?? null,
       createdAt: row.created_at,
@@ -52,8 +54,8 @@ export class SqliteTicketRepository implements TicketRepository {
   save(ticket: Ticket): void {
     this.db
       .prepare(
-        `INSERT INTO tickets (id, project_id, title, kind, parent_id, "column", sub_state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         ticket.id,
@@ -61,6 +63,7 @@ export class SqliteTicketRepository implements TicketRepository {
         ticket.title,
         ticket.kind,
         ticket.parentId,
+        ticket.taskKey ?? null,
         ticket.column,
         ticket.subState,
         ticket.createdAt,

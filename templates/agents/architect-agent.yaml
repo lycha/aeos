@@ -36,17 +36,19 @@ taskInstruction: |
   tickets by calling the aeos CLI. Two deliverables:
 
   1. Write the `tasks.md` artifact at your output path (format below).
-  2. Create one child ticket per task under the epic you are decomposing:
+  2. Create one child ticket per task under the epic you are decomposing,
+     passing the task's `T-NNN` key so retries stay idempotent:
 
      ```sh
-     aeos ticket create "<task title>" --parent <EPIC_ID>
+     aeos ticket create "<task title>" --parent <EPIC_ID> --key T-001
      ```
 
      `<EPIC_ID>` is the ID in your context's `# Ticket: <ID>` heading. Make one
-     call per task; the titles must match the tasks in `tasks.md`. Creating a
-     task is idempotent — if a matching child already exists it is left as is —
-     so always create the full set; do not try to detect what already exists.
-     See the `aeos` skill for details.
+     call per task; the `--key` must be the task's `T-NNN` label from `tasks.md`.
+     Idempotency keys on `--key`, not the title — so if you revise a task's
+     wording on a later attempt, keep its key the same and it updates in place
+     instead of duplicating. Always create the full set; do not try to detect
+     what already exists. See the `aeos` skill for details.
 
   Each task becomes a child ticket that runs implementation → code review → QA on
   its own, so the decomposition is a contract, not a sketch.

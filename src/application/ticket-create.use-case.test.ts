@@ -76,6 +76,7 @@ describe('TicketCreateUseCase', () => {
       // No parent supplied, so this is a top-level epic.
       kind: 'EPIC',
       parentId: null,
+      taskKey: null,
       alreadyExisted: false,
     });
   });
@@ -271,6 +272,78 @@ describe('TicketCreateUseCase', () => {
         ...defaultInput,
         title: 'Add session middleware',
         parentId: 'AEOS-1',
+      });
+
+      expect(result.alreadyExisted).toBe(false);
+      expect(ticketRepo.createAtomic).toHaveBeenCalledOnce();
+    });
+
+    it('matches on the task key, surviving a title rephrase on retry', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
+        {
+          ...epic,
+          id: 'AEOS-2',
+          kind: 'TASK',
+          parentId: 'AEOS-1',
+          title: 'Add password hashing',
+          taskKey: 'T-001',
+          column: 'IMPLEMENTATION',
+        },
+      ]);
+
+      // A retry rephrases the title but keeps the key — must still match, which
+      // title-based dedup would have missed and duplicated.
+      const result = useCase.execute({
+        ...defaultInput,
+        title: 'Add password hashing to the login flow',
+        parentId: 'AEOS-1',
+        taskKey: 'T-001',
+      });
+
+      expect(result).toMatchObject({ ticketId: 'AEOS-2', alreadyExisted: true });
+      expect(ticketRepo.createAtomic).not.toHaveBeenCalled();
+    });
+
+    it('persists the task key on a newly created task', () => {
+      let built: import('../domain/model/ticket.js').Ticket | undefined;
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+      (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mockImplementation(
+        (_projectId: string, build: (n: number) => import('../domain/model/ticket.js').Ticket) => {
+          built = build(2);
+          return built;
+        },
+      );
+
+      const result = useCase.execute({
+        ...defaultInput,
+        title: 'Hash passwords',
+        parentId: 'AEOS-1',
+        taskKey: 'T-001',
+      });
+
+      expect(built?.taskKey).toBe('T-001');
+      expect(result.taskKey).toBe('T-001');
+    });
+
+    it('a different key is a different task even with an identical title', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
+        {
+          ...epic,
+          id: 'AEOS-2',
+          kind: 'TASK',
+          parentId: 'AEOS-1',
+          title: 'Add endpoint',
+          taskKey: 'T-001',
+        },
+      ]);
+
+      const result = useCase.execute({
+        ...defaultInput,
+        title: 'Add endpoint',
+        parentId: 'AEOS-1',
+        taskKey: 'T-002',
       });
 
       expect(result.alreadyExisted).toBe(false);

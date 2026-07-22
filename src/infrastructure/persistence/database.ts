@@ -125,6 +125,19 @@ CREATE TABLE IF NOT EXISTS orchestrator_state (
       `);
     },
   },
+  {
+    version: 4,
+    description: 'Add task_key for stable decomposition idempotency',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'task_key')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN task_key TEXT DEFAULT NULL`);
+      }
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_tickets_task_key
+         ON tickets(project_id, parent_id, task_key)`,
+      );
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

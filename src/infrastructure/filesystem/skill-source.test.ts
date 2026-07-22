@@ -56,6 +56,17 @@ describe('scaffoldSkill', () => {
     expect(second).toEqual([]);
   });
 
+  it('creates the executor links as relative symlinks where supported', () => {
+    scaffoldSkill(tmpDir);
+
+    const link = path.join(tmpDir, '.claude', 'skills', 'aeos');
+    const stat = fs.lstatSync(link);
+    if (stat.isSymbolicLink()) {
+      // Relative, so the project stays portable if moved.
+      expect(fs.readlinkSync(link)).toBe(path.join('..', '..', '.aeos', 'skills', 'aeos'));
+    }
+  });
+
   it('does not overwrite a canonical skill the user has edited', () => {
     scaffoldSkill(tmpDir);
     const canonical = path.join(tmpDir, '.aeos', 'skills', 'aeos', 'SKILL.md');

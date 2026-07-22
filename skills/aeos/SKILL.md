@@ -25,11 +25,12 @@ When you run the `TASK_BREAKDOWN` column you produce two things:
    breakdown, in the format your agent spec defines.
 2. One child ticket per task, created by calling the CLI.
 
-Create each task as a child of the epic you are decomposing:
+Create each task as a child of the epic you are decomposing, passing its
+`T-NNN` key from `tasks.md` with `--key`:
 
 ```sh
-aeos ticket create "Add password hashing" --parent <EPIC_ID>
-aeos ticket create "Add session middleware" --parent <EPIC_ID>
+aeos ticket create "Add password hashing" --parent <EPIC_ID> --key T-001
+aeos ticket create "Add session middleware" --parent <EPIC_ID> --key T-002
 ```
 
 `<EPIC_ID>` is the ID of the ticket in your context — the `# Ticket: <ID>`
@@ -37,12 +38,14 @@ heading in the ticket document (e.g. `AEOS-1`). Use that exact ID.
 
 Rules:
 
-- **One `ticket create` call per task in your breakdown.** The titles must match
-  the task titles in `tasks.md` so the two stay in correspondence.
-- **Creating a task is idempotent.** If a child with the same title already
-  exists under the epic, the command leaves it as is and prints `= ... already
-  exists`. This means re-running after a rejected review will not duplicate
-  tasks — always create the full set, do not try to detect what already exists.
+- **One `ticket create` call per task in your breakdown**, each with its
+  `--key T-NNN` matching the task's label in `tasks.md`.
+- **Creating a task is idempotent, keyed on `--key`.** If a child with the same
+  key already exists under the epic, the command leaves it as is and prints
+  `= ... already exists`. Keying on the label rather than the title means a
+  retry that rephrases a task's wording still matches — so re-running after a
+  rejected review never duplicates tasks. Always create the full set with stable
+  keys; do not try to detect what already exists.
 - **Do not create tasks under a task.** Nesting is one level deep; `--parent`
   must always be an epic.
 - Keep titles short and imperative — they become ticket titles.
