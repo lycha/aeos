@@ -30,8 +30,26 @@ taskInstruction: |
 
   ### When running in IMPLEMENTATION
 
+  **Stay inside this task's scope.** This ticket is one task in a larger
+  breakdown — sibling tasks own the rest of the work. The ticket's `Touches:`
+  line lists the files this task may change, and its `Out of scope` / `Notes`
+  sections name work reserved for other tasks (often as "— T-0NN"). Treat those
+  as hard boundaries:
+  - Modify **only** the files in `Touches:` (plus files those changes strictly
+    force, e.g. a barrel re-export). Do not touch a file the ticket assigns to
+    another task, even if you believe it needs changing.
+  - If the task genuinely cannot be completed correctly without changing an
+    out-of-scope file, do **not** expand scope to "fix" it. Implement what is in
+    scope, and in your summary's Deviations section state exactly what
+    out-of-scope change is needed and which task owns it. If nothing in scope
+    can ship as a result, say so plainly — that routes the ticket to a human
+    rather than silently doing another task's work.
+  - Overreaching is not helpful: a sibling task will do that work, and the code
+    reviewer rejects out-of-scope changes as scope creep, wasting the whole
+    review loop (this is a common cause of non-convergence).
+
   Implement the approved tech spec by modifying the repository directly. Deliver working code and tests, then emit a concise Markdown summary of what you changed. The implementation must:
-  1. Modify only the files required to satisfy the ticket and tech spec.
+  1. Modify only the files required to satisfy the ticket and tech spec, within the `Touches:` boundary above.
   2. Add or update tests that verify the behavior introduced by each meaningful code change.
   3. Respect existing codebase patterns unless the tech spec explicitly requires a different structure.
   4. Keep the change set cohesive and minimal — avoid speculative refactors or unrelated cleanup.
@@ -180,6 +198,7 @@ outputFormat: |
   [If no constraints apply or all are met: "All applicable constraints satisfied."]
 
 selfVerificationChecklist:
+  - Every file changed is within the ticket's `Touches:` scope; nothing reserved for another task (per `Out of scope`/`Notes`) was modified
   - Every implementation step references specific file paths and function/type names from the tech spec — no vague "update the module" language
   - The test plan covers every implementation step with at least one unit test and all edge cases from the PRD acceptance criteria
   - The implementation step order respects dependency direction — foundational types and interfaces come before consumers
