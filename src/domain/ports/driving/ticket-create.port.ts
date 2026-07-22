@@ -20,6 +20,13 @@ export interface TicketCreateInput {
    * a parent.
    */
   taskKey?: string;
+  /**
+   * Markdown body for the ticket's Description — the task's full breakdown
+   * (description, acceptance criteria, touches, out-of-scope) when a decomposed
+   * task is created. Omitted for a hand-created ticket, which gets editable
+   * placeholders instead.
+   */
+  body?: string;
 }
 
 export interface TicketCreateResult {

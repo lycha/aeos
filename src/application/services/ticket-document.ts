@@ -8,13 +8,23 @@ const METADATA_START = '<!-- AEOS:METADATA START -->';
 const METADATA_END = '<!-- AEOS:METADATA END -->';
 
 function renderMetadataBlock(ticket: Ticket): string {
-  return [
+  const lines = [
     METADATA_START,
     '## AEOS Metadata',
+    `- Kind: ${ticket.kind}`,
     `- Column: ${ticket.column}`,
     `- Sub-state: ${ticket.subState ?? 'NONE'}`,
-    METADATA_END,
-  ].join('\n');
+  ];
+  // Lineage — a task is meaningless without the epic it decomposes; surface the
+  // parent (and its stable key) so the document is self-describing.
+  if (ticket.parentId) {
+    lines.push(`- Parent: ${ticket.parentId}`);
+  }
+  if (ticket.taskKey) {
+    lines.push(`- Task key: ${ticket.taskKey}`);
+  }
+  lines.push(METADATA_END);
+  return lines.join('\n');
 }
 
 function upsertMetadataBlock(content: string, ticket: Ticket): string {
@@ -39,7 +49,17 @@ export function ticketDocumentPath(projectPath: string, ticketId: string): strin
   return path.join(projectPath, '.aeos', 'tickets', ticketId, `${ticketId}-ticket.md`);
 }
 
-export function buildInitialTicketDocument(ticket: Ticket): string {
+export function buildInitialTicketDocument(ticket: Ticket, body?: string): string {
+  // A decomposed task arrives with its full breakdown (description, acceptance
+  // criteria, touches, out-of-scope) in `body`; use it verbatim as the
+  // Description so the engineer implements from the real spec, not a bare title.
+  // Without a body (a hand-created ticket), fall back to editable placeholders.
+  const trimmedBody = body?.trim();
+  const description = trimmedBody ? trimmedBody : '<!-- Fill in the ticket description here -->';
+  const definitionOfDone = trimmedBody
+    ? '<!-- Acceptance criteria are covered in the Description above (from the task breakdown). -->'
+    : '<!-- Define acceptance criteria — evaluated at DoD Gate -->';
+
   return [
     `# Ticket: ${ticket.id}`,
     '',
@@ -49,10 +69,10 @@ export function buildInitialTicketDocument(ticket: Ticket): string {
     ticket.title,
     '',
     '## Description',
-    '<!-- Fill in the ticket description here -->',
+    description,
     '',
     '## Definition of Done',
-    '<!-- Define acceptance criteria — evaluated at DoD Gate -->',
+    definitionOfDone,
     '',
     '## Notes',
     '<!-- Additional context, links, constraints -->',

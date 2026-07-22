@@ -116,6 +116,16 @@ describe('TicketCreateUseCase', () => {
     expect(content).toContain('## Notes');
   });
 
+  it('writes the provided body into the ticket document', () => {
+    useCase.execute({ ...defaultInput, body: '**Acceptance criteria**\n- [ ] rate cap enforced' });
+
+    const content = (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock
+      .calls[0][3] as string;
+
+    expect(content).toContain('rate cap enforced');
+    expect(content).not.toContain('Fill in the ticket description here');
+  });
+
   it('should build ticket with column BACKLOG and null sub_state via createAtomic', () => {
     let capturedTicket: Ticket | null = null;
     (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mockImplementation(

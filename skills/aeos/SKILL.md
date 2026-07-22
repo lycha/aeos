@@ -27,12 +27,27 @@ When you run the `TASK_BREAKDOWN` column you produce two things:
 2. One child ticket per task, created by calling the CLI.
 
 Create each task as a child of the epic you are decomposing, passing its
-`T-NNN` key from `tasks.md` with `--key`:
+`T-NNN` key from `tasks.md` with `--key` **and its full content with
+`--body-file`**. The engineer that implements a task sees only its ticket, so a
+title alone strands it — the ticket must carry the task's Description,
+Acceptance criteria, Depends on, Touches, and Out of scope:
 
 ```sh
-aeos ticket create "Add password hashing" --parent <EPIC_ID> --key T-001
-aeos ticket create "Add session middleware" --parent <EPIC_ID> --key T-002
+cat > /tmp/<EPIC_ID>-T-001.md <<'BODY'
+**Depends on:** none
+**Touches:** lib/auth/hash.ts
+
+**Description**
+...
+
+**Acceptance criteria**
+- [ ] ...
+BODY
+aeos ticket create "Add password hashing" --parent <EPIC_ID> --key T-001 --body-file /tmp/<EPIC_ID>-T-001.md
 ```
+
+Small bodies may be passed inline with `--body "<markdown>"`, but prefer
+`--body-file` for multi-line content — it avoids shell-quoting mistakes.
 
 `<EPIC_ID>` is the ID of the ticket in your context — the `# Ticket: <ID>`
 heading in the ticket document (e.g. `AEOS-1`). Use that exact ID.
@@ -40,8 +55,9 @@ heading in the ticket document (e.g. `AEOS-1`). Use that exact ID.
 Rules:
 
 - **One `ticket create` call per task in your breakdown**, each with its own
-  **distinct** `--key T-NNN` matching the task's label in `tasks.md`. Reusing a
-  key across two tasks silently drops the second — they are treated as one task.
+  **distinct** `--key T-NNN` matching the task's label in `tasks.md`, and its
+  own `--body-file` carrying that task's full block. Reusing a key across two
+  tasks silently drops the second — they are treated as one task.
 - **Creating a task is idempotent, keyed on `--key`.** If a child with the same
   key already exists under the epic, the command leaves it **unchanged** and
   prints `= ... already exists` — a reworded title is not applied, so keep each

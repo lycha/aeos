@@ -19,7 +19,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
   ) {}
 
   execute(input: TicketCreateInput): TicketCreateResult {
-    const { title, projectId, projectKey, projectPath, parentId, taskKey } = input;
+    const { title, projectId, projectKey, projectPath, parentId, taskKey, body } = input;
 
     // A parent makes this a task; without one it is an epic.
     const kind = parentId ? TicketKind.TASK : TicketKind.EPIC;
@@ -91,7 +91,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
     const ticketId = ticket.id;
 
     // 2. Build ticket markdown content
-    const content = buildInitialTicketDocument(ticket);
+    const content = buildInitialTicketDocument(ticket, body);
 
     // 4. Write artifact file; compensate on failure
     const filename = `${ticketId}-ticket.md`;
