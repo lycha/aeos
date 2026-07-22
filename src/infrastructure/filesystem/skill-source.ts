@@ -43,16 +43,6 @@ function packagedSkillDir(): string {
   return dir;
 }
 
-function copyDir(from: string, to: string): void {
-  fs.mkdirSync(to, { recursive: true });
-  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-    const src = path.join(from, entry.name);
-    const dst = path.join(to, entry.name);
-    if (entry.isDirectory()) copyDir(src, dst);
-    else if (entry.isFile()) fs.copyFileSync(src, dst);
-  }
-}
-
 /**
  * Links a target directory to the canonical skill via a relative symlink,
  * falling back to a copy where symlinks are unavailable (e.g. Windows without
@@ -66,7 +56,7 @@ function linkOrCopy(canonical: string, target: string): boolean {
   try {
     fs.symlinkSync(relative, target, 'dir');
   } catch {
-    copyDir(canonical, target);
+    fs.cpSync(canonical, target, { recursive: true });
   }
   return true;
 }
@@ -89,7 +79,7 @@ export function scaffoldSkill(projectRoot: string): string[] {
   const canonical = path.join(projectRoot, AEOS_DIR, SKILLS_SUBDIR, SKILL_NAME);
 
   if (!fs.existsSync(canonical)) {
-    copyDir(packagedSkillDir(), canonical);
+    fs.cpSync(packagedSkillDir(), canonical, { recursive: true });
     created.push(path.join(AEOS_DIR, SKILLS_SUBDIR, SKILL_NAME));
   }
 

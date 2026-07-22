@@ -21,8 +21,9 @@ directory. Every command below is safe to run from within a column execution.
 
 When you run the `TASK_BREAKDOWN` column you produce two things:
 
-1. The `tasks.md` artifact at your given output path — the human-readable
-   breakdown, in the format your agent spec defines.
+1. The `tasks.md` breakdown as your response text, in the format your agent
+   spec defines. Your printed output is captured as the artifact — print the
+   breakdown; do not write it to a file (a file you write is ignored).
 2. One child ticket per task, created by calling the CLI.
 
 Create each task as a child of the epic you are decomposing, passing its

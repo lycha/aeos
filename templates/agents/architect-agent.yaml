@@ -32,10 +32,13 @@ taskInstruction: |
 
   ### When running in TASK_BREAKDOWN
 
-  This column is agentic: you both write the breakdown AND create the child
+  This column is agentic: you both produce the breakdown AND create the child
   tickets by calling the aeos CLI. Two deliverables:
 
-  1. Write the `tasks.md` artifact at your output path (format below).
+  1. Produce the `tasks.md` breakdown as your response text, in the format
+     below. Your printed output IS the artifact AEOS records and the reviewer
+     evaluates — do not write it to a file with a tool; a file you write is
+     ignored, only what you print is captured.
   2. Create one child ticket per task under the epic you are decomposing,
      passing the task's `T-NNN` key so retries stay idempotent:
 
