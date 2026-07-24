@@ -86,6 +86,18 @@ export function registerTicketShowCommand(
           // eslint-disable-next-line no-console
           console.log(`        See: ${escalation.artifactPath}`);
         }
+        // Point the operator at the file-based resolve flow.
+        if (subState === 'ESCALATED') {
+          // eslint-disable-next-line no-console
+          console.log(
+            `        Respond in ${result.ticket.id}-escalation.md, then: aeos ticket resolve ${result.ticket.id}`,
+          );
+        } else if (subState === 'BLOCKED') {
+          // eslint-disable-next-line no-console
+          console.log(
+            `        Answer ${result.ticket.id}-questions.md, then: aeos ticket answer ${result.ticket.id}`,
+          );
+        }
       }
 
       if (result.children.length > 0) {

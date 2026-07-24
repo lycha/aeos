@@ -13,6 +13,7 @@ import { registerTicketCreateCommand } from './commands/ticket-create.command.js
 import { registerTicketListCommand } from './commands/ticket-list.command.js';
 import { registerTicketShowCommand } from './commands/ticket-show.command.js';
 import { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
+import { registerTicketResolveCommand } from './commands/ticket-resolve.command.js';
 import { registerTicketRunCommand } from './commands/ticket-run.command.js';
 import { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
 import { registerTicketSignOffCommand } from './commands/ticket-sign-off.command.js';
@@ -30,6 +31,7 @@ export { registerTicketCreateCommand } from './commands/ticket-create.command.js
 export { registerTicketListCommand } from './commands/ticket-list.command.js';
 export { registerTicketShowCommand } from './commands/ticket-show.command.js';
 export { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
+export { registerTicketResolveCommand } from './commands/ticket-resolve.command.js';
 export { registerTicketRunCommand } from './commands/ticket-run.command.js';
 export { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
 export { registerTicketSignOffCommand } from './commands/ticket-sign-off.command.js';
@@ -80,6 +82,7 @@ export function buildProgram(): Command {
   registerTicketListCommand(program, () => container.ticketList, container.projectRepo);
   registerTicketShowCommand(program, () => container.ticketShow, container.projectRepo);
   registerTicketAnswerCommand(program, () => container.ticketAnswer, container.projectRepo);
+  registerTicketResolveCommand(program, () => container.ticketResolve, container.projectRepo);
   registerTicketRunCommand(program, () => container.ticketRun, container.projectRepo);
   registerTicketApproveCommand(program, () => container.ticketApprove, container.projectRepo);
   registerTicketSignOffCommand(program, () => container.ticketSignOff, container.projectRepo);

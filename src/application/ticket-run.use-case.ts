@@ -51,6 +51,7 @@ import type { ExecutorChunkObserver } from '../domain/model/executor-invocation.
 import type { ReviewVerdict } from '../domain/model/review-verdict.js';
 import type { Escalation } from '../domain/model/escalation.js';
 import { EscalationReason } from '../domain/model/escalation.js';
+import { buildEscalationDocument, escalationFilename } from './services/escalation-document.js';
 import { Column } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { validateOutput } from '../domain/services/output-validation.js';
@@ -984,6 +985,25 @@ export class TicketRunUseCase implements TicketRunPort {
       message: escalation.message,
       artifactPath: escalation.artifactPath ?? null,
     });
+
+    // Write the human-facing escalation artifact so the operator can respond in
+    // a file and `aeos ticket resolve`, mirroring the preflight questions flow.
+    // The BLOCKED (preflight) path already has its own questions.md, so only the
+    // true ESCALATED path gets an escalation.md.
+    if (subState === SubState.ESCALATED) {
+      this.artifactStore.writeArtifact(
+        ctx.projectPath,
+        ctx.ticketId,
+        escalationFilename(ctx.ticketId),
+        buildEscalationDocument({
+          ticketId: ctx.ticketId,
+          column: ctx.column,
+          reason: escalation.reason,
+          message: escalation.message,
+          artifactPath: escalation.artifactPath ?? null,
+        }),
+      );
+    }
 
     ctx.emitter.emit({
       type: 'ticket-run.escalated',
