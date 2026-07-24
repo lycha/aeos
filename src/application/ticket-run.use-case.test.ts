@@ -54,6 +54,13 @@ function createMockGitGateway(): GitGateway {
     init: vi.fn(),
     commit: vi.fn(),
     commitFiles: vi.fn(),
+    stageAll: vi.fn(),
+    commitAll: vi.fn().mockReturnValue(false),
+    isRepo: vi.fn().mockReturnValue(true),
+    ensureOnBranch: vi.fn(),
+    tagHere: vi.fn(),
+    diffRange: vi.fn().mockReturnValue(''),
+    refExists: vi.fn().mockReturnValue(false),
     diff: vi.fn().mockReturnValue('diff --git a/src/file.ts b/src/file.ts'),
   };
 }
@@ -204,6 +211,7 @@ function defaultContext(): AssembledContext {
     ticketContent: 'ticket content',
     settledDecisions: null,
     priorArtifacts: [],
+    epicContext: [],
     constraints: null,
     codeDiff: null,
   };
@@ -567,6 +575,37 @@ describe('TicketRunUseCase', () => {
       'AEOS-1-impl.md',
       expect.anything(),
     );
+  });
+
+  it('baselines pre-existing repo changes before an agentic worker runs', async () => {
+    // Otherwise the accumulated tree (a previous task's work, unrelated local
+    // edits) lands in this ticket's diff and CODE_REVIEW rejects files the
+    // ticket never claimed.
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(gitGateway.commitAll).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      expect.stringContaining('[AEOS-1][BASELINE]'),
+    );
+  });
+
+  it('stages the repo before diffing so newly created files count as changes', async () => {
+    // `git diff HEAD` ignores untracked files, so a task that only ADDS files
+    // (a migration, a new module) would read as "no changes" and fail — and the
+    // files would reach CODE_REVIEW/QA looking untracked.
+    const order: string[] = [];
+    (gitGateway.stageAll as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      order.push('stageAll'),
+    );
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      order.push('diff');
+      return 'diff --git a/new.sql b/new.sql';
+    });
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(gitGateway.stageAll).toHaveBeenCalledWith(PROJECT_PATH);
+    expect(order).toEqual(['stageAll', 'diff']);
   });
 
   it('skips the repo-diff check for an agentic column that opts out', async () => {

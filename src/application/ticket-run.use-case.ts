@@ -51,6 +51,7 @@ import type { ExecutorChunkObserver } from '../domain/model/executor-invocation.
 import type { ReviewVerdict } from '../domain/model/review-verdict.js';
 import type { Escalation } from '../domain/model/escalation.js';
 import { EscalationReason } from '../domain/model/escalation.js';
+import { buildEscalationDocument, escalationFilename } from './services/escalation-document.js';
 import { Column } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { validateOutput } from '../domain/services/output-validation.js';
@@ -493,6 +494,20 @@ export class TicketRunUseCase implements TicketRunPort {
     }
     const prompt = this.buildPromptFn(workerContext, ctx.workerAgentSpec);
 
+    // Baseline the repo before an agentic worker touches it, on the first
+    // attempt only. Whatever is already uncommitted — a previous task's work,
+    // or unrelated local edits — becomes its own commit, so `git diff HEAD`
+    // afterwards contains this task's changes and nothing else. Without this,
+    // CODE_REVIEW reviews the accumulated tree and rejects files the ticket
+    // never claimed ("orphan unacknowledged file"). Retries skip it, or the
+    // rejected attempt's own work would be baselined away mid-loop.
+    if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false && attempt === 1) {
+      this.gitGateway.commitAll(
+        ctx.projectPath,
+        `[${ctx.ticketId}][BASELINE] pre-existing changes before ${ctx.column}`,
+      );
+    }
+
     const attemptLabel = attempt > 1 ? ` (attempt ${attempt})` : '';
     this.emitStageEvent(
       emitter,
@@ -581,6 +596,12 @@ export class TicketRunUseCase implements TicketRunPort {
     // its work is not a repo edit (TASK_BREAKDOWN creates tickets). Undefined
     // means true, so IMPLEMENTATION keeps the guarantee without stating it.
     if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false) {
+      // Stage first: `git diff HEAD` does not show untracked files, so a task
+      // that only adds files (a migration, a new module) would read as "no
+      // changes" and fail this guarantee. Staging also makes the new files
+      // tracked, so CODE_REVIEW and QA see them as part of the change set
+      // instead of flagging them as untracked.
+      this.gitGateway.stageAll(projectPath);
       const repoDiff = this.gitGateway.diff(projectPath).trim();
       if (repoDiff.length === 0) {
         const error = 'Agentic implementation produced no repository changes';
@@ -964,6 +985,25 @@ export class TicketRunUseCase implements TicketRunPort {
       message: escalation.message,
       artifactPath: escalation.artifactPath ?? null,
     });
+
+    // Write the human-facing escalation artifact so the operator can respond in
+    // a file and `aeos ticket resolve`, mirroring the preflight questions flow.
+    // The BLOCKED (preflight) path already has its own questions.md, so only the
+    // true ESCALATED path gets an escalation.md.
+    if (subState === SubState.ESCALATED) {
+      this.artifactStore.writeArtifact(
+        ctx.projectPath,
+        ctx.ticketId,
+        escalationFilename(ctx.ticketId),
+        buildEscalationDocument({
+          ticketId: ctx.ticketId,
+          column: ctx.column,
+          reason: escalation.reason,
+          message: escalation.message,
+          artifactPath: escalation.artifactPath ?? null,
+        }),
+      );
+    }
 
     ctx.emitter.emit({
       type: 'ticket-run.escalated',

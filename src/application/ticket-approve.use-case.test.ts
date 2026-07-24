@@ -28,6 +28,13 @@ function createMockGitGateway(): GitGateway {
     init: vi.fn(),
     commit: vi.fn(),
     commitFiles: vi.fn(),
+    stageAll: vi.fn(),
+    commitAll: vi.fn().mockReturnValue(false),
+    isRepo: vi.fn().mockReturnValue(true),
+    ensureOnBranch: vi.fn(),
+    tagHere: vi.fn(),
+    diffRange: vi.fn().mockReturnValue(''),
+    refExists: vi.fn().mockReturnValue(false),
     diff: vi.fn().mockReturnValue(''),
   };
 }
@@ -81,7 +88,7 @@ describe('TicketApproveUseCase', () => {
     artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
-    useCase = new TicketApproveUseCase(ticketRepo, artifactStore, stateMachine);
+    useCase = new TicketApproveUseCase(ticketRepo, artifactStore, stateMachine, gitGateway);
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket());
   });
 
@@ -233,7 +240,7 @@ describe('TicketApproveUseCase', () => {
       expect(stateMachine.transition).not.toHaveBeenCalled();
     });
 
-    it('advances the epic to DOD_GATE once every task is DONE', () => {
+    it('advances the epic to INTEGRATION_REVIEW once every task is DONE', () => {
       (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epicInBreakdown());
       (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
         child('AEOS-2', 'DONE'),
@@ -242,7 +249,7 @@ describe('TicketApproveUseCase', () => {
 
       const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-      expect(result).toMatchObject({ status: 'advanced', toColumn: 'DOD_GATE' });
+      expect(result).toMatchObject({ status: 'advanced', toColumn: 'INTEGRATION_REVIEW' });
     });
 
     it('advances an epic that decomposed into no tasks', () => {
@@ -251,7 +258,7 @@ describe('TicketApproveUseCase', () => {
 
       expect(useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toMatchObject({
         status: 'advanced',
-        toColumn: 'DOD_GATE',
+        toColumn: 'INTEGRATION_REVIEW',
       });
     });
 
@@ -269,5 +276,50 @@ describe('TicketApproveUseCase', () => {
         toColumn: 'CODE_REVIEW',
       });
     });
+  });
+});
+
+describe('TicketApproveUseCase — per-task commit', () => {
+  let ticketRepo: ReturnType<typeof createMockTicketRepo>;
+  let artifactStore: ReturnType<typeof createMockArtifactStore>;
+  let gitGateway: ReturnType<typeof createMockGitGateway>;
+  let stateMachine: ReturnType<typeof createMockStateMachine>;
+  let useCase: TicketApproveUseCase;
+
+  function task(column: Ticket['column']): Ticket {
+    return { ...signedOffTicket(column), kind: 'TASK', parentId: 'AEOS-9' };
+  }
+
+  beforeEach(() => {
+    ticketRepo = createMockTicketRepo();
+    artifactStore = createMockArtifactStore();
+    gitGateway = createMockGitGateway();
+    stateMachine = createMockStateMachine();
+    useCase = new TicketApproveUseCase(ticketRepo, artifactStore, stateMachine, gitGateway);
+  });
+
+  it('commits the source repo when a TASK reaches DONE', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(task('QA'));
+
+    const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result).toMatchObject({ status: 'advanced', toColumn: 'DONE' });
+    expect(gitGateway.commitAll).toHaveBeenCalledWith(PROJECT_PATH, '[AEOS-1] Test ticket');
+  });
+
+  it('does not commit on a mid-pipeline advance — CODE_REVIEW still needs the diff', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(task('IMPLEMENTATION'));
+
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(gitGateway.commitAll).not.toHaveBeenCalled();
+  });
+
+  it('does not commit for an epic — epics produce artifacts, not code', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket('DOD_GATE'));
+
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(gitGateway.commitAll).not.toHaveBeenCalled();
   });
 });

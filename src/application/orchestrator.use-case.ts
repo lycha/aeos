@@ -23,6 +23,7 @@ import type { OrchestratorStateRepository } from '../domain/ports/driven/orchest
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketRunObserver } from '../domain/model/ticket-run-event.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
+import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type {
   OrchestratorPort,
   OrchestratorObserver,
@@ -59,7 +60,21 @@ export class OrchestratorUseCase implements OrchestratorPort {
     private readonly configStore: ConfigStore,
     private readonly ticketRun: TicketRunPort,
     private readonly ticketApprove: TicketApprovePort,
+    private readonly gitGateway: GitGateway,
   ) {}
+
+  /**
+   * Gives the epic its own feature branch and marks its base commit, so task
+   * commits accumulate in isolation and the whole-feature diff (base..HEAD) can
+   * be computed at INTEGRATION_REVIEW. No-op when the project path is not a git
+   * repo, or when isolation is disabled via AEOS_GIT_ISOLATION=none.
+   */
+  private setUpGitIsolation(projectPath: string, epicId: string): void {
+    if (process.env.AEOS_GIT_ISOLATION === 'none') return;
+    if (!this.gitGateway.isRepo(projectPath)) return;
+    this.gitGateway.ensureOnBranch(projectPath, `aeos/${epicId}`);
+    this.gitGateway.tagHere(projectPath, `aeos-base/${epicId}`);
+  }
 
   async run(
     projectId: string,
@@ -111,6 +126,9 @@ export class OrchestratorUseCase implements OrchestratorPort {
 
     this.writeState(projectId, epicId, OrchestratorStatus.RUNNING, null, null, budgetUsd);
     let settled = false;
+
+    // Isolate this epic's work on its own branch before any task runs.
+    this.setUpGitIsolation(projectPath, epicId);
 
     try {
       for (let step = 0; step < maxSteps; step += 1) {

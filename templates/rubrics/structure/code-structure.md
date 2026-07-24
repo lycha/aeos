@@ -54,6 +54,23 @@ Evaluates whether the reviewer assessed that tests accompanying the code changes
 
 ---
 
+## 4a. Integration Seam Exercised (not mocked past)
+
+Evaluates whether the tests exercise the **real** boundary between the changed
+component and its collaborators, rather than mocking the collaborator and
+asserting against the mock. Unit tests that mock the very seam a change depends
+on can pass while the integrated behaviour is broken (a green test asserting
+`sink.record` was called *with* an `id`, against a mock sink that the real,
+`id`-dropping sink never stands in for).
+
+| Grade | Definition |
+|-------|------------|
+| **PASS** | Where the change integrates two components (a caller and a real collaborator — a sink, an adapter, a delivery path), at least one test drives the **real** collaborator end-to-end, or the review explicitly justifies why a non-mocked test is infeasible here and names what compensates. Assertions verify observable behaviour at the far side of the seam, not just that the mock was called. |
+| **WARN** | The seam is covered only by mocks, and the review notes the gap but accepts it without an integration test or a stated reason. |
+| **FAIL** | The change's core behaviour crosses a component boundary, every test mocks that collaborator, and the review does not flag it — so the tests would stay green if the real collaborator dropped or mishandled the data. The "false confidence" case. |
+
+---
+
 ## 5. No Dead Code or Debug Artifacts
 
 Evaluates whether the reviewer checked for dead code, debug statements, commented-out code, TODO/FIXME markers, and other artifacts that should not reach production.

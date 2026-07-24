@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildPrompt } from './prompt-builder.js';
+import { buildPrompt, buildContextSection } from './prompt-builder.js';
 import type { AssembledContext } from '../../domain/model/assembled-context.js';
 import type { AgentSpec } from '../../domain/model/agent-spec.js';
 
@@ -20,6 +20,7 @@ function createContext(overrides: Partial<AssembledContext> = {}): AssembledCont
     ticketContent: '# AEOS-1\nImplement feature X',
     settledDecisions: null,
     priorArtifacts: [],
+    epicContext: [],
     constraints: null,
     codeDiff: null,
     ...overrides,
@@ -199,5 +200,26 @@ describe('buildPrompt', () => {
 
     expect(result).toContain('## Code Diff');
     expect(result).toContain('[DIFF TRUNCATED');
+  });
+});
+
+describe('buildContextSection — epic specification (WI-3)', () => {
+  it('renders epic context as an authoritative, do-not-contradict block before the ticket', () => {
+    const section = buildContextSection(
+      createContext({
+        epicContext: [{ name: 'AEOS-1-tech-spec.md', content: 'D-6: use response_url' }],
+      }),
+    );
+
+    expect(section).toContain('## Epic Specification');
+    expect(section).toContain('do not contradict');
+    expect(section).toContain('D-6: use response_url');
+    // It precedes the ticket block.
+    expect(section.indexOf('## Epic Specification')).toBeLessThan(section.indexOf('## Ticket'));
+  });
+
+  it('omits the epic block entirely when there is no epic context', () => {
+    const section = buildContextSection(createContext({ epicContext: [] }));
+    expect(section).not.toContain('## Epic Specification');
   });
 });

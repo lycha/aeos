@@ -12,6 +12,7 @@ minWordCount: 100
 requiredSections: []
 reviewerRubrics:
   - rubrics/structure/tech-spec-structure.md
+  - rubrics/structure/spec-traceability.md
   - rubrics/drift/intent-drift.md
 # The breakdown is reviewed as ONE artifact, not per task. Atomicity, ordering,
 # and collective sufficiency are properties of the set — a per-task review

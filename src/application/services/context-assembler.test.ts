@@ -34,6 +34,13 @@ function createMockGitGateway(): GitGateway {
     init: vi.fn(),
     commit: vi.fn(),
     commitFiles: vi.fn(),
+    stageAll: vi.fn(),
+    commitAll: vi.fn().mockReturnValue(false),
+    isRepo: vi.fn().mockReturnValue(true),
+    ensureOnBranch: vi.fn(),
+    tagHere: vi.fn(),
+    diffRange: vi.fn().mockReturnValue(''),
+    refExists: vi.fn().mockReturnValue(false),
     diff: vi.fn().mockReturnValue(''),
   };
 }
@@ -248,5 +255,107 @@ describe('ContextAssembler', () => {
     // The content before truncation marker should be MAX_DIFF_CHARS long
     const truncatedContent = result.codeDiff!.split('\n\n[DIFF TRUNCATED')[0];
     expect(truncatedContent).toHaveLength(MAX_DIFF_CHARS);
+  });
+});
+
+describe('ContextAssembler — epic context (WI-3)', () => {
+  let artifactStore: ReturnType<typeof createMockArtifactStore>;
+  let projectRepo: ReturnType<typeof createMockProjectRepo>;
+  let gitGateway: ReturnType<typeof createMockGitGateway>;
+  let assembler: ContextAssembler;
+
+  const PROJECT_ROOT = '/projects/test';
+
+  // A child-task ticket document carries "- Parent: <id>" in its metadata block.
+  const TASK_DOC = [
+    '# Ticket: AEOS-2',
+    '<!-- AEOS:METADATA START -->',
+    '## AEOS Metadata',
+    '- Kind: TASK',
+    '- Parent: AEOS-1',
+    '<!-- AEOS:METADATA END -->',
+    '## Title',
+    'Do a task',
+  ].join('\n');
+
+  beforeEach(() => {
+    artifactStore = createMockArtifactStore();
+    projectRepo = createMockProjectRepo();
+    gitGateway = createMockGitGateway();
+    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
+  });
+
+  it("injects the parent epic's PRD and tech spec, PRD first", async () => {
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockImplementation(
+      (_root: string, ticketId: string) =>
+        ticketId === 'AEOS-2'
+          ? ['AEOS-2-ticket.md']
+          : ['AEOS-1-tech-spec.md', 'AEOS-1-prd.md', 'AEOS-1-tasks.md'],
+    );
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockImplementation(
+      (_root: string, _id: string, filename: string) =>
+        filename === 'AEOS-2-ticket.md'
+          ? TASK_DOC
+          : filename === 'AEOS-1-prd.md'
+            ? '# PRD body'
+            : filename === 'AEOS-1-tech-spec.md'
+              ? '# Tech spec body'
+              : 'other',
+    );
+
+    const result = await assembler.assemble('AEOS-2', PROJECT_ROOT, Column.IMPLEMENTATION);
+
+    expect(result.epicContext.map((a) => a.name)).toEqual(['AEOS-1-prd.md', 'AEOS-1-tech-spec.md']);
+    expect(result.epicContext[0].content).toBe('# PRD body');
+    // The epic's tasks.md is NOT pulled in — only PRD + tech spec.
+    expect(result.epicContext.some((a) => a.name.endsWith('-tasks.md'))).toBe(false);
+  });
+
+  it('returns no epic context for an epic (no parent in metadata)', async () => {
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
+      '# Ticket: AEOS-1\n## AEOS Metadata\n- Kind: EPIC\n',
+    );
+
+    const result = await assembler.assemble('AEOS-1', PROJECT_ROOT, Column.IMPLEMENTATION);
+
+    expect(result.epicContext).toEqual([]);
+  });
+});
+
+describe('ContextAssembler — integration-review diff (WI-2)', () => {
+  let artifactStore: ReturnType<typeof createMockArtifactStore>;
+  let projectRepo: ReturnType<typeof createMockProjectRepo>;
+  let gitGateway: ReturnType<typeof createMockGitGateway>;
+  let assembler: ContextAssembler;
+
+  beforeEach(() => {
+    artifactStore = createMockArtifactStore();
+    projectRepo = createMockProjectRepo();
+    gitGateway = createMockGitGateway();
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Epic');
+    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
+  });
+
+  it('diffs the epic base tag..HEAD when the base tag exists', async () => {
+    (gitGateway.refExists as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (gitGateway.diffRange as ReturnType<typeof vi.fn>).mockReturnValue('diff --git a/x b/x');
+
+    const result = await assembler.assemble('AEOS-1', '/root', Column.INTEGRATION_REVIEW);
+
+    expect(gitGateway.refExists).toHaveBeenCalledWith('/root', 'aeos-base/AEOS-1');
+    expect(gitGateway.diffRange).toHaveBeenCalledWith('/root', 'aeos-base/AEOS-1', 'HEAD');
+    expect(result.codeDiff).toContain('diff --git');
+  });
+
+  it('falls back to the working-tree diff when the base tag is missing', async () => {
+    (gitGateway.refExists as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('');
+
+    const result = await assembler.assemble('AEOS-1', '/root', Column.INTEGRATION_REVIEW);
+
+    expect(gitGateway.diffRange).not.toHaveBeenCalled();
+    expect(result.codeDiff).toBe('No changes detected');
   });
 });

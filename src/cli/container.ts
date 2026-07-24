@@ -7,6 +7,7 @@ import type { TicketCreatePort } from '../domain/ports/driving/ticket-create.por
 import type { TicketListPort } from '../domain/ports/driving/ticket-list.port.js';
 import type { TicketShowPort } from '../domain/ports/driving/ticket-show.port.js';
 import type { TicketAnswerPort } from '../domain/ports/driving/ticket-answer.port.js';
+import type { TicketResolvePort } from '../domain/ports/driving/ticket-resolve.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
 import type { TicketSignOffPort } from '../domain/ports/driving/ticket-sign-off.port.js';
@@ -33,6 +34,7 @@ import { TicketCreateUseCase } from '../application/ticket-create.use-case.js';
 import { TicketListUseCase } from '../application/ticket-list.use-case.js';
 import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
 import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
+import { TicketResolveUseCase } from '../application/ticket-resolve.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
 import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
 import { TicketSignOffUseCase } from '../application/ticket-sign-off.use-case.js';
@@ -65,6 +67,7 @@ export interface Container {
   ticketList: TicketListPort;
   ticketShow: TicketShowPort;
   ticketAnswer: TicketAnswerPort;
+  ticketResolve: TicketResolvePort;
   ticketRun: TicketRunPort;
   ticketApprove: TicketApprovePort;
   ticketSignOff: TicketSignOffPort;
@@ -158,6 +161,14 @@ export function createContainer(): Container {
         new DecisionPromotionService(artifactStore),
       );
     },
+    get ticketResolve() {
+      return new TicketResolveUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getStateMachine(),
+        gitGateway,
+      );
+    },
     get ticketRun() {
       const contextAssembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
       const columnSpecLoader = new YamlColumnSpecLoader();
@@ -183,7 +194,12 @@ export function createContainer(): Container {
       );
     },
     get ticketApprove() {
-      return new TicketApproveUseCase(getTicketRepo(), artifactStore, getStateMachine());
+      return new TicketApproveUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getStateMachine(),
+        gitGateway,
+      );
     },
     get ticketSignOff() {
       return new TicketSignOffUseCase(getTicketRepo(), artifactStore, getStateMachine());
@@ -203,6 +219,7 @@ export function createContainer(): Container {
         configStore,
         this.ticketRun,
         this.ticketApprove,
+        gitGateway,
       );
     },
     get ticketDodApprove() {

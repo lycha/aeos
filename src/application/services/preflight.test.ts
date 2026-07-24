@@ -54,6 +54,7 @@ function makeContext(overrides: Partial<AssembledContext> = {}): AssembledContex
     ticketContent: '# Build a login page\nUsers should be able to log in with email and password.',
     settledDecisions: '# AEOS Decisions\nUse email/password auth only.',
     priorArtifacts: [{ name: 'AEOS-1-prd.md', content: '# PRD' }],
+    epicContext: [],
     constraints: 'Use TypeScript strict mode',
     codeDiff: null,
     ...overrides,

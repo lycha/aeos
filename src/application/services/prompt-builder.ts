@@ -40,6 +40,18 @@ export function buildContextSection(context: AssembledContext): string {
 
   parts.push('[CONTEXT]');
 
+  // Epic Specification — the parent epic's PRD/tech spec for a child task.
+  // Placed first and framed as authoritative: the task must implement against
+  // these decisions and must not contradict them.
+  if (context.epicContext.length > 0) {
+    const epicParts = context.epicContext
+      .map((artifact) => `### ${artifact.name}\n${artifact.content}`)
+      .join('\n\n');
+    parts.push(
+      `## Epic Specification (authoritative — do not contradict its decisions)\n${epicParts}`,
+    );
+  }
+
   // Ticket
   parts.push(`## Ticket\n${context.ticketContent}`);
 

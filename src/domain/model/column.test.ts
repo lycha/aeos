@@ -6,16 +6,16 @@ describe('Column', () => {
     expect(Column.BACKLOG).toBe('BACKLOG');
   });
 
-  it('all 9 column values are distinct strings', () => {
+  it('all 10 column values are distinct strings', () => {
     const values = Object.values(Column);
-    expect(values).toHaveLength(9);
-    expect(new Set(values).size).toBe(9);
+    expect(values).toHaveLength(10);
+    expect(new Set(values).size).toBe(10);
   });
 });
 
 describe('COLUMN_ORDER', () => {
-  it('contains all 9 columns in correct pipeline order', () => {
-    expect(COLUMN_ORDER).toHaveLength(9);
+  it('contains all 10 columns in correct pipeline order', () => {
+    expect(COLUMN_ORDER).toHaveLength(10);
     expect([...COLUMN_ORDER]).toEqual([
       'BACKLOG',
       'PRODUCT_SCOPING',
@@ -24,6 +24,7 @@ describe('COLUMN_ORDER', () => {
       'IMPLEMENTATION',
       'CODE_REVIEW',
       'QA',
+      'INTEGRATION_REVIEW',
       'DOD_GATE',
       'DONE',
     ]);

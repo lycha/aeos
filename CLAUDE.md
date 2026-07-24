@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AEOS is a CLI that drives tickets through LLM-agent pipelines. A ticket is an **epic** or a **task**, and each has its own column sequence:
 
-- **epic** — `BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN → DOD_GATE → DONE`
+- **epic** — `BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE`
 - **task** — `BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE`
 
 Each column has a worker agent, a reviewer agent with rubrics, and a human approval gate. An epic decomposes into child tasks and cannot leave `TASK_BREAKDOWN` until every child is `DONE`. `aeos orchestrator run <epicId>` drives the whole thing autonomously. See `README.md` for the full command surface, state machine table, and executor matrix — that document is current; prefer it over re-deriving behaviour from code.
