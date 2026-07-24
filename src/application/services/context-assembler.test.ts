@@ -322,3 +322,40 @@ describe('ContextAssembler — epic context (WI-3)', () => {
     expect(result.epicContext).toEqual([]);
   });
 });
+
+describe('ContextAssembler — integration-review diff (WI-2)', () => {
+  let artifactStore: ReturnType<typeof createMockArtifactStore>;
+  let projectRepo: ReturnType<typeof createMockProjectRepo>;
+  let gitGateway: ReturnType<typeof createMockGitGateway>;
+  let assembler: ContextAssembler;
+
+  beforeEach(() => {
+    artifactStore = createMockArtifactStore();
+    projectRepo = createMockProjectRepo();
+    gitGateway = createMockGitGateway();
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Epic');
+    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
+  });
+
+  it('diffs the epic base tag..HEAD when the base tag exists', async () => {
+    (gitGateway.refExists as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (gitGateway.diffRange as ReturnType<typeof vi.fn>).mockReturnValue('diff --git a/x b/x');
+
+    const result = await assembler.assemble('AEOS-1', '/root', Column.INTEGRATION_REVIEW);
+
+    expect(gitGateway.refExists).toHaveBeenCalledWith('/root', 'aeos-base/AEOS-1');
+    expect(gitGateway.diffRange).toHaveBeenCalledWith('/root', 'aeos-base/AEOS-1', 'HEAD');
+    expect(result.codeDiff).toContain('diff --git');
+  });
+
+  it('falls back to the working-tree diff when the base tag is missing', async () => {
+    (gitGateway.refExists as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('');
+
+    const result = await assembler.assemble('AEOS-1', '/root', Column.INTEGRATION_REVIEW);
+
+    expect(gitGateway.diffRange).not.toHaveBeenCalled();
+    expect(result.codeDiff).toBe('No changes detected');
+  });
+});

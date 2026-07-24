@@ -17,11 +17,15 @@ describe('column pipelines', () => {
       'PRODUCT_SCOPING',
       'TECH_SPEC',
       'TASK_BREAKDOWN',
+      'INTEGRATION_REVIEW',
       'DOD_GATE',
       'DONE',
     ]);
+    // The epic reviews the assembled feature (INTEGRATION_REVIEW) but never does
+    // the per-task build columns itself.
     expect(isColumnInPipeline(TicketKind.EPIC, Column.IMPLEMENTATION)).toBe(false);
     expect(isColumnInPipeline(TicketKind.EPIC, Column.CODE_REVIEW)).toBe(false);
+    expect(isColumnInPipeline(TicketKind.EPIC, Column.INTEGRATION_REVIEW)).toBe(true);
   });
 
   it('routes a task straight to building — it is already specified', () => {
@@ -47,9 +51,11 @@ describe('column pipelines', () => {
       expect(nextColumnFor(TicketKind.EPIC, Column.TECH_SPEC)).toBe(Column.TASK_BREAKDOWN);
     });
 
-    it('advances an epic from TASK_BREAKDOWN straight to DOD_GATE', () => {
-      // The build columns belong to its children, not to the epic.
-      expect(nextColumnFor(TicketKind.EPIC, Column.TASK_BREAKDOWN)).toBe(Column.DOD_GATE);
+    it('advances an epic from TASK_BREAKDOWN to INTEGRATION_REVIEW, then DOD_GATE', () => {
+      // The build columns belong to its children; the epic reviews the whole
+      // assembled feature before the human DoD gate.
+      expect(nextColumnFor(TicketKind.EPIC, Column.TASK_BREAKDOWN)).toBe(Column.INTEGRATION_REVIEW);
+      expect(nextColumnFor(TicketKind.EPIC, Column.INTEGRATION_REVIEW)).toBe(Column.DOD_GATE);
     });
 
     it('advances a task from BACKLOG straight to IMPLEMENTATION', () => {

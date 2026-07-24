@@ -18,6 +18,7 @@ const COLUMN_SPEC_FILENAMES: Partial<Record<Column, string>> = {
   [Column.IMPLEMENTATION]: 'implementation',
   [Column.CODE_REVIEW]: 'code-review',
   [Column.QA]: 'qa',
+  [Column.INTEGRATION_REVIEW]: 'integration-review',
   [Column.DOD_GATE]: 'dod-gate',
 };
 

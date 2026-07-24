@@ -65,20 +65,33 @@ export class ContextAssembler {
     // 4. Read constraints
     const constraints = this.projectRepo.readConstraints(projectRoot);
 
-    // 5. Inject git diff for CODE_REVIEW column
+    // 5. Inject a git diff for the review columns.
+    //    - CODE_REVIEW reviews the working-tree diff of one task.
+    //    - INTEGRATION_REVIEW reviews the whole assembled feature: every task
+    //      commit on the epic branch, i.e. the range from the epic's base tag to
+    //      HEAD. Task work is committed by then, so a plain `git diff HEAD` would
+    //      be empty.
     let codeDiff: string | null = null;
     if (column === Column.CODE_REVIEW) {
-      const rawDiff = this.gitGateway.diff(projectRoot);
-      if (rawDiff.trim() === '') {
-        codeDiff = 'No changes detected';
-      } else if (rawDiff.length > MAX_DIFF_CHARS) {
-        codeDiff = `${rawDiff.slice(0, MAX_DIFF_CHARS)}\n\n[DIFF TRUNCATED — showing first 50,000 characters of ${rawDiff.length} total]`;
-      } else {
-        codeDiff = rawDiff;
-      }
+      codeDiff = this.clampDiff(this.gitGateway.diff(projectRoot));
+    } else if (column === Column.INTEGRATION_REVIEW) {
+      const baseTag = `aeos-base/${ticketId}`;
+      const raw = this.gitGateway.refExists(projectRoot, baseTag)
+        ? this.gitGateway.diffRange(projectRoot, baseTag, 'HEAD')
+        : this.gitGateway.diff(projectRoot);
+      codeDiff = this.clampDiff(raw);
     }
 
     return { ticketContent, settledDecisions, priorArtifacts, epicContext, constraints, codeDiff };
+  }
+
+  /** Normalizes an empty diff to a marker and truncates an oversized one. */
+  private clampDiff(rawDiff: string): string {
+    if (rawDiff.trim() === '') return 'No changes detected';
+    if (rawDiff.length > MAX_DIFF_CHARS) {
+      return `${rawDiff.slice(0, MAX_DIFF_CHARS)}\n\n[DIFF TRUNCATED — showing first 50,000 characters of ${rawDiff.length} total]`;
+    }
+    return rawDiff;
   }
 
   /**

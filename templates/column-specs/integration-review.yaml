@@ -1,0 +1,23 @@
+column: INTEGRATION_REVIEW
+phase: VERIFY
+# The epic's own column, reached once every child task is DONE. The worker
+# (integration-reviewer) reviews the WHOLE assembled feature — the base..HEAD
+# diff of the epic branch — against the epic's PRD and tech-spec decisions, then
+# the standard reviewer grades that report. Artifact mode: it produces a report,
+# not repo edits, so the agentic diff check does not apply.
+workerAgentFile: agents/integration-reviewer-agent.yaml
+reviewerAgentFile: agents/reviewer-agent.yaml
+outputArtifact: integration-review.md
+minWordCount: 80
+requiredSections: []
+reviewerRubrics:
+  - rubrics/drift/spec-fidelity.md
+  - rubrics/drift/intent-drift.md
+maxIterations: 3
+escalation: escalate_to_human
+# Manual: a human reads the integration verdict before the DoD gate, regardless
+# of the reviewer's pass — this is the last check before the feature is called done.
+advanceMode: manual
+preflight:
+  enabled: false
+  questionsArtifact: questions.md

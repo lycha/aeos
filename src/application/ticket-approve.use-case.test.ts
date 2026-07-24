@@ -240,7 +240,7 @@ describe('TicketApproveUseCase', () => {
       expect(stateMachine.transition).not.toHaveBeenCalled();
     });
 
-    it('advances the epic to DOD_GATE once every task is DONE', () => {
+    it('advances the epic to INTEGRATION_REVIEW once every task is DONE', () => {
       (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epicInBreakdown());
       (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
         child('AEOS-2', 'DONE'),
@@ -249,7 +249,7 @@ describe('TicketApproveUseCase', () => {
 
       const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-      expect(result).toMatchObject({ status: 'advanced', toColumn: 'DOD_GATE' });
+      expect(result).toMatchObject({ status: 'advanced', toColumn: 'INTEGRATION_REVIEW' });
     });
 
     it('advances an epic that decomposed into no tasks', () => {
@@ -258,7 +258,7 @@ describe('TicketApproveUseCase', () => {
 
       expect(useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toMatchObject({
         status: 'advanced',
-        toColumn: 'DOD_GATE',
+        toColumn: 'INTEGRATION_REVIEW',
       });
     });
 

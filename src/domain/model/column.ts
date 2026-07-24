@@ -10,6 +10,7 @@ export const Column = {
   IMPLEMENTATION: 'IMPLEMENTATION',
   CODE_REVIEW: 'CODE_REVIEW',
   QA: 'QA',
+  INTEGRATION_REVIEW: 'INTEGRATION_REVIEW',
   DOD_GATE: 'DOD_GATE',
   DONE: 'DONE',
 } as const;
@@ -31,6 +32,7 @@ export const COLUMN_ORDER = [
   Column.IMPLEMENTATION,
   Column.CODE_REVIEW,
   Column.QA,
+  Column.INTEGRATION_REVIEW,
   Column.DOD_GATE,
   Column.DONE,
 ] as const;
@@ -46,6 +48,9 @@ export const EPIC_COLUMN_ORDER = [
   Column.PRODUCT_SCOPING,
   Column.TECH_SPEC,
   Column.TASK_BREAKDOWN,
+  // Once every child task is DONE, the epic reviews the assembled feature diff
+  // against its own PRD and tech spec before the human DoD gate.
+  Column.INTEGRATION_REVIEW,
   Column.DOD_GATE,
   Column.DONE,
 ] as const;
