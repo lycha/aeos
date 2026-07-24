@@ -1,8 +1,25 @@
 # Tech Spec — AEOS Pipeline Integrity Improvements
 
 **Date:** 2026-07-24
-**Status:** Proposed (no implementation yet)
+**Status:** Implemented on `feat/pipeline-integrity` (all seven work items). See the status table below.
 **Motivates:** `aeos-postmortem-stan1.md` — a full-epic run shipped two spec-fidelity defects that every per-task gate marked green.
+
+## Implementation status
+
+| WI | Status | Commit | Notes |
+|----|--------|--------|-------|
+| WI-1 | ✅ Done | `f9186d2` | Per-epic `aeos/<epicId>` branch + `aeos-base/<epicId>` tag; opt out with `AEOS_GIT_ISOLATION=none`. Delivered via env flag rather than `project.json` for v1. |
+| WI-2 | ✅ Done | `e3e4bf3` | `INTEGRATION_REVIEW` epic column over `base..HEAD`; escalates to human (manual advance). Auto-remediation remains out of scope. |
+| WI-3 | ✅ Done | `8bda398` | Parent PRD/tech-spec injected into child context; parent id parsed from ticket metadata (no new port). |
+| WI-4 | ✅ Done | `b1964c7` | `spec-traceability.md` rubric on TASK_BREAKDOWN. |
+| WI-5 | ✅ Done | `b1964c7` | Integration-seam criterion in `code-structure.md`. |
+| WI-6 | ✅ Done | `e3e4bf3` | Folded into WI-2: deferred hand-offs verified by the integration reviewer + spec-fidelity rubric. |
+| WI-7 | ✅ Done | `d856fa9` | `escalation.md` + `aeos ticket resolve`; response injected as a resolution artifact. |
+
+Deltas from the design below: WI-1's opt-out is an env var (not yet a
+`project.json` field); the epic base is captured as a git **tag** rather than a
+stored `base_ref` column, so no migration was needed and `ContextAssembler`
+derives the range from the ticket id alone.
 
 ## 1. Overview
 

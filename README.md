@@ -60,14 +60,15 @@ aeos ticket dod-approve MYPRJ-1
 A ticket is either an **epic** or a **task**, and each follows its own pipeline.
 
 ```
-EPIC   BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN ─────────→ DOD_GATE → DONE
-                 PM Agent          Architect    Architect                 Human
-                 ↓                 ↓            ↓                           ▲
-                 PRD               Tech Spec    tasks.md                    │
-                 ↓                 ↓            ↓                           │
-                 Reviewer          Reviewer     Reviewer                    │
-                                                │                           │
-                                   fans out into child tasks    all children DONE
+EPIC   BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN ──→ INTEGRATION_REVIEW → DOD_GATE → DONE
+                 PM Agent          Architect    Architect          Integration Reviewer  Human
+                 ↓                 ↓            ↓                    ↓                      ▲
+                 PRD               Tech Spec    tasks.md            integration-review.md  │
+                 ↓                 ↓            ↓                    ↓                      │
+                 Reviewer          Reviewer     Reviewer            Reviewer               │
+                                                │                   (whole-feature diff    │
+                                   fans out into child tasks         vs PRD/tech spec)     │
+                                                             all children DONE ────────────┘
                                                 ▼                           │
 TASK   BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE ───────────────────┘
                  Engineer          Engineer      QA
@@ -79,7 +80,9 @@ TASK   BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE ────�
 
 An epic is scoped, specced, and decomposed — it never implements anything itself.
 Its child tasks do that, and the epic cannot leave `TASK_BREAKDOWN` until every
-child reaches `DONE`.
+child reaches `DONE`. It then runs `INTEGRATION_REVIEW`, which reviews the whole
+assembled feature (the epic branch's `base..HEAD` diff) against the PRD and tech
+spec — the check per-task review cannot make — before the human `DOD_GATE`.
 
 Each column follows the same cycle:
 
@@ -124,7 +127,7 @@ The forward order depends on the ticket's kind:
 
 | Kind   | Pipeline                                                                   |
 | ------ | -------------------------------------------------------------------------- |
-| `EPIC` | `BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN → DOD_GATE → DONE` |
+| `EPIC` | `BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE` |
 | `TASK` | `BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE`                       |
 
 `aeos ticket approve` uses the kind to pick the next column, so a task never
@@ -181,6 +184,7 @@ Every non-terminal column allows the same set:
 | `IMPLEMENTATION`  | task | all eight                |
 | `CODE_REVIEW`     | task | all eight                |
 | `QA`              | task | all eight                |
+| `INTEGRATION_REVIEW` | epic | all eight             |
 | `DOD_GATE`        | epic | all eight                |
 | `DONE`            | both | `null` only              |
 
@@ -264,7 +268,8 @@ Notes:
 | `aeos ticket approve <id>`                                   | Advance a SIGNED_OFF ticket to the next column                             |
 | `aeos ticket sign-off <id>`                                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
 | `aeos ticket move <id> <status>`                             | Human override — move a ticket directly to any workflow status             |
-| `aeos ticket answer <id>`                                    | Unblock a ticket after answering pre-flight questions                      |
+| `aeos ticket answer <id>`                                    | Unblock a `BLOCKED` ticket after answering pre-flight questions            |
+| `aeos ticket resolve <id>`                                   | Resume an `ESCALATED` ticket after writing a decision in its `escalation.md` |
 | `aeos ticket dod-approve <id>`                               | Final human gate — mark ticket as DONE _(not yet implemented)_             |
 | `aeos dashboard`                                             | Cross-project Kanban summary _(not yet implemented)_                       |
 | `aeos costs [--project] [--ticket]`                          | LLM spend report _(not yet implemented)_                                   |
@@ -293,7 +298,9 @@ aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation
 ...
 
 # 5. Only once every task is DONE can the epic advance
-aeos ticket approve AEOS-1                             # → DOD_GATE
+aeos ticket approve AEOS-1                             # → INTEGRATION_REVIEW
+aeos ticket run AEOS-1                                 # reviews the whole feature vs PRD/spec
+aeos ticket approve AEOS-1                             # → DOD_GATE (after human reads the verdict)
 ```
 
 Nesting is one level deep: tasks hang off epics, and a task cannot itself have
