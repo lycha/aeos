@@ -206,6 +206,7 @@ function defaultContext(): AssembledContext {
     ticketContent: 'ticket content',
     settledDecisions: null,
     priorArtifacts: [],
+    epicContext: [],
     constraints: null,
     codeDiff: null,
   };

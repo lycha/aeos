@@ -204,6 +204,7 @@ outputFormat: |
   [If no constraints apply or all are met: "All applicable constraints satisfied."]
 
 selfVerificationChecklist:
+  - The implementation is consistent with the epic's PRD and tech-spec decisions (see the "Epic Specification" context block); no settled decision (e.g. a chosen mechanism or delivery path) is silently contradicted
   - Every file changed is within the ticket's `Touches:` scope; nothing reserved for another task (per `Out of scope`/`Notes`) was modified
   - Every implementation step references specific file paths and function/type names from the tech spec — no vague "update the module" language
   - The test plan covers every implementation step with at least one unit test and all edge cases from the PRD acceptance criteria
