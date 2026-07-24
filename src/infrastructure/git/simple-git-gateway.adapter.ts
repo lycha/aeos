@@ -75,4 +75,46 @@ export class SimpleGitGateway implements GitGateway {
   diff(dir: string): string {
     return execFileSync('git', ['diff', 'HEAD'], { cwd: dir, encoding: 'utf-8' });
   }
+
+  isRepo(dir: string): boolean {
+    try {
+      execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir, stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  ensureOnBranch(dir: string, name: string): void {
+    const current = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: dir,
+      encoding: 'utf-8',
+    }).trim();
+    if (current === name) return;
+
+    if (this.refExists(dir, `refs/heads/${name}`)) {
+      execFileSync('git', ['checkout', name], { cwd: dir, stdio: 'ignore' });
+    } else {
+      // Create from current HEAD, carrying any uncommitted work with us.
+      execFileSync('git', ['checkout', '-b', name], { cwd: dir, stdio: 'ignore' });
+    }
+  }
+
+  tagHere(dir: string, name: string): void {
+    if (this.refExists(dir, `refs/tags/${name}`)) return;
+    execFileSync('git', ['tag', name], { cwd: dir, stdio: 'ignore' });
+  }
+
+  diffRange(dir: string, from: string, to: string): string {
+    return execFileSync('git', ['diff', from, to], { cwd: dir, encoding: 'utf-8' });
+  }
+
+  refExists(dir: string, ref: string): boolean {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], { cwd: dir, stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }

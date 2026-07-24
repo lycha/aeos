@@ -31,6 +31,11 @@ function createMockGitGateway(): GitGateway {
     commitFiles: vi.fn(),
     stageAll: vi.fn(),
     commitAll: vi.fn().mockReturnValue(false),
+    isRepo: vi.fn().mockReturnValue(true),
+    ensureOnBranch: vi.fn(),
+    tagHere: vi.fn(),
+    diffRange: vi.fn().mockReturnValue(''),
+    refExists: vi.fn().mockReturnValue(false),
     diff: vi.fn().mockReturnValue(''),
   };
 }

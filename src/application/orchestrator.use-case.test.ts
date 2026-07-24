@@ -14,6 +14,7 @@ import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader
 import type { OrchestratorStateRepository } from '../domain/ports/driven/orchestrator-state-repository.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
+import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 
 const PROJECT_ID = 'p';
 const PROJECT_PATH = '/tmp/proj';
@@ -42,6 +43,7 @@ describe('OrchestratorUseCase', () => {
   let configStore: ConfigStore;
   let ticketRun: TicketRunPort;
   let ticketApprove: TicketApprovePort;
+  let gitGateway: GitGateway;
   let useCase: OrchestratorUseCase;
 
   beforeEach(() => {
@@ -98,6 +100,20 @@ describe('OrchestratorUseCase', () => {
       }),
     };
 
+    gitGateway = {
+      init: vi.fn(),
+      commit: vi.fn(),
+      commitFiles: vi.fn(),
+      stageAll: vi.fn(),
+      commitAll: vi.fn().mockReturnValue(false),
+      diff: vi.fn().mockReturnValue(''),
+      isRepo: vi.fn().mockReturnValue(false),
+      ensureOnBranch: vi.fn(),
+      tagHere: vi.fn(),
+      diffRange: vi.fn().mockReturnValue(''),
+      refExists: vi.fn().mockReturnValue(false),
+    };
+
     useCase = new OrchestratorUseCase(
       ticketRepo,
       costRepo,
@@ -106,6 +122,7 @@ describe('OrchestratorUseCase', () => {
       configStore,
       ticketRun,
       ticketApprove,
+      gitGateway,
     );
   });
 
@@ -170,6 +187,29 @@ describe('OrchestratorUseCase', () => {
     // 3 (epic) + 3 (one child) = 6, over the 5 ceiling.
     expect(result.haltReason).toBe(HaltReason.BUDGET_EXCEEDED);
     expect(result.spentUsd).toBe(6);
+  });
+
+  it('sets up an isolated epic branch + base tag when the repo is git', async () => {
+    (gitGateway.isRepo as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      epic({ column: Column.DOD_GATE, subState: SubState.READY }),
+    );
+
+    await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+    expect(gitGateway.ensureOnBranch).toHaveBeenCalledWith(PROJECT_PATH, 'aeos/AEOS-1');
+    expect(gitGateway.tagHere).toHaveBeenCalledWith(PROJECT_PATH, 'aeos-base/AEOS-1');
+  });
+
+  it('skips git isolation when the project path is not a repo', async () => {
+    (gitGateway.isRepo as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      epic({ column: Column.DOD_GATE, subState: SubState.READY }),
+    );
+
+    await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+    expect(gitGateway.ensureOnBranch).not.toHaveBeenCalled();
   });
 
   it('refuses to run a paused epic', async () => {

@@ -219,6 +219,7 @@ export function createContainer(): Container {
         configStore,
         this.ticketRun,
         this.ticketApprove,
+        gitGateway,
       );
     },
     get ticketDodApprove() {
