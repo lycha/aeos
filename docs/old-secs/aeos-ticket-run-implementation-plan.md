@@ -32,7 +32,7 @@ This keeps the current `TicketRunResult` return type intact while making progres
 
 **Changes**
 
-- Introduce the event types defined in [AEOS Ticket Run Event Model Proposal](./aeos-ticket-run-event-model-proposal.md).
+- Introduce the event types defined in [AEOS Ticket Run Event Model Proposal](aeos-ticket-run-event-model-proposal.md).
 - Treat the event stream as an application/orchestration contract even if it lives near the driving port for pragmatic reasons.
 - Define terminal lifecycle semantics up front, including `ticket-run.interrupted` on the stream and its compatibility story with the unchanged `TicketRunResult` contract.
 - Define the rule that every `stage.started` must close with exactly one `stage.completed` or `stage.failed` event.
@@ -196,7 +196,7 @@ This keeps the current `TicketRunResult` return type intact while making progres
 
 ## See also
 
-- [AEOS Ticket Run Event Model Proposal](./aeos-ticket-run-event-model-proposal.md)
-- [AEOS Ticket Run Terminal Layout Spec](./aeos-ticket-run-terminal-layout-spec.md)
-- [System Design](./03-system-design.md)
-- [M7-003 Dashboard Task](./tasks/M7-003-aeos-dashboard.md)
+- [AEOS Ticket Run Event Model Proposal](aeos-ticket-run-event-model-proposal.md)
+- [AEOS Ticket Run Terminal Layout Spec](aeos-ticket-run-terminal-layout-spec.md)
+- [System Design](03-system-design.md)
+- [M7-003 Dashboard Task](../tasks/M7-003-aeos-dashboard.md)
