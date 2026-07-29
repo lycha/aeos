@@ -8,8 +8,33 @@ Normative contracts for everything in the artefact tree. Lives at `<artefact-tre
 <artefact-tree>/schemas/
 ├── feature-inventory.schema.json
 ├── decisions.schema.json
-└── assumption-register.schema.json
+├── assumption-register.schema.json
+└── lint_decisions.py            # cross-file invariants a schema can't see
 ```
+
+## The linter
+
+JSON Schema checks one file's shape. `lint_decisions.py` checks what spans files:
+
+```bash
+python schemas/lint_decisions.py features/<feature> \
+  --register assumption-register.yaml \
+  --schemas schemas/
+```
+
+Exit 0 clean, 1 on error. Warnings never fail the build. It runs the JSON Schema
+pass too when `jsonschema` is installed, so it's a single gate. What it catches
+that the schemas cannot:
+
+- A `RECLASSIFIED` question whose `becomes` ID is never actually resolved
+- A `requires_human` conflict left unresolved
+- A blocking/high absence missing from decisions.yaml
+- An `ASSUMED` decision that never reached the register
+- `source_precedence` or a conflict position citing a source not in `meta.sources`
+- A resolution that smells like implementation, not behaviour (warning)
+- `UNMAPPED` glossary terms still open (warning)
+
+Wire it into the artefact-tree pre-commit hook alongside the schema check.
 
 ---
 
@@ -68,7 +93,7 @@ What the schema *cannot* enforce, and stays a skill responsibility:
 - Every `blocking` absence in the inventory appears here
 - No `resolution` describes an implementation
 
-Those need a linter walking both files together. Worth writing once the shape settles.
+These are exactly what `lint_decisions.py` covers.
 
 ---
 
