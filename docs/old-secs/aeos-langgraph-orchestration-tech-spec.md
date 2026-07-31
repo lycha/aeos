@@ -53,7 +53,7 @@ Three structural problems:
 
 ### What already works and must not regress
 
-- **The event model.** `src/domain/model/ticket-run-event.ts` and `TicketRunEventEmitter` implement the design in [the event model proposal](./aeos-ticket-run-event-model-proposal.md): a single run-scoped sequencer assigns monotonic `sequence`, stamps run metadata, and forwards to an optional observer. The doc's `TicketRunPhase` union is *already* an enumeration of orchestration stages — it maps 1:1 onto graph nodes, which is strong evidence the decomposition below is natural rather than imposed.
+- **The event model.** `src/domain/model/ticket-run-event.ts` and `TicketRunEventEmitter` implement the design in [the event model proposal](aeos-ticket-run-event-model-proposal.md): a single run-scoped sequencer assigns monotonic `sequence`, stamps run metadata, and forwards to an optional observer. The doc's `TicketRunPhase` union is *already* an enumeration of orchestration stages — it maps 1:1 onto graph nodes, which is strong evidence the decomposition below is natural rather than imposed.
 - **Streaming.** Executor adapters forward `stdout`/`stderr` chunks live via `onChunk` → emitter → Ink. LangGraph's streaming adds nothing here.
 - **The Ink TUI.** `src/cli/ui/ticket-run-shell-state.ts` (475 lines) consumes the event stream. It must be left untouched by this migration.
 
@@ -366,6 +366,6 @@ A secondary consideration, not decisive: `docs/01-product-brief.md` positions AE
 
 ## See also
 
-- [AEOS Ticket Run Event Model Proposal](./aeos-ticket-run-event-model-proposal.md)
-- [AEOS Ticket Run Implementation Plan](./aeos-ticket-run-implementation-plan.md)
-- [System Design](./03-system-design.md)
+- [AEOS Ticket Run Event Model Proposal](aeos-ticket-run-event-model-proposal.md)
+- [AEOS Ticket Run Implementation Plan](aeos-ticket-run-implementation-plan.md)
+- [System Design](03-system-design.md)

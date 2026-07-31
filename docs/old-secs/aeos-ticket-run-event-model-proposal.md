@@ -196,7 +196,7 @@ Observer delivery should be documented as **in-process, best-effort, and non-dur
 
 ## See also
 
-- [AEOS Ticket Run Terminal Layout Spec](./aeos-ticket-run-terminal-layout-spec.md)
-- [AEOS Ticket Run Implementation Plan](./aeos-ticket-run-implementation-plan.md)
-- [System Design](./03-system-design.md)
-- [M7-003 Dashboard Task](./tasks/M7-003-aeos-dashboard.md)
+- [AEOS Ticket Run Terminal Layout Spec](aeos-ticket-run-terminal-layout-spec.md)
+- [AEOS Ticket Run Implementation Plan](aeos-ticket-run-implementation-plan.md)
+- [System Design](03-system-design.md)
+- [M7-003 Dashboard Task](../tasks/M7-003-aeos-dashboard.md)
