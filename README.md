@@ -508,3 +508,5 @@ npm run smoke-test:opencode # Real OpenCode CLI smoke test (external tool requir
 ## License
 
 ISC
+
+Test
