@@ -1,5 +1,7 @@
 # AEOS — AI-Engineered Operating System
 
+> The thinking behind AEOS is in the [wiki](https://github.com/lycha/aeos/wiki): the [manifesto](https://github.com/lycha/aeos/wiki/AI-Driven-Development-A-Manifesto), the [Twelve Principles](https://github.com/lycha/aeos/wiki/Twelve-Principles-of-AI%E2%80%90Driven-Development) and the [Laws Behind the Principles](https://github.com/lycha/aeos/wiki/Laws-Behind-the-Principles).
+
 An AI-assisted development pipeline that takes a ticket from idea to code review using specialised LLM agents. Each pipeline column has a dedicated agent, a reviewer with rubrics, and a human approval gate. AEOS dogfoods itself — it was built using its own pipeline.
 
 ## Requirements
