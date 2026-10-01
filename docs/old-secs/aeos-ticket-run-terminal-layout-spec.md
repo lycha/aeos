@@ -22,7 +22,7 @@ Specify the live split-pane UI for `aeos ticket run` so users can see both AEOS 
 
 ## Inputs
 
-This UI consumes the event types proposed in [AEOS Ticket Run Event Model Proposal](./aeos-ticket-run-event-model-proposal.md).
+This UI consumes the event types proposed in [AEOS Ticket Run Event Model Proposal](aeos-ticket-run-event-model-proposal.md).
 
 - Left pane: lifecycle, stage, sub-state, artifact, review, and cost events.
 - Right pane: `executor.stdout.chunk` and `executor.stderr.chunk` events.
@@ -212,6 +212,6 @@ Example fallback:
 
 ## See also
 
-- [AEOS Ticket Run Event Model Proposal](./aeos-ticket-run-event-model-proposal.md)
-- [AEOS Ticket Run Implementation Plan](./aeos-ticket-run-implementation-plan.md)
-- [System Design](./03-system-design.md)
+- [AEOS Ticket Run Event Model Proposal](aeos-ticket-run-event-model-proposal.md)
+- [AEOS Ticket Run Implementation Plan](aeos-ticket-run-implementation-plan.md)
+- [System Design](03-system-design.md)

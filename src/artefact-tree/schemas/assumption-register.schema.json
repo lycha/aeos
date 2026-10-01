@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://standin.co/schemas/assumption-register/1",
+  "title": "assumption-register.yaml",
+  "description": "Project-wide, persists across features. Every ASSUMED outcome from any session lands here. Reviewed at the start of every session and every planning cycle.",
+  "type": "object",
+  "required": ["schema_version", "assumptions"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "from", "feature", "registered", "assumption", "revisit_when", "risk", "status"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^ASM-[0-9]+$" },
+          "from": {
+            "type": "string",
+            "pattern": "^(ABS|Q|CON)-[0-9]+$",
+            "description": "The inventory finding this assumption came from"
+          },
+          "feature": { "type": "string" },
+          "registered": { "type": "string", "format": "date" },
+          "assumption": { "type": "string" },
+          "revisit_when": {
+            "type": "string",
+            "minLength": 20,
+            "description": "An observable trigger — a ticket, metric, threshold, log line, or upcoming event. Not 'TBD', not 'if users are unhappy'."
+          },
+          "risk": { "enum": ["low", "medium", "high"] },
+          "status": { "enum": ["open", "fired", "retired"] },
+          "fired_on": { "type": ["string", "null"], "format": "date" },
+          "decided_by": { "enum": ["human", "agent"] },
+          "session_mode": { "enum": ["solo-simulated", "workshop-captured", "paired-live"] }
+        },
+        "allOf": [
+          {
+            "comment": "A fired assumption must record when it fired.",
+            "if": { "properties": { "status": { "const": "fired" } } },
+            "then": {
+              "properties": { "fired_on": { "type": "string", "format": "date" } },
+              "required": ["fired_on"]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
