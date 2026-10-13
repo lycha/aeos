@@ -1,0 +1,43 @@
+// ============================================================================================
+// Merge these into your project's build.gradle. The two applied scripts (jooq-policy.gradle,
+// scripts/verify-schema.gradle) and the generator do the work.
+//
+// Copy into your project:
+//   jooq-policy.gradle
+//   scripts/verify-schema.gradle
+// Put your Flyway migrations in src/main/resources/db/migration, point basePackageName/out in
+// jooq-policy.gradle at your package, then run `./gradlew generateDb`. Generation needs Docker.
+//
+// The compileKotlin gate makes every build regenerate + verify first, so nothing ever compiles
+// against a stale or unverified schema — a CI job that runs `build` enforces the whole thing.
+// ============================================================================================
+
+plugins {
+    id "dev.monosoul.jooq-docker" version "8.0.21"
+    // ... your existing plugins (org.jetbrains.kotlin.jvm, org.springframework.boot, ...)
+}
+
+repositories { mavenCentral() }
+
+apply from: "jooq-policy.gradle"
+apply from: "scripts/verify-schema.gradle"
+
+def policy = project.ext.jooqPolicy
+
+tasks.named("generateJooqClasses") {
+    schemas.set(["public"])
+    basePackageName.set(policy.basePackageName)
+    outputDirectory.set(file(policy.out))
+    includeFlywayTable.set(false)
+}
+tasks.named("verifySchema") { dependsOn("generateJooqClasses") }
+tasks.register("generateDb") { dependsOn("verifySchema") }
+
+// Make the generated jOOQ part of the build, and gate compilation on a passing contract.
+sourceSets.main.java.srcDirs += "${policy.out}"
+tasks.named("compileKotlin") { dependsOn("verifySchema") }
+
+dependencies {
+    jooqCodegen "org.postgresql:postgresql:42.7.3"
+    // implementation "org.jooq:jooq:3.21.2"   // keep the runtime jOOQ in step with pinnedJooqVersion
+}
