@@ -1,0 +1,204 @@
+openapi: 3.0.3
+info:
+  title: Example API
+  description: |
+    A small contract in the Stayposted house style — cookie auth stated once at
+    the document level, tags that become one API interface each, UPPERCASE enums.
+    It exercises the constructs the policy accounts for and nothing it refuses.
+  version: 1.0.0
+
+servers:
+  - url: "http://localhost:8080"
+    description: "Local development server"
+
+# One credential model, stated once. Protected operations inherit it; public ones override with `security: []`.
+security:
+  - CookieAuth: []
+
+tags:
+  - name: Health
+    description: Liveness and readiness.
+  - name: Auth
+    description: Registration and session.
+  - name: Widgets
+    description: The example resource.
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v1/auth/register:
+    post:
+      summary: Register a new user
+      operationId: register
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User registered and session established
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponse"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Weak password — does not meet security requirements
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/widgets:
+    get:
+      summary: List widgets
+      operationId: listWidgets
+      tags: [Widgets]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by lifecycle status.
+          schema:
+            $ref: "#/components/schemas/WidgetStatus"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: The widgets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WidgetList"
+    post:
+      summary: Create a widget
+      operationId: createWidget
+      tags: [Widgets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WidgetInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: sp_session
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+
+    UserProfileResponse:
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+
+    WidgetStatus:
+      type: string
+      enum: [active, archived, draft]
+
+    WidgetInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+
+    Widget:
+      type: object
+      required: [id, name, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/WidgetStatus"
+
+    WidgetList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Widget"
+
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string

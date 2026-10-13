@@ -1,0 +1,7 @@
+# Live generation output — produced by `composer generate`, never hand-edited.
+# The committed reference output lives under examples/generated/ and is NOT ignored.
+/build/
+
+# Composer install artifacts
+/vendor/
+composer.lock
