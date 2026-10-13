@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-07-20
-**Supersedes the decision gate in:** [LangGraph Orchestration Tech Spec](./aeos-langgraph-orchestration-tech-spec.md)
+**Supersedes the decision gate in:** [LangGraph Orchestration Tech Spec](aeos-langgraph-orchestration-tech-spec.md)
 
 ## Summary
 
@@ -256,6 +256,6 @@ What does **not** change: the outer column pipeline stays in SQLite and `StateMa
 
 ## See also
 
-- [LangGraph Orchestration Tech Spec](./aeos-langgraph-orchestration-tech-spec.md)
-- [Ticket Run Event Model Proposal](./aeos-ticket-run-event-model-proposal.md)
-- [System Design](./03-system-design.md)
+- [LangGraph Orchestration Tech Spec](aeos-langgraph-orchestration-tech-spec.md)
+- [Ticket Run Event Model Proposal](aeos-ticket-run-event-model-proposal.md)
+- [System Design](03-system-design.md)

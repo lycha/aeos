@@ -1,0 +1,235 @@
+# feature-inventory.yaml — schema and worked example
+#
+# Every entry carries `evidence` (where in the source it came from) and
+# `confidence` (observed = literally in the source; implied = you reasoned).
+# Implied entries are review targets, not facts.
+#
+# Two kinds of finding, and the difference matters:
+#   absences  — nobody decided. The agent will invent it.
+#   conflicts — somebody decided, twice, incompatibly. Downstream artefacts fork.
+# Conflicts are listed first and resolved first.
+
+meta:
+  feature: string                    # short slug, e.g. shared-standup-notes
+  context: string                    # bounded context this belongs to
+
+  # All sources harvested. More than one source is the normal case.
+  artefact_tree:                     # where this file lives
+    repo: string
+    branch: string
+
+  # Sources live in several trees. A bare commit hash is meaningless without
+  # its repository, so every reference is a triple.
+  sources:
+    - id: SRC-1
+      kind: prd | stories | prototype | codebase | conventions | api-contract
+      repo: string                   # REQUIRED
+      commit: string                 # REQUIRED where the source is in git
+      path: string                   # REQUIRED
+      version_note: string | null    # "rewrite of earlier wrap-set, 2026-07"
+
+  # Which source wins when two disagree. Declared ONCE per project, not per
+  # feature. Without this, every conflict needs a human; with it, most
+  # auto-resolve and only genuine product questions reach the session.
+  source_precedence: [SRC-4, SRC-3, SRC-1, SRC-2]   # highest authority first
+
+  glossary: string | null            # path to glossary.md, or null if absent
+  harvested_at: iso8601
+
+# ---------------------------------------------------------------------------
+# CONFLICTS — listed first, resolved first.
+#
+# A conflict is not an absence. Somebody has already decided, twice,
+# incompatibly. Every downstream artefact — API contract, table names, event
+# names, UI copy, tickets — forks at an unresolved conflict.
+
+conflicts:
+  - id: CON-1
+    topic: string                    # short, human-readable
+    kind: >
+      vocabulary | behaviour | scope | data-shape | state |
+      permission | stale
+    severity: blocking | high | normal
+                                     # blocking = forks downstream artefacts
+                                     # high     = different behaviour, decidable
+                                     # normal   = cosmetic or deferrable
+
+    positions:                       # what each source says — one per source
+      - source: SRC-1
+        says: string
+      - source: SRC-3
+        says: string
+
+    why_it_matters: string           # what forks if this is not resolved
+    evidence: string                 # file:line / selector, per source
+
+    # What source_precedence implies, computed not decided.
+    default_resolution: string | null
+    requires_human: true | false     # false when precedence settles it cleanly
+                                     # true when precedence is silent, contested,
+                                     # or when the winning source looks stale
+
+# ---------------------------------------------------------------------------
+
+screens:
+  - id: SCR-1
+    name: string
+    purpose: string
+    source: SRC-3                    # which source this came from
+    evidence: string
+
+states:
+  - id: SCR-1-S1
+    screen: SCR-1
+    kind: default | empty | loading | error | success | partial | disabled
+    description: string
+    source: SRC-3
+    evidence: string
+    confidence: observed | implied
+
+interactions:
+  - id: INT-1
+    screen: SCR-1
+    control: button | link | form | input | drag | menu | other
+    label: string                    # visible text, verbatim
+    action: string                   # what it appears to do — descriptive
+    destination: SCR-2 | external | unknown
+    enabled_when: string | not-observable
+    source: SRC-3
+    evidence: string
+    confidence: observed | implied
+
+data:
+  - id: DAT-1
+    screen: SCR-1
+    label: string                    # as shown in the UI, verbatim
+    glossary_term: string | UNMAPPED
+    kind: display | input | both
+    format: text | number | date | datetime | currency | count | enum | file | other
+    constraints_visible: [string]
+    sample_values: [string]
+    source: SRC-3
+    evidence: string
+    confidence: observed | implied
+
+transitions:
+  - id: TRN-1
+    from: SCR-1-S1
+    to: SCR-2-S1
+    trigger: INT-1
+    source: SRC-3
+    evidence: string
+    confidence: observed | implied
+
+# ---------------------------------------------------------------------------
+# ABSENCES — see reference/absence-checklist.md.
+# Every checklist category appears here, with findings or an explicit
+# none-found plus reason.
+
+absences:
+  - id: ABS-1
+    category: >
+      empty-state | error-state | loading-state | permission | concurrency |
+      boundary | lifecycle | notification | time | offline | accessibility |
+      role-variation | undo
+    description: string
+    affects: [SCR-1]
+    severity: blocking | high | normal
+
+  - id: ABS-n
+    category: offline
+    description: none-found
+    reason: string
+
+# Things you could not even frame as an absence or a conflict — genuine
+# unknowns about the sources. Resolved in Round 0, before conflicts, because
+# answering one frequently PROMOTES it into a conflict or an absence that then
+# needs working in the same session.
+questions:
+  - id: Q-1
+    question: string
+    context: string                  # why this matters
+    suspected: conflict | absence | fact | unknown
+                                     # your guess at what this becomes once
+                                     # answered. Lets the session pre-sort.
+    researchable: true | false       # can this be settled by reading code or
+                                     # sources, rather than by a human deciding?
+    blocks: [ABS-1, CON-1]           # items that cannot resolve until this does
+
+filler:
+  - id: FIL-1
+    description: string              # "three hardcoded users in the member list"
+    evidence: string
+
+# ---------------------------------------------------------------------------
+# WORKED FRAGMENTS — illustrative only
+# ---------------------------------------------------------------------------
+#
+# meta:
+#   sources:
+#     - id: SRC-1
+#       kind: prd
+#       repo: standin-specs
+#       commit: 9f2c1ab
+#       path: docs/prd-standup-digest.md
+#     - id: SRC-2
+#       kind: stories
+#       path: docs/stories.csv
+#       version_note: rewrite of an earlier "wrap" set
+#     - id: SRC-3
+#       kind: prototype
+#       path: prototype/composer-standalone-src.html
+#       repo: standin-design
+#       commit: abc123def456
+#     - id: SRC-4
+#       kind: conventions
+#       path: CLAUDE.md
+#   source_precedence: [SRC-4, SRC-3, SRC-2, SRC-1]
+#
+# conflicts:
+#   - id: CON-9
+#     topic: Product vocabulary for the core entity
+#     kind: vocabulary
+#     severity: blocking
+#     positions:
+#       - source: SRC-1
+#         says: >
+#           "declaration", "declared", "declare", "Representative" throughout,
+#           including in the definition of the core promise.
+#       - source: SRC-2
+#         says: '"brief" exclusively; row 6 reads "brief drop zone".'
+#       - source: SRC-3
+#         says: >
+#           "brief" in all UI copy; "wrap" in code identifiers
+#           (onWrapDropZone, wrapIngest, wrapDropText, wrapDirect).
+#       - source: SRC-4
+#         says: >
+#           Lists "wrap(s)", "declared state", "declaration", "refusal",
+#           "Representative(s)" as RETIRED — must never appear in copy.
+#     why_it_matters: >
+#       Four vocabularies for one entity, and the PRD is written almost
+#       entirely in the retired set. API contract, table names, event names,
+#       UI copy and tickets all fork here.
+#     evidence: "PRD passim; stories.csv passim; composer-standalone-src.html:213,:553; CLAUDE.md copy rules"
+#     default_resolution: >
+#       SRC-4 has highest precedence and explicitly retires the PRD and
+#       identifier vocabularies. "brief" wins for copy and for new code.
+#     requires_human: true
+#     # ^ true despite a clean precedence answer: resolving this creates
+#     #   refactor debt (lib/wraps/, app/api/wraps/) that needs an owner,
+#     #   and the PRD needs rewriting before it can be used as a spec source.
+#
+# absences:
+#   - id: ABS-4
+#     category: time
+#     description: >
+#       Relative timestamps shown but the reference point is undefined —
+#       viewer local, author local, or team-canonical. Also undefined: the
+#       cutoff after which relative flips to absolute.
+#     affects: [SCR-1]
+#     severity: blocking
+#
+# filler:
+#   - id: FIL-1
+#     description: Four hardcoded teammate entries with placeholder avatars
+#     evidence: "composer-standalone-src.html:.digest-list > .entry"

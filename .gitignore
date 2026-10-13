@@ -15,8 +15,8 @@ coverage/
 /docs/reviews/REVIEW-20260407-M1-012-fs-project-root.md
 /docs/reviews/REVIEW-20260407-M1-013-fs-artifact-path.md
 /docs/reviews/REVIEW-20260407-M1-014-fs-git-commit.md
-/docs/aeos-decisions-artifact-tech-spec.md
-/docs/auggie-cli-docs.md
+/docs/old-secs/aeos-decisions-artifact-tech-spec.md
+/docs/old-secs/auggie-cli-docs.md
 /code-review/REVIEW-20260418-213154-commit-cf33254.md
 /code-review/REVIEW-20260420-104719-aeos-decisions-tech-spec.md
 /.idea/
