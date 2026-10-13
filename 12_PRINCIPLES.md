@@ -4,6 +4,8 @@ The short version of the [AI-Driven Development Manifesto](https://github.com/ly
 
 > Humans write the specification and own the contracts and the release; generators build everything deterministic; agents fill the rest inside guardrails; and work is done when it is rolled out, observed and measured.
 
+For how to *enforce* each principle with real tooling — reference architectures, CI gates and tool comparisons — see [**Tooling for the Twelve Principles**](SUGGESTED_TOOLING.md).
+
 ---
 
 ### I. Discipline is the control
