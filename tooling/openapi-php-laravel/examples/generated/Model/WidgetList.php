@@ -2,7 +2,7 @@
 
 /**
  * Example API
- * A small contract in the Stayposted house style — cookie auth stated once at the document level, tags that become one API interface each, UPPERCASE enums. It exercises the constructs the policy accounts for and nothing it refuses.
+ * A small contract in a conventional house style — cookie auth stated once at the document level, tags that become one API interface each, UPPERCASE enums. It exercises the constructs the policy accounts for and nothing it refuses.
  * PHP version 8.1
  *
  * The version of the OpenAPI document: 1.0.0

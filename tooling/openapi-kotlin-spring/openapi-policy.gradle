@@ -27,12 +27,12 @@ ext.openapiPolicy = [
     // the plugin id alone, without re-verifying the generated diff and updating this pin in the
     // same change, is what fails. A generator's output is an input to everything downstream.
     //
-    // NOTE: stayposted-backend itself pins 6.0.1; this scaffold pins a current 7.x so it runs on
+    // NOTE: some production services still pin 6.0.1; this scaffold pins a current 7.x so it runs on
     // a modern JDK. The pin is the single knob you re-verify on a bump - that is the whole point.
     pinnedGeneratorVersion: "7.26.0",
 
-    // Passed verbatim to the kotlin-spring generator. Mirrors stayposted-backend's server task:
-    // interface-only (you write the @RestController impls), one API interface per tag, UPPERCASE
+    // Passed verbatim to the kotlin-spring generator: interface-only (you write the @RestController
+    // impls), one API interface per tag, UPPERCASE
     // enum constants, doc annotations from the source. See README for the Spring Boot 3 / jakarta
     // knob (`useSpringBoot3: "true"`).
     configOptions: [

@@ -28,7 +28,7 @@ plugins {
 apply from: "openapi-policy.gradle"
 apply from: "scripts/verify-contract.gradle"
 
-// --- (4) the generate task (one per contract; add a second for an admin spec like stayposted does). ---
+// --- (4) the generate task (one per contract; add a second for an admin spec if you have one). ---
 import org.openapitools.generator.gradle.plugin.tasks.GenerateTask
 def policy = project.ext.openapiPolicy
 

@@ -159,12 +159,10 @@ export function myFramework(opts = {}) {
 
 ### Worked reference
 
-StandIn's generator is this pattern taken all the way: its operations emitter is a Next App Router
-adapter with the route-file conformance always on (gated by an `x-implemented` flag), and its
-allow-lists carry app-specific refusals ("a per-operation `security` cannot change what
-`contractRoute` checks"). See `scripts/contracts/generate-api-contracts.mjs` in the StandIn
-repository for the fully-extended form. The Fastify adapter is modelled on
-[`edugo-payments-service`](https://github.com/lycha/edugo-payments-service).
+The fully-extended form of this pattern is a Next App Router adapter with the route-file conformance
+always on (gated by an `x-implemented` flag) and allow-lists that carry app-specific refusals (e.g.
+"a per-operation `security` cannot change what the central route wrapper checks"). The Fastify
+adapter is modelled on [`edugo-payments-service`](https://github.com/lycha/edugo-payments-service).
 
 ## Testing the core
 

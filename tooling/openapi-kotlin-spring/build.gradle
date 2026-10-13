@@ -31,7 +31,7 @@ tasks.register("generateApiServer", GenerateTask) {
     generatorName = "kotlin-spring"
     inputSpec = file(policy.spec)
     outputDir = file(policy.out)
-    // Mirror stayposted-backend: wipe prior output so a renamed/removed operation cannot leave a stale file.
+    // Wipe prior output so a renamed/removed operation cannot leave a stale file.
     doFirst { delete(policy.out) }
     configOptions = policy.configOptions
 }

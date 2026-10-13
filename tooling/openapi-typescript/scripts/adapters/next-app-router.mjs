@@ -2,8 +2,8 @@
 //
 // Maps each OpenAPI path to the route file it must live in:
 //   /payments/{id}  ->  app/payments/[id]/route.ts
-// and (optionally) fails the build if that file does not exist, which is how StandIn catches a
-// handler bound to the wrong operation or a declared endpoint with no handler.
+// and (optionally) fails the build if that file does not exist, which catches a handler bound to
+// the wrong operation or a declared endpoint with no handler.
 //
 // Factory, so it is configurable and therefore extendable:
 //   nextAppRouter()                                   // app/ base, no file-existence check

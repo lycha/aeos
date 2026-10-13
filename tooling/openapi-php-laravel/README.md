@@ -79,7 +79,7 @@ composer generate-api
 
 Run `composer generate-api` in CI before your build/test step, and PSR-4 autoload the generated
 namespace, so nothing ever runs against a stale or unverified contract. Add a second policy + generate
-call for an admin spec, exactly as `stayposted-backend` does with its two generator tasks.
+call for an admin spec if you serve one (one call per contract).
 
 ## Extending it — the policy file
 

@@ -21,7 +21,7 @@ if (!is_file($spec)) {
     exit(1);
 }
 
-// Mirror stayposted-backend: wipe prior output so a renamed/removed operation cannot leave a stale file.
+// Wipe prior output so a renamed/removed operation cannot leave a stale file.
 if (is_dir($out)) {
     $it = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($out, FilesystemIterator::SKIP_DOTS),

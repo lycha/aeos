@@ -7,7 +7,7 @@ models), and fails the build the moment the contract contains a construct the pr
 accounted for.
 
 It is the Gradle/kotlin-spring sibling of [`../openapi-typescript`](../openapi-typescript), and it
-mirrors how a real service — `stayposted-backend` — already does contract-first generation (the
+mirrors how a production Kotlin/Spring service does contract-first generation (the
 `org.openapi.generator` `kotlin-spring` task with `interfaceOnly`, `useTags`, UPPERCASE enums).
 
 Unlike the TypeScript scaffold (a copyable file set), this is a **runnable Gradle project**: the
@@ -82,7 +82,7 @@ plugin, the two `apply from`, the generate task, and the `compileKotlin` gate), 
 The snippet also wires `compileKotlin.dependsOn verifyContract` and adds the generated dir to the
 Kotlin source set, so no workflow ever compiles against a stale or unverified contract — a CI job
 that runs `build` is enough to enforce the whole thing. Add a second generate task for an admin
-spec, exactly as `stayposted-backend` does.
+spec if you serve one (one task per contract).
 
 ## Extending it — the policy file
 
@@ -104,9 +104,9 @@ change. The refusal list is a record of deliberate decisions, not a backlog.
 
 ## Notes on version & Spring Boot 3 (jakarta)
 
-- `stayposted-backend` pins `org.openapi.generator` **6.0.1** on Gradle 7.6. This scaffold pins a
-  current **7.26.0** on Gradle 9.x so it runs on a modern JDK. The version pin is the single knob you
-  re-verify on a bump — which is the whole point of discipline (1).
+- Many existing services still pin `org.openapi.generator` **6.0.1** on Gradle 7.6. This scaffold
+  pins a current **7.26.0** on Gradle 9.x so it runs on a modern JDK. The version pin is the single
+  knob you re-verify on a bump — which is the whole point of discipline (1).
 - The generated models here import `javax.validation.*` (the generator default, matching the 6.0.1
   era). For a Spring Boot 3 service you want `jakarta.*`: add `useSpringBoot3: "true"` to
   `configOptions` and regenerate. The reference output would change accordingly.
