@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AEOS — AI-Driven Development Manifesto</title>
+<meta name="description" content="A stand on how AI changes the way we build software: constrain the output, not the reasoning. The AI-Driven Development manifesto, its twelve principles, and the laws behind them.">
+<meta property="og:title" content="AEOS — AI-Driven Development Manifesto">
+<meta property="og:description" content="Constrain the output, not the reasoning. Humans write the specification; generators build everything deterministic; agents fill the rest inside guardrails.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://aeosdev.com">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0b08;
+    --bg-soft: #16130d;
+    --card: #1b1711;
+    --border: #2d271c;
+    --text: #efe7d8;
+    --muted: #a99f8d;
+    --sun: #ff9e2c;
+    --sun-deep: #ff7a00;
+    --sun-glow: rgba(255, 140, 0, 0.18);
+    --maxw: 1080px;
+    --serif: "Fraunces", Georgia, serif;
+    --sans: "Inter", system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--sun); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 16px; }
+
+  /* Nav */
+  header.nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(13, 11, 8, 0.82);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { font-family: var(--serif); font-weight: 600; font-size: 1.15rem; letter-spacing: .02em; color: var(--text); }
+  .nav nav a { color: var(--muted); font-size: .92rem; margin-left: 1.4rem; }
+  .nav nav a:hover { color: var(--sun); text-decoration: none; }
+  @media (max-width: 560px) { .nav nav a:not(.gh) { display: none; } }
+
+  /* Hero */
+  .hero { position: relative; overflow: hidden; text-align: center; padding: 5rem 0 4rem; }
+  .hero::before {
+    content: ""; position: absolute; left: 50%; top: -120px; transform: translateX(-50%);
+    width: 760px; height: 760px; max-width: 120vw;
+    background: radial-gradient(circle, var(--sun-glow), transparent 62%);
+    pointer-events: none;
+  }
+  .hero .wrap { position: relative; }
+  .hero h1 { font-size: clamp(3rem, 12vw, 5.5rem); margin: 0; line-height: 1; letter-spacing: .04em; }
+  .hero .tagline { font-family: var(--serif); font-size: clamp(1.1rem, 3.3vw, 1.5rem); color: var(--sun); margin: 1.2rem 0 1.6rem; font-weight: 500; }
+  .stand { max-width: 760px; margin: 0 auto; font-family: var(--serif); font-size: clamp(1.15rem, 2.6vw, 1.5rem); line-height: 1.55; color: var(--text); }
+  .stand .slogan { color: var(--sun); font-style: italic; white-space: nowrap; }
+  .cta { margin-top: 2.2rem; display: flex; gap: .9rem; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: .7rem 1.4rem; border-radius: 999px; font-weight: 600; font-size: .95rem; }
+  .btn-primary { background: linear-gradient(180deg, var(--sun), var(--sun-deep)); color: #1a1205; }
+  .btn-primary:hover { text-decoration: none; filter: brightness(1.07); }
+  .btn-ghost { border: 1px solid var(--border); color: var(--text); }
+  .btn-ghost:hover { text-decoration: none; border-color: var(--sun); color: var(--sun); }
+
+  /* Sections */
+  section { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .section-head { max-width: 760px; }
+  h2 { font-family: var(--serif); font-size: clamp(1.7rem, 5vw, 2.4rem); margin: 0 0 .4rem; font-weight: 600; }
+  .eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: .78rem; color: var(--sun); font-weight: 600; margin: 0 0 .8rem; }
+  .lead { color: var(--muted); font-size: 1.05rem; }
+  section.about p { max-width: 760px; font-size: 1.1rem; }
+  section.about .origin { font-family: var(--serif); font-size: clamp(1.2rem, 3vw, 1.6rem); line-height: 1.5; color: var(--text); }
+  em.key { color: var(--sun); font-style: italic; }
+
+  /* Principles grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: 2rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.4rem 1.4rem 1.5rem; display: flex; flex-direction: column;
+    transition: border-color .15s, transform .15s;
+  }
+  a.card:hover { text-decoration: none; border-color: var(--sun); transform: translateY(-2px); }
+  .num { font-family: var(--serif); font-size: 1.3rem; color: var(--sun); font-weight: 600; }
+  .card h3 { font-family: var(--serif); font-size: 1.22rem; margin: .3rem 0 .6rem; color: var(--text); line-height: 1.25; }
+  .card p { margin: 0; color: var(--muted); font-size: .96rem; line-height: 1.6; }
+  a.card .more { margin-top: 1rem; color: var(--sun); font-size: .85rem; font-weight: 600; }
+
+  /* Documents */
+  .docs { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-top: 2rem; }
+  a.doc { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 14px; padding: 1.3rem; display: block; transition: border-color .15s; }
+  a.doc:hover { text-decoration: none; border-color: var(--sun); }
+  a.doc strong { display: block; font-family: var(--serif); font-size: 1.1rem; color: var(--text); margin-bottom: .4rem; }
+  a.doc span { color: var(--muted); font-size: .92rem; }
+
+  /* Implementation */
+  .impl { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 14px; padding: 1.8rem; margin-top: 1.5rem; }
+  .wip { display: inline-block; background: var(--sun-glow); color: var(--sun); border-radius: 999px; padding: .2rem .8rem; font-size: .78rem; font-weight: 600; letter-spacing: .04em; margin-bottom: .9rem; }
+  .impl p { margin: 0; color: var(--muted); max-width: 760px; }
+
+  /* Footer */
+  footer { border-top: 1px solid var(--border); padding: 3rem 0; color: var(--muted); font-size: .92rem; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; align-items: center; }
+  footer .note { max-width: 520px; font-style: italic; font-family: var(--serif); }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <span class="brand">☀️🐎 AEOS</span>
+    <nav>
+      <a href="#principles">Principles</a>
+      <a href="#documents">Documents</a>
+      <a class="gh" href="https://github.com/lycha/aeos">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <h1>☀️🐎 AEOS</h1>
+    <p class="tagline">AI-Driven Development — a manifesto, its principles, and the laws behind them</p>
+    <p class="stand">
+      A stand on how AI changes the way we build software:
+      <span class="slogan">constrain the output, not the reasoning.</span>
+      Humans write the specification and own the contracts and the release; generators build everything
+      deterministic; agents fill the rest inside guardrails; and work is done when it is rolled out,
+      observed and measured.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/lycha/aeos/blob/main/AI_MANIFESTO.md">Read the manifesto</a>
+      <a class="btn btn-ghost" href="#principles">The twelve principles</a>
+    </div>
+  </div>
+</section>
+
+<section class="about">
+  <div class="wrap">
+    <p class="eyebrow">An argument, not a tool</p>
+    <p class="origin">
+      In Greek myth, <strong>Aeos</strong> (Ἠώς) is one of the four horses that pull Helios' Sun Chariot
+      across the sky — pure power, held on a fixed course by its driver. That is the stance of this project:
+      <em class="key">the human holds the reins; the agents do the pulling.</em>
+    </p>
+    <p>
+      AEOS began as an argument, not a tool. Its premise is that <strong>AI makes the engineering discipline of
+      the last forty years <em>more</em> valuable, not less</strong>. Domain-driven design, explicit contracts,
+      tests, feature flags and continuous delivery are exactly the controls that keep agent output correct — so
+      the right response to capable agents is to double down on discipline and treat every agent like a capable
+      engineer on their first day, <em>every day</em>: it remembers nothing between runs and sees only what has
+      been written down, so you write everything down.
+    </p>
+  </div>
+</section>
+
+<section id="principles">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">The Twelve Principles</p>
+      <h2>The manifesto, distilled</h2>
+      <p class="lead">Each principle links to its enforcement tooling — a reference architecture, CI gates and
+      tool comparisons for turning it into a control a machine checks.</p>
+    </div>
+    <div class="grid">
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-01-discipline-is-the-control.md">
+        <span class="num">I</span>
+        <h3>Discipline is the control</h3>
+        <p>AI makes the engineering discipline of the last forty years more valuable. Domain-driven design, explicit contracts, tests, feature flags and continuous delivery are the controls that keep agent output correct.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-02-agents-are-first-day-engineers.md">
+        <span class="num">II</span>
+        <h3>Agents are first-day engineers, every day</h3>
+        <p>An agent gets real trust and autonomy inside explicit guardrails. It remembers nothing from yesterday and sees only what has been written down, so the team writes down everything it needs.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-03-humans-write-the-specification.md">
+        <span class="num">III</span>
+        <h3>Humans write the specification</h3>
+        <p>Gherkin scenarios, EARS requirements, actors, UML and ERD diagrams, the OpenAPI contract and the domain invariants are the most important engineering artefacts. A human drafts them and an agent reviews the draft, and an agent drafts only from decisions already in the decision log.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-04-generators-build-the-scaffold.md">
+        <span class="num">IV</span>
+        <h3>Generators build the scaffold, agents write the logic</h3>
+        <p>Everything derivable from the specification is generated deterministically: types and interfaces from the OpenAPI contract, repository code from a human-owned schema, and the end-to-end suite from Gherkin scenarios. Invariants are enforced by constraints and property tests, and agents fill in the business logic.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-05-every-decision-is-traceable.md">
+        <span class="num">V</span>
+        <h3>Every decision is traceable</h3>
+        <p>Decision logs, specifications and the agents' own reasoning are committed next to the code, and every artefact links to the decision behind it. A gap found late amends the decision log or the spec first, and a missing decision stops the work.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-06-checks-first-review-agents-second.md">
+        <span class="num">VI</span>
+        <h3>Checks run first, review agents second</h3>
+        <p>Every reviewer on the panel (engineering, product, invariants, architecture and security) runs deterministic checks before a review agent covers what rules cannot express. When an agent keeps catching the same problem, that finding becomes a rule.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-07-humans-hold-three-gates.md">
+        <span class="num">VII</span>
+        <h3>Humans hold three gates</h3>
+        <p>The specification, any change to the API contract or database schema, and the release always have a human. Above that floor, engineering leadership decides where humans sign off, and a gate earns autonomy from evaluation data and loses it with an escaped defect.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-08-deploy-continuously-release-deliberately.md">
+        <span class="num">VIII</span>
+        <h3>Deploy continuously, release deliberately</h3>
+        <p>Deployment runs automatically behind feature flags, automated rollback and detailed monitoring. Release is a human decision, and work is done when it is released, observed and measured against its success metric.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-09-ceremony-scales-with-the-change.md">
+        <span class="num">IX</span>
+        <h3>Ceremony scales with the change</h3>
+        <p>The full pipeline is for changes people would otherwise argue about later, while a wording fix, a behaviour tweak or a bug starts further down. Every track still goes through a pull request with green checks, and contract and schema changes always get an engineer review.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-10-engineer-owns-the-blueprint.md">
+        <span class="num">X</span>
+        <h3>The engineer owns the blueprint</h3>
+        <p>The Product Engineering Architect is an engineer accountable for the specification, the contracts, the invariants and the data model, and agents build to them. The Product Manager owns the strategy, the problem and the priority, and the two meet at the specification.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-11-junior-engineers-grown-on-purpose.md">
+        <span class="num">XI</span>
+        <h3>Junior engineers are grown on purpose</h3>
+        <p>Juniors write part of their code by hand, start with small specifications and failing tests, and review agent output alongside a senior. Teaching is part of a senior's job, because this model depends on a steady supply of seniors.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+      <a class="card" href="https://github.com/lycha/aeos/blob/main/tooling/principles/PRINCIPLE-12-system-learns-from-measurement.md">
+        <span class="num">XII</span>
+        <h3>The system learns from measurement</h3>
+        <p>Delivery is judged on the DORA metrics, with lead time measured to deployment and to release, alongside spec amendments, time waiting at human gates, the panel's override rate and model spend per released change. Agents do not learn between runs, so the evaluations tune the system.</p>
+        <span class="more">Enforcement tooling →</span>
+      </a>
+
+    </div>
+  </div>
+</section>
+
+<section id="documents">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">The Documents</p>
+      <h2>Read the argument in full</h2>
+    </div>
+    <div class="docs">
+      <a class="doc" href="https://github.com/lycha/aeos/blob/main/AI_MANIFESTO.md">
+        <strong>The Manifesto</strong>
+        <span>The full argument for how agents and the modern SDLC fit together, and the belief AEOS is built to enforce.</span>
+      </a>
+      <a class="doc" href="https://github.com/lycha/aeos/blob/main/12_PRINCIPLES.md">
+        <strong>The Twelve Principles</strong>
+        <span>The manifesto distilled into twelve enforceable principles.</span>
+      </a>
+      <a class="doc" href="https://github.com/lycha/aeos/blob/main/LAWS_BEHIND.md">
+        <strong>Laws Behind the Principles</strong>
+        <span>The engineering laws — Conway's, Chesterton's Fence, Amdahl's — each principle rests on.</span>
+      </a>
+      <a class="doc" href="https://github.com/lycha/aeos/blob/main/SUGGESTED_TOOLING.md">
+        <strong>Suggested Tooling</strong>
+        <span>One document per principle on how to enforce it — reference architectures, CI gates and tool comparisons.</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">The Implementation</p>
+      <h2>AEOS, put to work</h2>
+    </div>
+    <div class="impl">
+      <span class="wip">🚧 Under active development</span>
+      <p>
+        <a href="https://github.com/lycha/aeos/tree/main/aeos-core"><strong>aeos-core</strong></a> is the reference
+        implementation of these principles: <strong>AEOS</strong>, the <em>Agentic Engineering Operating System</em>
+        — a CLI that drives a ticket from idea to reviewed code through LLM-agent pipelines, where every stage has a
+        worker agent, a reviewer agent with machine-readable rubrics, and a human approval gate, and the orchestrator
+        that decides what runs next is a deterministic function that never merges a PR and never clears the final
+        human gate.
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="note">The manifesto is a position, not scripture — challenges, counter-examples and refinements are welcome.</p>
+    <div>
+      Apache License 2.0 · <a href="https://github.com/lycha">@lycha</a> · <a href="https://github.com/lycha/aeos">github.com/lycha/aeos</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
