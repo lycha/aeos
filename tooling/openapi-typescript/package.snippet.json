@@ -1,7 +1,8 @@
 {
-  "_comment": "Merge these into your project's package.json. The pre* hooks make every workflow regenerate first, so nothing ever runs against a stale contract. Adjust the dev/build/test hooks to your framework.",
+  "_comment": "Merge these into your project's package.json. `generate-api-types` is the full pipeline (types + validators + conformance + operations registry); `generate-operations` regenerates just the registry against already-generated types, for fast iteration on the registry or an adapter. The pre* hooks run the full pipeline so nothing ever runs against a stale contract. Adjust the dev/build/test hooks to your framework.",
   "scripts": {
     "generate-api-types": "node scripts/generate-openapi-types.mjs",
+    "generate-operations": "node scripts/generate-operations.mjs",
     "predev": "npm run generate-api-types",
     "prebuild": "npm run generate-api-types",
     "pretest": "npm run generate-api-types",

@@ -14,6 +14,10 @@
 //                   so the next reader knows "why not, and what would it take".
 //   - neither     - a key named in neither list fails the build with the generic message.
 
+import { operationsEmitter } from "./emit-operations.mjs";
+import { nextAppRouter } from "./adapters/next-app-router.mjs";
+// import { fastify } from "./adapters/fastify.mjs";
+
 /** Where the contract is, and where generated code goes. Paths are repo-relative. */
 export const spec = "openapi.yaml";
 export const out = "generated/api";
@@ -150,10 +154,27 @@ export const checks = [
   noCookieParameters,
 ];
 
-/**
- * Optional project-specific emitter, run after hey-api and after the conformance pass both pass.
- * Receives { doc, outDir, operations } where `operations` is [{ method, path, operationId, operation }].
- * Use it to emit, for example, a typed route registry. Return nothing; throw to fail the build.
- * Left undefined by default.
- */
-export const afterGenerate = undefined;
+// --------------------------------------------------------------------------------------------
+// Operations registry (optional). Emits `<out>/operations.gen.ts` - one typed OperationDefinition
+// per operationId, binding the generated Zod validators to each operation's method, path, declared
+// statuses and content types. The registry itself is framework-agnostic; an ADAPTER adds the
+// framework-specific bits and is the extension point for other stacks.
+//
+// Bundled adapters:
+//   nextAppRouter  - adds a `routeFile` per path (app/payments/[id]/route.ts) and can enforce it.
+//   fastify        - adds a `fastifyPath` and emits the operationId union + 501 stub handlers
+//                    that fastify-openapi-glue needs.
+// Write your own by exporting { name, fields?, typeFields?, emit?, check? } - see scripts/adapters/.
+// --------------------------------------------------------------------------------------------
+
+export const afterGenerate = operationsEmitter({
+  adapter: nextAppRouter(),
+  // Enforce that each operation's route file exists (pair with an x-implemented flag for stubs):
+  // adapter: nextAppRouter({ enforceRouteFiles: true, isImplemented: (op) => op.operation["x-implemented"] === true }),
+});
+
+// Fastify (fastify-openapi-glue) instead:
+// export const afterGenerate = operationsEmitter({ adapter: fastify() });
+
+// Routing-agnostic (just the portable registry, no framework fields):
+// export const afterGenerate = operationsEmitter();

@@ -168,16 +168,19 @@ export function walkSpec(doc, policy) {
         kind: "operation",
       });
 
-      for (const p of [...sharedParams, ...(operation.parameters ?? [])]) {
+      // Resolved + merged parameters, kept on the op so emitters and adapters do not re-resolve.
+      const parameters = [...sharedParams, ...(operation.parameters ?? [])].map((p) => {
         checkRefSiblings(p, id ?? `${method} ${path}`, "parameter");
-        allowOnly(resolve(p), {
+        const resolved = resolve(p);
+        allowOnly(resolved, {
           allowed: toSet(policy.allow.parameter, "parameter"),
           refusals: refuse.parameter,
           allowExtensions,
           subject: `${id ?? `${method} ${path}`} parameter`,
           kind: "parameter",
         });
-      }
+        return resolved;
+      });
 
       for (const [code, response] of Object.entries(operation.responses ?? {})) {
         checkRefSiblings(response, `${id} ${code}`, "response");
@@ -190,9 +193,11 @@ export function walkSpec(doc, policy) {
         });
       }
 
+      let requestBody;
       if (operation.requestBody !== undefined) {
         checkRefSiblings(operation.requestBody, id, "requestBody");
-        allowOnly(resolve(operation.requestBody), {
+        requestBody = resolve(operation.requestBody);
+        allowOnly(requestBody, {
           allowed: toSet(policy.allow.requestBody, "requestBody"),
           refusals: refuse.requestBody,
           allowExtensions,
@@ -201,7 +206,7 @@ export function walkSpec(doc, policy) {
         });
       }
 
-      const op = { method, path, operationId: id, operation };
+      const op = { method, path, operationId: id, operation, parameters, requestBody };
       // Policy checks are ordinary project functions that throw a plain Error; present their
       // message the same way as an allow-list break rather than as a Node stack trace.
       for (const check of policy.checks ?? []) {
@@ -220,12 +225,41 @@ export function walkSpec(doc, policy) {
   return operations;
 }
 
-async function loadPolicy() {
+export async function loadPolicy() {
   const path = process.env.OPENAPI_POLICY
     ? resolve(process.env.OPENAPI_POLICY)
     : join(HERE, "openapi.policy.mjs");
   if (!existsSync(path)) fail(`policy not found at ${path}. Copy openapi.policy.mjs beside this script and edit it.`);
   return import(pathToFileURL(path).href);
+}
+
+/**
+ * The conformance pass + afterGenerate (the operations registry). Shared by the full pipeline and
+ * by `generate-operations.mjs`, which runs just this against already-generated types. Requires
+ * zod.gen.ts to exist, so the operations registry has validators to bind to.
+ */
+export async function runOperations(doc, policy, { afterGenerate } = {}) {
+  const operations = walkSpec(doc, policy);
+  // An explicit override (e.g. `generate-operations --adapter fastify`) replaces the policy's hook.
+  const hook = afterGenerate ?? policy.afterGenerate;
+  if (typeof hook === "function") {
+    const zodPath = join(policy.out, "zod.gen.ts");
+    if (!existsSync(zodPath)) {
+      fail(`${zodPath} not found. The operations registry binds to the generated validators - run \`npm run generate-api-types\` first.`);
+    }
+    // The names zod.gen.ts actually exports, so an emitter can bind validators by name and verify
+    // the hey-api naming convention rather than trusting it.
+    const zodExports = new Set([...readFileSync(zodPath, "utf8").matchAll(/^export const (\w+)/gm)].map((m) => m[1]));
+    // afterGenerate (emitter + adapter) throws plain Errors; present them like a conformance
+    // failure rather than as a Node stack trace.
+    try {
+      await hook({ doc, outDir: policy.out, operations, zodExports, repoRoot: process.cwd() });
+    } catch (e) {
+      if (e instanceof ConformanceError) throw e;
+      fail(e instanceof Error ? e.message : String(e));
+    }
+  }
+  return operations;
 }
 
 async function main() {
@@ -261,13 +295,9 @@ async function main() {
   const empty = expected.filter((f) => statSync(join(OUT, f)).size === 0);
   if (empty.length) fail(`${empty.join(", ")} generated but empty.`);
 
-  // 4. Conformance: nothing in the contract is unaccounted for.
+  // 4. Conformance + operations registry (nothing in the contract is unaccounted for).
   const doc = parse(readFileSync(SPEC, "utf8"));
-  const operations = walkSpec(doc, policy);
-
-  if (typeof policy.afterGenerate === "function") {
-    await policy.afterGenerate({ doc, outDir: OUT, operations });
-  }
+  const operations = await runOperations(doc, policy);
 
   console.log(`generate-openapi-types: ${OUT}/ is current - ${operations.length} operations, ${expected.length} files.`);
 }
