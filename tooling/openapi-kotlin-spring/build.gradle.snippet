@@ -1,0 +1,47 @@
+// ============================================================================================
+// Merge these into your project's build.gradle. This is the wiring; the two applied scripts
+// (openapi-policy.gradle, scripts/verify-contract.gradle) and the generator do the work.
+//
+// Copy into your project:
+//   openapi-policy.gradle
+//   scripts/verify-contract.gradle
+// Then merge the blocks below, point `spec` in openapi-policy.gradle at your contract, and run:
+//   ./gradlew generateApi
+//
+// The pre-compile wiring makes every build regenerate + verify first, so nothing ever compiles
+// against a stale contract — a CI job that runs `build` (or `compileKotlin`) enforces the whole thing.
+// ============================================================================================
+
+// --- (1) buildscript classpath: snakeyaml for the conformance walk. Must precede `plugins {}`. ---
+buildscript {
+    repositories { mavenCentral() }
+    dependencies { classpath "org.yaml:snakeyaml:2.2" }
+}
+
+// --- (2) the generator plugin. Keep in step with pinnedGeneratorVersion in openapi-policy.gradle. ---
+plugins {
+    id "org.openapi.generator" version "7.26.0"
+    // ... your existing plugins (org.jetbrains.kotlin.jvm, org.springframework.boot, ...)
+}
+
+// --- (3) apply the policy and the reusable verifier. ---
+apply from: "openapi-policy.gradle"
+apply from: "scripts/verify-contract.gradle"
+
+// --- (4) the generate task (one per contract; add a second for an admin spec like stayposted does). ---
+import org.openapitools.generator.gradle.plugin.tasks.GenerateTask
+def policy = project.ext.openapiPolicy
+
+tasks.register("generateApiServer", GenerateTask) {
+    generatorName = "kotlin-spring"
+    inputSpec = file(policy.spec)
+    outputDir = file(policy.out)
+    doFirst { delete(policy.out) }
+    configOptions = policy.configOptions
+}
+tasks.named("verifyContract") { dependsOn("generateApiServer") }
+tasks.register("generateApi") { dependsOn("verifyContract") }
+
+// --- (5) make the generated sources part of the build, and gate compilation on a passing contract. ---
+sourceSets.main.kotlin.srcDirs += "${policy.out}/src/main/kotlin"
+tasks.named("compileKotlin") { dependsOn("verifyContract") }

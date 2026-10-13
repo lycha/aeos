@@ -1,0 +1,47 @@
+// Standalone, runnable scaffold for contract-first Kotlin/Spring generation with Principle IV
+// enforcement. In a real project you merge the pieces from build.gradle.snippet into your own
+// build; here they stand alone so `./gradlew verifyContract` runs end to end.
+//
+// Pipeline:  generateApiServer  ->  verifyContract
+//   generateApiServer   emits interface-only Kotlin APIs + models from the contract (kotlin-spring).
+//   verifyContract      pins the emitter, proves generation happened, and fails on any OpenAPI
+//                       construct the policy has not accounted for. See scripts/verify-contract.gradle.
+
+// snakeyaml for the conformance walk in verify-contract.gradle. Must precede `plugins {}`.
+buildscript {
+    repositories { mavenCentral() }
+    dependencies { classpath "org.yaml:snakeyaml:2.2" }
+}
+
+plugins {
+    // Keep this version in step with `pinnedGeneratorVersion` in openapi-policy.gradle.
+    id "org.openapi.generator" version "7.26.0"
+}
+
+apply from: "openapi-policy.gradle"
+apply from: "scripts/verify-contract.gradle"
+
+import org.openapitools.generator.gradle.plugin.tasks.GenerateTask
+
+def policy = project.ext.openapiPolicy
+
+tasks.register("generateApiServer", GenerateTask) {
+    group = "openapi"
+    description = "Generate interface-only Kotlin/Spring APIs and models from the contract."
+    generatorName = "kotlin-spring"
+    inputSpec = file(policy.spec)
+    outputDir = file(policy.out)
+    // Mirror stayposted-backend: wipe prior output so a renamed/removed operation cannot leave a stale file.
+    doFirst { delete(policy.out) }
+    configOptions = policy.configOptions
+}
+
+// Verification always follows generation, and never runs against stale output.
+tasks.named("verifyContract") { dependsOn("generateApiServer") }
+
+// Convenience aggregate: regenerate and verify in one call.
+tasks.register("generateApi") {
+    group = "openapi"
+    description = "generateApiServer + verifyContract."
+    dependsOn("verifyContract")
+}

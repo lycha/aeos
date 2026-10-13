@@ -1,0 +1,139 @@
+// OpenAPI -> Kotlin/Spring generation policy.
+//
+// THIS IS THE FILE YOU EDIT. The verifier (scripts/verify-contract.gradle) is the reusable
+// core and should not need changing; this file is where a project says what it serves.
+//
+// It encodes Principle IV ("Generators build the scaffold, agents write the logic") and the
+// enforcement rule that makes it real: an OpenAPI construct the project has not accounted for
+// BREAKS THE BUILD, it is never silently ignored. A green build for a construct nothing serves
+// ships the endpoint anyway and hides the gap, which is worse than a red one.
+//
+// Every key in `allow`/`refuse` below is one of three things, recorded here rather than inferred:
+//   - allowed  - the generator/your code honours it, or it is purely documentary (safe).
+//   - refused  - your runtime cannot serve it; the reason names the CONSTRAINT, not the key.
+//   - neither  - a key named in neither list fails the build with the generic message.
+
+ext.openapiPolicy = [
+
+    // Where the contract is, and where generated code goes. Paths are project-relative.
+    spec: "examples/openapi.yaml",
+    out : "build/generated",
+
+    // The org.openapi.generator version this policy was verified against.
+    //
+    // It must equal the version of the `org.openapi.generator` plugin applied in build.gradle.
+    // The verifier reads the version the generator actually stamped into
+    // build/generated/.openapi-generator/VERSION and refuses to pass if it differs - so bumping
+    // the plugin id alone, without re-verifying the generated diff and updating this pin in the
+    // same change, is what fails. A generator's output is an input to everything downstream.
+    //
+    // NOTE: stayposted-backend itself pins 6.0.1; this scaffold pins a current 7.x so it runs on
+    // a modern JDK. The pin is the single knob you re-verify on a bump - that is the whole point.
+    pinnedGeneratorVersion: "7.26.0",
+
+    // Passed verbatim to the kotlin-spring generator. Mirrors stayposted-backend's server task:
+    // interface-only (you write the @RestController impls), one API interface per tag, UPPERCASE
+    // enum constants, doc annotations from the source. See README for the Spring Boot 3 / jakarta
+    // knob (`useSpringBoot3: "true"`).
+    configOptions: [
+        basePackage          : "io.example.api",
+        apiPackage           : "io.example.api",
+        modelPackage         : "io.example.api.model",
+        gradleBuildFile      : "false",
+        interfaceOnly        : "true",
+        useTags              : "true",
+        enumPropertyNaming   : "UPPERCASE",
+        documentationProvider: "source",
+    ],
+
+    // Keys permitted on each object type. A key here is allowed; anything else is refused (if it
+    // appears in `refuse`) or breaks the build with the generic message. `x-*` extensions are
+    // allowed everywhere (documentary); set allowExtensions:false to force each through the lists.
+    allowExtensions: true,
+    allow: [
+        document   : ["openapi", "info", "servers", "security", "tags", "paths", "components", "externalDocs"],
+        pathItem   : ["get", "put", "post", "delete", "patch", "options", "head", "trace", "parameters", "summary", "description", "servers"],
+        operation  : ["operationId", "parameters", "requestBody", "responses", "summary", "description", "tags", "externalDocs", "deprecated", "security"],
+        response   : ["description", "content"],
+        requestBody: ["content", "required", "description"],
+        parameter  : ["name", "in", "required", "schema", "description", "deprecated", "example", "examples"],
+    ],
+
+    // Keys you have met and decided your runtime cannot serve. The value is the reason, phrased as
+    // the constraint. Move a key to `allow` (or delete the matching check) once you model it.
+    refuse: [
+        document: [
+            webhooks:
+                "A root `webhooks:` block (OpenAPI 3.1) declares operations the CLIENT serves. The " +
+                "kotlin-spring server generator emits nothing that dispatches them, so they would be a " +
+                "contract promise no handler keeps. Model webhook handling and allow it, or remove the block.",
+        ],
+        pathItem: [
+            '$ref':
+                "A \$ref'd path item hides its operations behind indirection the generator does not follow " +
+                "into generated interfaces. Inline the path item so every operation is visible.",
+        ],
+        operation: [
+            callbacks:
+                "A `callbacks` object describes a request the SERVER later makes to the client. The server " +
+                "generator does not emit or dispatch those, so the document would describe traffic that does not exist.",
+        ],
+        response: [
+            headers:
+                "A declared response header is not surfaced as a typed output on the generated interface " +
+                "(handlers return a body + status). It can only be honoured by hand in the @RestController, so a " +
+                "generated client would wait for a header the signature never promises. Set it in your impl and allow this, or drop it.",
+            links:
+                "A `links` object tells a client how to build a follow-up call from this response. Nothing " +
+                "generates or verifies them here, so they are a promise the code does not keep.",
+        ],
+        requestBody: [:],
+        parameter: [
+            content:
+                "A parameter with `content:` (a serialised media type in the parameter) is not bound as a plain " +
+                "typed value by the generator. Use `schema:`.",
+        ],
+    ],
+
+    // Value-level checks the shape lists cannot catch. Each is a closure taking one operation map
+    // [method, path, operationId, operation] and throwing (with a clear message) to fail the build.
+    // Edit, remove, or add your own.
+    checks: [
+
+        // The generated Kotlin method name is derived from operationId, so it must be a usable identifier.
+        { op ->
+            def id = op.operationId
+            if (!id) {
+                throw new RuntimeException("${op.method} ${op.path} has no operationId. The generated interface method is named from it.")
+            }
+            if (!(id ==~ /^[A-Za-z_][A-Za-z0-9_]*$/)) {
+                throw new RuntimeException("${op.method} ${op.path} has operationId \"${id}\", which is not a usable Kotlin identifier. Use a camelCase verb-noun.")
+            }
+        },
+
+        // useTags:true puts each operation on the API interface named by its tag; an untagged operation
+        // lands on a catch-all `DefaultApi`, which is never what a tagged contract intends.
+        { op ->
+            def tags = op.operation.tags
+            if (!tags || tags.isEmpty()) {
+                throw new RuntimeException("${op.operationId} declares no tag. With useTags:true each operation becomes a method on the API interface named by its tag; an untagged operation is dumped onto DefaultApi. Give it exactly one tag.")
+            }
+        },
+
+        // Every operation returns something: at least one 2xx response.
+        { op ->
+            def codes = (op.operation.responses ?: [:]).keySet()*.toString()
+            if (!codes.any { it ==~ /^2\d\d$/ }) {
+                throw new RuntimeException("${op.operationId} declares no 2xx response. Every operation returns something.")
+            }
+        },
+
+        // 1xx/3xx responses get no generated body schema here; refuse them unless you model them.
+        { op ->
+            def bad = (op.operation.responses ?: [:]).keySet()*.toString().findAll { it ==~ /^[13]\d\d$/ }
+            if (bad) {
+                throw new RuntimeException("${op.operationId} declares ${bad.join(', ')}. Informational/redirect statuses get no generated schema here; model a null-body/redirect path and remove this check, or drop them.")
+            }
+        },
+    ],
+]

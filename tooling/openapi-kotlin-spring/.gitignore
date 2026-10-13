@@ -1,0 +1,10 @@
+# Live generation output + Gradle state — produced by `./gradlew generateApi`, never hand-edited.
+# The committed reference output lives under examples/generated/ and is NOT ignored.
+/build/
+/.gradle/
+
+# Gradle wrapper logs / local
+*.log
+
+# Stray openapi-generator-CLI version file (this scaffold uses the Gradle plugin, not the CLI).
+openapitools.json

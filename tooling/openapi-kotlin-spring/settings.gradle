@@ -1,0 +1,3 @@
+// Standalone, runnable scaffold. In a real project you would not have this file —
+// you apply the pieces from build.gradle.snippet into your existing build instead.
+rootProject.name = "openapi-kotlin-spring-scaffold"

@@ -1,0 +1,145 @@
+// Contract verifier — the REUSABLE CORE. It should not need editing; project decisions live in
+// openapi-policy.gradle. It implements the enforcement half of Principle IV:
+//
+//   1. Pin the emitter. A generator's output is an input to everything downstream, so the version
+//      the generator actually stamped into .openapi-generator/VERSION is held against the policy's
+//      pinnedGeneratorVersion. A mismatch (someone bumped the plugin without re-verifying) fails.
+//   2. No silent no-op. The generator can exit 0 having written nothing useful (bad config, empty
+//      spec). A green build with no generated interfaces/models surfaces much later as unrelated
+//      "unresolved reference" errors, so the output is checked for.
+//   3. An unmodelled construct breaks the build. Every key of the document, each path item,
+//      operation, response, request body and parameter is walked against the policy's allow-lists;
+//      a key on neither the allow-list nor the refusal list fails. Value-level `checks` then run.
+//
+// Wire it so generation always precedes it and compilation always follows a pass (see build.gradle).
+//
+// snakeyaml is loaded reflectively in the task body (it lives on the buildscript classpath declared
+// in build.gradle); a top-level `import` would be resolved when this applied script is compiled,
+// before that classpath is in scope, and fail.
+
+// --- pure helpers -----------------------------------------------------------------------------
+
+ext.spVerify = { boolean cond, String msg -> if (!cond) throw new GradleException("contract: " + msg) }
+
+// Fail on any key of `node` the allow-list does not name; a refused key carries its own reason.
+ext.spAllowOnly = { Map node, Set allowed, Map refusals, boolean allowExtensions, String subject, String kind ->
+    (node ?: [:]).keySet().each { key ->
+        if (allowed.contains(key)) return
+        if (allowExtensions && key.toString().startsWith("x-")) return
+        def why = refusals?.get(key)
+        if (why) {
+            throw new GradleException("contract: ${subject} declares `${key}` on its ${kind}. ${why}")
+        }
+        throw new GradleException(
+            "contract: ${subject} declares `${key}` on its ${kind}, which this pipeline does not account for.\n" +
+            "  Allowed today: ${allowed.toList().sort().join(', ')}.\n" +
+            "  An unmodelled construct breaks the build rather than being ignored, because a green build for\n" +
+            "  something nothing serves ships the endpoint anyway and hides the gap. Two deliberate ways out:\n" +
+            "  model it (honour it in your code and add the key to `allow` in openapi-policy.gradle), or refuse\n" +
+            "  it (add it to `refuse` with the constraint that makes it unservable)."
+        )
+    }
+}
+
+// The whole conformance pass over the parsed spec and the policy. Returns the operations found.
+ext.spWalkSpec = { Map doc, Map policy ->
+    def verbs = ["get", "put", "post", "delete", "patch", "options", "head", "trace"]
+    def allowExt = policy.allowExtensions != false
+    def refuse = policy.refuse ?: [:]
+    def toSet = { List l -> l as Set }
+    def operations = []
+
+    spAllowOnly(doc, toSet(policy.allow.document), refuse.document, allowExt, "the contract", "document")
+
+    def seenIds = [:]
+    (doc.paths ?: [:]).each { path, item ->
+        spAllowOnly(item, toSet(policy.allow.pathItem), refuse.pathItem, allowExt, path.toString(), "path item")
+        def sharedParams = item.parameters ?: []
+
+        verbs.each { verb ->
+            def operation = item[verb]
+            if (operation == null) return
+            def id = operation.operationId
+            def method = verb.toUpperCase()
+
+            if (id && seenIds.containsKey(id)) {
+                throw new GradleException("contract: two operations share operationId \"${id}\": ${seenIds[id]} and ${method} ${path}. It names one generated method; give each its own id.")
+            }
+            if (id) seenIds[id] = "${method} ${path}"
+
+            spAllowOnly(operation, toSet(policy.allow.operation), refuse.operation, allowExt,
+                "${method} ${path} (${id ?: 'no operationId'})", "operation")
+
+            (sharedParams + (operation.parameters ?: [])).each { p ->
+                // $ref'd parameters are resolved by the generator; we only police inline ones here.
+                if (p?.get('$ref') == null) {
+                    spAllowOnly(p, toSet(policy.allow.parameter), refuse.parameter, allowExt,
+                        "${id ?: method + ' ' + path} parameter", "parameter")
+                }
+            }
+
+            (operation.responses ?: [:]).each { code, response ->
+                if (response?.get('$ref') == null) {
+                    spAllowOnly(response, toSet(policy.allow.response), refuse.response, allowExt,
+                        "${id} ${code}", "response")
+                }
+            }
+
+            if (operation.requestBody != null && operation.requestBody.get('$ref') == null) {
+                spAllowOnly(operation.requestBody, toSet(policy.allow.requestBody), refuse.requestBody, allowExt,
+                    id.toString(), "requestBody")
+            }
+
+            def op = [method: method, path: path, operationId: id, operation: operation]
+            (policy.checks ?: []).each { check -> check(op) }
+            operations << op
+        }
+    }
+
+    spVerify(!operations.isEmpty(), "the contract declares no operations.")
+    return operations
+}
+
+// --- the task ---------------------------------------------------------------------------------
+
+tasks.register("verifyContract") {
+    group = "openapi"
+    description = "Pin the emitter, assert generation happened, and fail on any unmodelled OpenAPI construct."
+    doLast {
+        def policy = project.ext.openapiPolicy
+        def outDir = file(policy.out)
+
+        // 1. Pin the emitter: compare the version the generator stamped to the policy pin.
+        def versionFile = new File(outDir, ".openapi-generator/VERSION")
+        spVerify(versionFile.exists(),
+            "${versionFile} not found - generation did not run, so the emitter version cannot be checked. Run generateApiServer first.")
+        def stamped = versionFile.text.trim()
+        spVerify(stamped == policy.pinnedGeneratorVersion,
+            "openapi-generator ${stamped} produced the output; this policy is verified against ${policy.pinnedGeneratorVersion}.\n" +
+            "  A generator's output is an input to everything downstream and changes between releases. Re-verify the new\n" +
+            "  version (regenerate, read the diff), then set `pinnedGeneratorVersion` in openapi-policy.gradle AND the plugin\n" +
+            "  id version in build.gradle in the same change. Bumping one without the other is what this refuses.")
+
+        // 2. No silent no-op: at least one API interface and one model must exist and be non-empty.
+        def kotlin = new File(outDir, "src/main/kotlin")
+        spVerify(kotlin.exists(), "no generated sources under ${kotlin} - the generator wrote nothing. Check configOptions in openapi-policy.gradle.")
+        def kts = []
+        kotlin.eachFileRecurse { if (it.isFile() && it.name.endsWith(".kt")) kts << it }
+        def apis = kts.findAll { it.name.endsWith("Api.kt") }
+        def models = kts.findAll { it.parentFile.name == policy.configOptions.modelPackage.tokenize('.').last() }
+        spVerify(!apis.isEmpty(), "the generator wrote no *Api.kt interfaces - a silent no-op, not a passing build. Check the plugin/config.")
+        def empty = kts.findAll { it.length() == 0L }
+        spVerify(empty.isEmpty(), "generated but empty: ${empty.collect { it.name }.join(', ')}.")
+
+        // 3. Conformance: nothing in the contract is unaccounted for.
+        def specFile = file(policy.spec)
+        spVerify(specFile.exists(), "${specFile} not found - nothing to verify against.")
+        // snakeyaml is on the buildscript classpath (build.gradle); load it through that classloader
+        // explicitly, since the default Class.forName loader for this closure does not see it.
+        def yamlClass = Class.forName("org.yaml.snakeyaml.Yaml", true, project.buildscript.classLoader)
+        def doc = yamlClass.getDeclaredConstructor().newInstance().load(specFile.newInputStream())
+        def operations = spWalkSpec(doc, policy)
+
+        logger.lifecycle("verifyContract: ${policy.out} is current - ${operations.size()} operations, ${apis.size()} API interfaces, ${models.size()} models, emitter ${stamped}.")
+    }
+}
