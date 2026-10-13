@@ -1,0 +1,14 @@
+{
+  "name": "artefact-tree-pipeline",
+  "owner": {
+    "name": "lycha",
+    "url": "https://github.com/lycha/aeos"
+  },
+  "plugins": [
+    {
+      "name": "artefact-tree-pipeline",
+      "source": ".",
+      "description": "Prototype-to-spec pipeline (harvest, decide, spec) with portable artefact schemas."
+    }
+  ]
+}

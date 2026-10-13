@@ -1,0 +1,14 @@
+{
+    "_comment": "Merge these into your Laravel project's composer.json, then copy openapi-policy.php and scripts/ into the project root (or a package). Point `spec` and `out` in openapi-policy.php at your paths, set invokerPackage to your namespace, and run `composer generate-api`. Wire it into CI by running `composer generate-api` before your build/test step so nothing ever runs against a stale or unverified contract. The generator needs Java on PATH (or set OPENAPI_GENERATOR_CMD to 'npx @openapitools/openapi-generator-cli').",
+    "require-dev": {
+        "symfony/yaml": "^6.4 || ^7.0"
+    },
+    "scripts": {
+        "generate": "@php scripts/generate.php",
+        "verify-contract": "@php scripts/verify-contract.php",
+        "generate-api": [
+            "@generate",
+            "@verify-contract"
+        ]
+    }
+}

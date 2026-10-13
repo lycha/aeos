@@ -1,0 +1,7 @@
+# Live generation output — produced by `npm run generate-db-types`, never hand-edited.
+# The committed reference output lives under examples/generated/ and is NOT ignored.
+/.generated/
+
+# Local install artifacts
+node_modules/
+package-lock.json

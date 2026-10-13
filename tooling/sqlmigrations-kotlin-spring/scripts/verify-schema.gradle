@@ -1,0 +1,87 @@
+// Schema verifier - the REUSABLE CORE. It should not need editing; project decisions live in
+// jooq-policy.gradle. It implements the enforcement half of Principle IV for the DB layer:
+//
+//   1. Pin the emitter. jOOQ stamps its version into every generated file's @Generated annotation;
+//      the verifier reads it and refuses to pass unless it equals policy.pinnedJooqVersion. A plugin
+//      bump that changes the generator version cannot slip through without re-verifying.
+//   2. No silent no-op. At least one generated table class must exist and be non-empty, otherwise a
+//      green build ships a query layer with no generated schema.
+//   3. An unmapped type breaks the build. Every generated table field's Java type is checked against
+//      the policy's allow-list; a type on neither the allow-list nor the refusal list fails. The
+//      headline refusal is `Object` - jOOQ's fallback for a SQL type it could not map. Value-level
+//      `checks` then run over the parsed tables.
+//
+// Wire it so generation always precedes it and compilation always follows a pass (see build.gradle).
+
+tasks.register("verifySchema") {
+    group = "jooq"
+    description = "Pin the jOOQ version, assert generation happened, and fail on any unmapped SQL type."
+    doLast {
+        def policy = project.ext.jooqPolicy
+        def outDir = file(policy.out)
+        def tablesDir = new File(outDir, policy.basePackageName.replace('.', '/') + '/tables')
+
+        // 2. No silent no-op (checked early so a missing dir gives a clear message).
+        if (!tablesDir.isDirectory()) {
+            throw new GradleException("contract: no generated tables under ${tablesDir} - generation did not run or wrote nothing. Run generateJooqClasses first.")
+        }
+        def tableFiles = (tablesDir.listFiles() ?: []).findAll { it.isFile() && it.name.endsWith('.java') }
+        if (tableFiles.isEmpty()) {
+            throw new GradleException("contract: the generator wrote no table classes - a silent no-op, not a passing build.")
+        }
+        def empty = tableFiles.findAll { it.length() == 0L }
+        if (empty) throw new GradleException("contract: generated but empty: ${empty*.name.join(', ')}.")
+
+        // 1. Pin the emitter: read the jOOQ version stamped into a generated file.
+        def stamped = null
+        for (f in tableFiles) {
+            def m = (f.text =~ /jOOQ version:([\d.]+)/)
+            if (m.find()) { stamped = m.group(1); break }
+        }
+        if (stamped == null) {
+            throw new GradleException("contract: could not read a jOOQ version from the generated sources, so the emitter pin cannot be checked.")
+        }
+        if (stamped != policy.pinnedJooqVersion) {
+            throw new GradleException(
+                "contract: jOOQ ${stamped} produced the output; this policy is verified against ${policy.pinnedJooqVersion}.\n" +
+                "  A generator's output is an input to everything downstream and changes between releases. Re-verify the new\n" +
+                "  version (regenerate, read the diff), then set pinnedJooqVersion in jooq-policy.gradle in the same change\n" +
+                "  (and pin the plugin's jOOQ version to match). Bumping the plugin alone is what this refuses.")
+        }
+
+        // 3. Parse each table's fields and check types against allow/refuse.
+        def allowed = (policy.allow.fieldTypes ?: []) as Set
+        def refuse = policy.refuse ?: [:]
+        def fieldRe = ~/TableField<\w+,\s*([\w\[\].<>]+)>\s+(\w+)\s*=/
+        def tables = []
+        tableFiles.each { f ->
+            def fields = []
+            def mm = (f.text =~ fieldRe)
+            while (mm.find()) {
+                def type = mm.group(1)
+                def name = mm.group(2)
+                fields << [name: name, type: type]
+                if (!allowed.contains(type)) {
+                    def tableName = f.name.replaceFirst(/\.java$/, '')
+                    def why = refuse[type]
+                    if (why) {
+                        throw new GradleException("contract: ${tableName}.${name} is typed `${type}`. ${why}")
+                    }
+                    throw new GradleException(
+                        "contract: ${tableName}.${name} is typed `${type}`, which this pipeline does not account for.\n" +
+                        "  Allowed today: ${allowed.toList().sort().join(', ')}.\n" +
+                        "  An unaccounted-for field type breaks the build rather than being ignored. Two deliberate ways out:\n" +
+                        "  map it (a jOOQ forcedType binding, or change the column) and add the type to allow.fieldTypes, or\n" +
+                        "  refuse it (add it to `refuse` with the constraint that makes it unusable).")
+                }
+            }
+            tables << [name: f.name.replaceFirst(/\.java$/, ''), fields: fields]
+        }
+
+        // Value-level checks.
+        (policy.checks ?: []).each { check -> check(tables) }
+
+        def fieldCount = tables.sum { it.fields.size() } ?: 0
+        logger.lifecycle("verifySchema: ${policy.out} is current - ${tables.size()} tables, ${fieldCount} fields, emitter jOOQ ${stamped}.")
+    }
+}

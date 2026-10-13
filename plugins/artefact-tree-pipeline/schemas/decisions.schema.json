@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://standin.co/schemas/decisions/1",
+  "title": "decisions.yaml",
+  "description": "Output of gap-interrogation. Produced identically by gap-interrogation-solo and gap-interrogation-capture.",
+  "type": "object",
+  "required": ["schema_version", "meta", "summary"],
+  "properties": {
+    "schema_version": { "const": 1 },
+
+    "meta": {
+      "type": "object",
+      "required": ["feature", "session", "mode", "artefact_tree", "inventory"],
+      "properties": {
+        "feature": { "type": "string" },
+        "session": { "type": "string", "format": "date" },
+        "mode": { "enum": ["solo-simulated", "workshop-captured", "paired-live"] },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "artefact_tree": { "$ref": "#/$defs/treeRef" },
+        "inventory": { "$ref": "#/$defs/ref" },
+        "source_artefact": { "type": ["string", "null"] },
+        "posture": { "enum": ["conservative", "decisive"] },
+        "adversary_rotation": { "type": "array", "items": { "type": "string" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "workshop-captured" } } },
+          "then": { "required": ["source_artefact"] }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "solo-simulated" } } },
+          "then": { "required": ["posture"] }
+        }
+      ]
+    },
+
+    "question_resolutions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["question", "outcome"],
+        "properties": {
+          "question": { "$ref": "#/$defs/id" },
+          "outcome": { "enum": ["ANSWERED", "RECLASSIFIED", "ESCALATED", "DROPPED"] },
+          "answer": { "type": "string" },
+          "answered_by": { "enum": ["research", "human"] },
+          "reclassified_as": { "enum": ["conflict", "absence"] },
+          "becomes": { "$ref": "#/$defs/id" },
+          "reason": { "type": "string" },
+          "owner": { "type": "string" },
+          "due": { "type": "string", "format": "date" },
+          "blocks_released": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+          "capture_confidence": { "$ref": "#/$defs/captureConfidence" },
+          "evidence": { "type": "string" }
+        },
+        "allOf": [
+          { "if": { "properties": { "outcome": { "const": "ANSWERED" } } },
+            "then": { "required": ["answer", "answered_by"] } },
+          { "if": { "properties": { "outcome": { "const": "RECLASSIFIED" } } },
+            "then": { "required": ["reclassified_as", "becomes"] } },
+          { "if": { "properties": { "outcome": { "const": "DROPPED" } } },
+            "then": { "required": ["reason"] } },
+          { "if": { "properties": { "outcome": { "const": "ESCALATED" } } },
+            "then": { "required": ["owner", "due"] } }
+        ]
+      }
+    },
+
+    "conflict_resolutions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["conflict", "outcome", "resolution"],
+        "properties": {
+          "conflict": { "$ref": "#/$defs/id" },
+          "outcome": { "enum": ["RESOLVED", "RECONCILED", "SPLIT", "ESCALATED"] },
+          "resolution": { "type": "string" },
+          "debt_created": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["task", "owner"],
+              "properties": {
+                "task": { "type": "string" },
+                "owner": { "type": "string" },
+                "due": { "type": ["string", "null"], "format": "date" }
+              }
+            }
+          },
+          "affects_downstream": {
+            "type": "array",
+            "items": { "enum": ["api-contract", "table-names", "event-names", "ui-copy", "tickets", "glossary"] }
+          },
+          "split_into": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": ["name", "definition"],
+              "properties": {
+                "name": { "type": "string" },
+                "definition": { "type": "string" }
+              }
+            }
+          },
+          "owner": { "type": "string" },
+          "due": { "type": "string", "format": "date" },
+          "capture_confidence": { "$ref": "#/$defs/captureConfidence" },
+          "evidence": { "type": "string" }
+        },
+        "allOf": [
+          { "if": { "properties": { "outcome": { "enum": ["RESOLVED", "RECONCILED"] } } },
+            "then": { "required": ["debt_created"] } },
+          { "if": { "properties": { "outcome": { "const": "SPLIT" } } },
+            "then": { "required": ["split_into"] } },
+          { "if": { "properties": { "outcome": { "const": "ESCALATED" } } },
+            "then": { "required": ["owner", "due"] } }
+        ]
+      }
+    },
+
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["absence", "outcome", "resolution"],
+        "properties": {
+          "absence": { "$ref": "#/$defs/id" },
+          "outcome": { "enum": ["DECIDED", "DEFERRED", "ASSUMED", "ESCALATED"] },
+          "resolution": { "type": "string" },
+          "becomes": { "type": "string", "pattern": "^(AC|NON-GOAL)-[0-9]+$" },
+          "rationale": { "type": "string" },
+          "revisit_when": { "type": "string", "minLength": 20 },
+          "risk": { "enum": ["low", "medium", "high"] },
+          "decided_by": { "enum": ["human", "agent"] },
+          "question": { "type": "string" },
+          "owner": { "type": "string" },
+          "due": { "type": "string", "format": "date" },
+          "blocks": { "type": "array", "items": { "type": "string" } },
+          "capture_confidence": { "$ref": "#/$defs/captureConfidence" },
+          "evidence": { "type": "string" }
+        },
+        "allOf": [
+          { "if": { "properties": { "outcome": { "enum": ["DECIDED", "DEFERRED"] } } },
+            "then": { "required": ["becomes"] } },
+          { "if": { "properties": { "outcome": { "const": "ASSUMED" } } },
+            "then": { "required": ["rationale", "revisit_when", "risk", "decided_by"] } },
+          { "if": { "properties": { "outcome": { "const": "ESCALATED" } } },
+            "then": { "required": ["owner", "due"] } },
+          {
+            "comment": "An agent-originated call is never a decision.",
+            "if": { "properties": { "decided_by": { "const": "agent" } } },
+            "then": { "properties": { "outcome": { "const": "ASSUMED" } } }
+          }
+        ]
+      }
+    },
+
+    "summary": {
+      "type": "object",
+      "required": ["stories_ready", "stories_blocked"],
+      "properties": {
+        "questions_answered": { "$ref": "#/$defs/idList" },
+        "questions_reclassified": { "$ref": "#/$defs/idList" },
+        "questions_escalated": { "$ref": "#/$defs/idList" },
+        "questions_dropped": { "$ref": "#/$defs/idList" },
+        "conflicts_resolved": { "$ref": "#/$defs/idList" },
+        "conflicts_escalated": { "$ref": "#/$defs/idList" },
+        "assumptions_registered": { "$ref": "#/$defs/idList" },
+        "escalations_open": { "$ref": "#/$defs/idList" },
+        "debt_created": { "type": "integer", "minimum": 0 },
+        "stories_ready": { "type": "array", "items": { "type": "string" } },
+        "stories_blocked": { "type": "array", "items": { "type": "string" } },
+        "stories_too_big": { "type": "array", "items": { "type": "string" } },
+        "inventory_items_untouched": { "$ref": "#/$defs/idList" },
+        "off_inventory_decisions": { "$ref": "#/$defs/idList" },
+        "low_confidence_entries": { "$ref": "#/$defs/idList" }
+      }
+    }
+  },
+
+  "$defs": {
+    "id": { "type": "string", "pattern": "^(Q|CON|ABS|NEW)-[0-9]+$" },
+    "idList": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+    "captureConfidence": { "enum": ["explicit", "inferred", "ambiguous"] },
+    "treeRef": {
+      "type": "object",
+      "required": ["repo", "branch"],
+      "properties": {
+        "repo": { "type": "string" },
+        "branch": { "type": "string" }
+      }
+    },
+    "ref": {
+      "type": "object",
+      "description": "References are triples. A commit hash is meaningless without its repository.",
+      "required": ["repo", "commit", "path"],
+      "properties": {
+        "repo": { "type": "string" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "path": { "type": "string" }
+      }
+    }
+  }
+}

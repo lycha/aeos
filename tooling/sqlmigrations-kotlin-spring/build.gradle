@@ -1,0 +1,45 @@
+// Standalone, runnable scaffold for contract-first SQL-migrations -> jOOQ generation with
+// Principle IV enforcement. In a real project you merge the pieces from build.gradle.snippet into
+// your own build; here they stand alone so `./gradlew generateDb` runs end to end.
+//
+// Pipeline:  generateJooqClasses  ->  verifySchema
+//   generateJooqClasses   spins up a throwaway Postgres (Docker), runs the Flyway migrations, and
+//                         generates jOOQ classes from the real migrated schema.
+//   verifySchema          pins the jOOQ version, proves generation happened, and fails on any SQL
+//                         type the policy has not accounted for. See scripts/verify-schema.gradle.
+
+plugins {
+    // dev.monosoul.jooq-docker is the maintained successor to the (abandoned) com.revolut.jooq-docker
+    // that stayposted-backend uses; it runs on modern Gradle/JDK. Keep the jOOQ version it selects in
+    // step with pinnedJooqVersion in jooq-policy.gradle.
+    id "dev.monosoul.jooq-docker" version "8.0.21"
+}
+
+repositories { mavenCentral() }
+
+apply from: "jooq-policy.gradle"
+apply from: "scripts/verify-schema.gradle"
+
+def policy = project.ext.jooqPolicy
+
+tasks.named("generateJooqClasses") {
+    schemas.set(["public"])
+    basePackageName.set(policy.basePackageName)
+    // migrations default to src/main/resources/db/migration
+    outputDirectory.set(file(policy.out))
+    includeFlywayTable.set(false)
+}
+
+// Verification always follows generation, and never runs against stale output.
+tasks.named("verifySchema") { dependsOn("generateJooqClasses") }
+
+// Convenience aggregate: regenerate and verify in one call.
+tasks.register("generateDb") {
+    group = "jooq"
+    description = "generateJooqClasses + verifySchema."
+    dependsOn("verifySchema")
+}
+
+dependencies {
+    jooqCodegen "org.postgresql:postgresql:42.7.3"
+}

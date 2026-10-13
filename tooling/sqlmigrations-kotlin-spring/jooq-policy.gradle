@@ -1,0 +1,61 @@
+// SQL migrations -> jOOQ (Kotlin/Spring) generation policy.
+//
+// THIS IS THE FILE YOU EDIT. The verifier (scripts/verify-schema.gradle) is the reusable core and
+// should not need changing; this file is where a project says what its schema is allowed to contain.
+//
+// It encodes Principle IV ("Generators build the scaffold, agents write the logic") for the database
+// layer: the Flyway migrations are the source of truth, the jOOQ classes are generated from the *real
+// migrated schema* (never hand-written), and a column whose SQL type the pipeline has not accounted
+// for BREAKS THE BUILD rather than silently landing as `java.lang.Object` in a generated table field.
+//
+// A jOOQ field typed `Object` is the database equivalent of an unmodelled OpenAPI construct: the
+// generator met a SQL type it could not map (a custom type, an unconfigured extension type, a
+// composite) and fell back to the untyped default, so the query DSL is silently untyped there.
+
+ext.jooqPolicy = [
+
+    // Where the generated jOOQ classes go (keep in step with outputDirectory in build.gradle) and the
+    // base package they live under.
+    out            : "build/generated-jooq",
+    basePackageName: "com.example.db.jooq",
+
+    // The jOOQ version this policy is verified against. The verifier reads the version jOOQ stamped
+    // into the generated @Generated annotations and refuses to pass unless it equals this. The plugin
+    // picks a default jOOQ version per release; pin it so a plugin bump that changes the generator
+    // cannot silently retype the schema. Bumping the plugin without re-verifying and moving this is
+    // what fails.
+    pinnedJooqVersion: "3.21.2",
+
+    // Generated jOOQ field Java types the schema is allowed to contain. A type here is allowed;
+    // anything else is refused (if listed in `refuse`) or breaks the build with the generic message.
+    allow: [
+        fieldTypes: [
+            "UUID", "String", "Long", "Integer", "Short", "Boolean", "BigDecimal", "Double",
+            "OffsetDateTime", "LocalDateTime", "LocalDate", "LocalTime", "JSONB", "JSON", "byte[]",
+        ],
+    ],
+
+    // Java types you have met and decided not to carry untyped. The value is the reason, phrased as
+    // the constraint. The headline refusal is `Object` - jOOQ's fallback for a SQL type it could not map.
+    refuse: [
+        "Object":
+            "A field typed `Object`: jOOQ met a SQL type it could not map (a custom type, a composite, " +
+            "an unconfigured extension type, an enum without a forced type). The query DSL is untyped " +
+            "there. Account for it (a jOOQ forcedType binding, or change the column), then this passes - " +
+            "or add it to `allow.fieldTypes` once you have decided the `Object` is acceptable.",
+    ],
+
+    // Value-level checks over the parsed generated tables ([{ name, fields: [{ name, type }] }]).
+    // Each is a closure that throws (with a clear message) to fail the build. Edit, remove, or add.
+    checks: [
+
+        // Every generated table should carry a timestamp field (a house convention the ledger relies on).
+        // jOOQ field names are UPPERCASE. Delete this if it does not fit your schema.
+        { tables ->
+            def missing = tables.findAll { t -> !t.fields.any { it.name == "CREATED_AT" || it.name == "UPDATED_AT" } }*.name
+            if (missing) {
+                throw new RuntimeException("these generated tables have neither CREATED_AT nor UPDATED_AT: ${missing.join(', ')}. The convention is that every table is timestamped; add the column or remove this check.")
+            }
+        },
+    ],
+]

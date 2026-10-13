@@ -1,0 +1,25 @@
+{
+    "name": "example/openapi-php-laravel-scaffold",
+    "description": "Runnable scaffold for contract-first Kotlin-style OpenAPI -> PHP/Laravel generation with Principle IV enforcement.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "symfony/yaml": "^6.4 || ^7.0"
+    },
+    "scripts": {
+        "generate": "@php scripts/generate.php",
+        "verify-contract": "@php scripts/verify-contract.php",
+        "generate-api": [
+            "@generate",
+            "@verify-contract"
+        ]
+    },
+    "scripts-descriptions": {
+        "generate": "Run the php-laravel generator per openapi-policy.php.",
+        "verify-contract": "Pin the emitter, assert generation happened, and fail on any unmodelled OpenAPI construct.",
+        "generate-api": "generate + verify-contract (the command you run)."
+    }
+}

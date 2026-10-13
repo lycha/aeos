@@ -1,0 +1,11 @@
+{
+  "name": "artefact-tree-pipeline",
+  "description": "Prototype-to-spec pipeline. Harvest a design handoff into a feature inventory, capture a gap-interrogation workshop into a decisions log, and transcribe decisions into an EARS + Gherkin specification. Ships the canonical artefact schemas and seeds them into a project's artefact tree, so the skills are portable and the schema never drifts.",
+  "version": "0.1.0",
+  "author": {
+    "name": "lycha",
+    "url": "https://github.com/lycha/aeos"
+  },
+  "homepage": "https://github.com/lycha/aeos/wiki/AI-Driven-Development-A-Manifesto",
+  "keywords": ["spec", "ears", "gherkin", "decisions", "artefact-tree", "ddd", "prototype"]
+}

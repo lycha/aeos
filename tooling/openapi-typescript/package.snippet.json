@@ -1,0 +1,20 @@
+{
+  "_comment": "Merge these into your project's package.json. `generate-api-types` is the full pipeline (types + validators + conformance + operations registry); `generate-operations` regenerates just the registry against already-generated types, for fast iteration on the registry or an adapter. The pre* hooks run the full pipeline so nothing ever runs against a stale contract. Adjust the dev/build/test hooks to your framework.",
+  "scripts": {
+    "generate-api-types": "node scripts/generate-openapi-types.mjs",
+    "generate-operations": "node scripts/generate-operations.mjs",
+    "predev": "npm run generate-api-types",
+    "prebuild": "npm run generate-api-types",
+    "pretest": "npm run generate-api-types",
+    "typecheck": "npm run generate-api-types && tsc --noEmit",
+    "contract:lint": "redocly lint openapi.yaml"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "^0.99.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "yaml": "^2.0.0",
+    "zod": "^4.0.0"
+  }
+}

@@ -1,0 +1,6 @@
+# Live generation output + Gradle state — produced by `./gradlew generateDb`, never hand-edited.
+# The committed reference output lives under examples/generated/ and is NOT ignored.
+/build/
+/.gradle/
+
+*.log
