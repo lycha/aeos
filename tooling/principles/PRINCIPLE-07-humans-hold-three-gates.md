@@ -9,33 +9,33 @@
 > Amdahl's Law — human gates are the serial fraction of the pipeline and set its pace, so every gate
 > that safely earns autonomy shortens the whole critical path.
 
-AEOS already has the mechanism this principle needs: explicit human approval gates between pipeline
-columns (`WORKING → IN_REVIEW → SIGNED_OFF`), and gates that "earn autonomy from evaluation data." This
-document translates the principle into the Git-host, CI, and codegen tooling that enforces it on the
-repositories AEOS drives — so that the three mandatory gates are not a convention an agent can talk its
-way past, but a merge-blocking control keyed to the exact paths that carry contract and schema risk.
+AEOS already has the mechanism this principle needs. Pipeline columns are explicit human approval gates
+(`WORKING → IN_REVIEW → SIGNED_OFF`), and a gate can "earn autonomy from evaluation data."
+
+This document maps that principle onto the Git-host, CI, and codegen tooling of the repositories AEOS
+drives. The point: make the three mandatory gates a merge-blocking control, not a convention an agent can
+talk its way past. Each gate is keyed to the exact paths that carry contract and schema risk.
 
 ## What it demands, operationally
 
 1. **Three gates are non-negotiable and path-defined.** A human must approve (a) the specification,
    (b) any change to the API contract or DB schema, and (c) the release. Each maps to concrete repo
-   paths or events: spec docs (`docs/spec/**`, `*.prd.md`), the contract (`openapi/**`, `**/*.proto`,
-   `schema.graphql`), the schema (`migrations/**`, `db/schema.sql`, `atlas.hcl`), and the
-   release (a tag push or a deploy job).
-2. **The gate is enforced by the host, not the agent.** CODEOWNERS plus a required-review rule plus a
-   branch ruleset make the approval a merge precondition. An AEOS agent running with a bot token cannot
-   self-approve a diff that touches a gated path; the ruleset rejects the merge.
-3. **Risk is *detected*, not declared.** A PR either touches a gated path (cheap path trigger) or
-   introduces a breaking contract/schema change that a diff tool flags (`oasdiff`, `buf breaking`,
-   `atlas migrate lint`). Either condition forces the human gate; neither relies on the author
-   remembering to ask.
-4. **Everything else can flow.** Amdahl's Law says the serial human fraction caps throughput, so gates
-   are *scoped*: a PR that touches only non-gated paths and passes checks may auto-merge. Humans spend
-   their serial time only on the diffs that carry irreversible, depended-upon risk.
-5. **Autonomy is earned and revocable.** A gate's required-approval count is a function of its
-   evaluation record. Sustained clean passes can downgrade a gate from "human required" to "auto-merge
-   on green"; an escaped defect traced to a gate immediately restores the human requirement. This is
-   exactly AEOS's own gate-earns-autonomy model applied to the downstream repo.
+   paths or events: spec docs (`docs/spec/**`, `*.prd.md`); the contract (`openapi/**`, `**/*.proto`,
+   `schema.graphql`); the schema (`migrations/**`, `db/schema.sql`, `atlas.hcl`); the release (a tag
+   push or a deploy job).
+2. **The host enforces the gate, not the agent.** CODEOWNERS plus a required-review rule plus a branch
+   ruleset make approval a merge precondition. An AEOS agent on a bot token cannot self-approve a diff
+   that touches a gated path. The ruleset rejects the merge.
+3. **Risk is *detected*, not declared.** A gate fires on one of two signals: the PR touches a gated path
+   (a cheap glob trigger), or a diff tool flags a breaking contract/schema change (`oasdiff`,
+   `buf breaking`, `atlas migrate lint`). Neither relies on the author remembering to ask.
+4. **Everything else flows.** Amdahl's Law: the serial human fraction caps throughput. So gates are
+   *scoped*. A PR that touches only non-gated paths and passes checks may auto-merge. Humans spend their
+   serial time only on diffs that carry irreversible, depended-upon risk.
+5. **Autonomy is earned and revocable.** A gate's required-approval count is a function of its evaluation
+   record. Sustained clean passes can downgrade a gate from "human required" to "auto-merge on green". An
+   escaped defect traced to that gate immediately restores the human requirement. This is AEOS's own
+   gate-earns-autonomy model, applied to the downstream repo.
 
 ## Reference architecture
 
@@ -77,42 +77,42 @@ so a PR cannot merge while classification is pending or failing.
 
 ## CI / automation
 
-- **Path + diff classifier (required check).** A job runs on every PR, computes changed files, and sets
-  a `gated` output when any path matches the gated globs. In parallel it runs the contract/schema diff
-  tools against the merge base; a breaking result also sets `gated`. The job posts a sticky PR comment
-  explaining *why* a gate fired (which path, which breaking rule), so the human review has the diff in
+- **Path + diff classifier (required check).** One job runs on every PR. It computes changed files and
+  sets a `gated` output when any path matches the gated globs. In parallel it runs the contract/schema
+  diff tools against the merge base; a breaking result also sets `gated`. It posts a sticky PR comment
+  explaining *why* a gate fired — which path, which breaking rule — so the human review has the diff in
   front of it. This is the Amdahl lever: it keeps the serial human step off the 90%+ of PRs that touch
   nothing gated.
-- **Contract gate detectors.** For REST/OpenAPI, `oasdiff breaking --fail-on ERR` (optionally
-  `--format githubactions`) exits non-zero on any of its 100+ breaking-change classes; `Optic` runs the
-  same check in-PR with "forwards-only" governance so only changed endpoints are held to new rules;
-  `Spectral` (`extends: spectral:oas`) enforces style/governance rules that are not strictly breaking.
-  For gRPC/protobuf, `bufbuild/buf-action` (or `buf-breaking-action`) runs `buf breaking` against a
-  baseline Git ref and comments inline on offending `.proto` lines.
-- **Schema gate detector.** `ariga/atlas-action/migrate/lint` runs on any PR that modifies the migration
-  directory, simulates the migration against a dev database, and fails + comments on destructive or
-  lock-inducing changes. A cheaper floor is a pure path trigger on `migrations/**` that forces the DBA
+- **Contract gate detectors.** For REST/OpenAPI: `oasdiff breaking --fail-on ERR` (optionally
+  `--format githubactions`) exits non-zero on any of its 100+ breaking-change classes. `openapi-changes`
+  runs a comparable diff across Git revisions in-PR and emits a visual changelog alongside the verdict. `Spectral`
+  (`extends: spectral:oas`) enforces style/governance rules that are not strictly breaking. For
+  gRPC/protobuf: `bufbuild/buf-action` runs `buf breaking` against a baseline Git ref and comments inline
+  on offending `.proto` lines.
+- **Schema gate detector.** `ariga/atlas-action/migrate/lint` runs on any PR that touches the migration
+  directory. It simulates the migration against a dev database, then fails and comments on destructive or
+  lock-inducing changes. The cheaper floor is a plain path trigger on `migrations/**` that forces the DBA
   gate regardless of lint verdict — a migration is a schema change by definition.
-- **Release gate.** The deploy job declares `environment: production`; GitHub Actions blocks the job
-  until the environment's **required reviewers** approve (a manual-approval gate; secrets stay sealed
-  until approval). GitLab's equivalent is a manual job plus a protected environment with deployment
+- **Release gate.** The deploy job declares `environment: production`. GitHub Actions blocks the job
+  until the environment's **required reviewers** approve — a manual-approval gate, with secrets sealed
+  until approval. GitLab's equivalent is a manual job plus a protected environment with deployment
   approvals. `prevent self review` stops the deploy's triggerer from approving it.
 - **Earned autonomy, mechanically.** Gate state lives in config, not habit. A gate's required-approval
-  count is driven by an eval record (pass/escape history). When a gate is autonomous, a passing PR goes
-  through **auto-merge** / the **merge queue** (`gh pr merge --auto`, or GitHub's native merge queue)
-  the moment required checks are green — no reviewer. An escaped-defect postmortem flips the gate's
-  ruleset back to `required_approving_review_count: 1+` and re-adds the CODEOWNERS entry. Because
-  rulesets are API-managed, this toggle is a reviewable config PR, not a console click.
+  count is driven by its eval record (pass/escape history). When a gate is autonomous, a passing PR goes
+  through **auto-merge** / the **merge queue** (`gh pr merge --auto`, or GitHub's native merge queue) the
+  moment required checks are green — no reviewer. An escaped-defect postmortem flips the ruleset back to
+  `required_approving_review_count: 1+` and re-adds the CODEOWNERS entry. Because rulesets are
+  API-managed, that toggle is a reviewable config PR, not a console click.
 
 ## Tooling options
 
 | Tool | What it does | When to pick it |
 | --- | --- | --- |
-| [GitHub repository rulesets](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners) + [required reviewer rule](https://github.blog/changelog/2026-02-17-required-reviewer-rule-is-now-generally-available/) | Branch/tag protection as code; the required-reviewer rule targets specific files/folders by pattern (with `!` negation) and demands N approvals from named teams | GitHub host; you want path-scoped gates layered over CODEOWNERS and managed via API |
+| [GitHub repository rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets) + [required reviewer rule](https://github.blog/changelog/2026-02-17-required-reviewer-rule-is-now-generally-available/) | Branch/tag protection as code; the required-reviewer rule targets specific files/folders by pattern (with `!` negation) and demands N approvals from named teams | GitHub host; you want path-scoped gates layered over CODEOWNERS and managed via API |
 | [GitHub CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners) | Maps path globs to owning teams; "require review from Code Owners" makes their approval a merge precondition | Every GitHub repo — the baseline ownership map; put the spec/contract/schema paths here and give CODEOWNERS itself an owner |
 | [GitLab Code Owners](https://docs.gitlab.com/ee/user/project/codeowners/) + protected branches | Path-scoped required approvals; `[section][n]` syntax requires n approvals; approval rules cover non-path reviewer groups | GitLab Premium/Ultimate host; target branch must be protected and Code Owner approval enabled |
 | [oasdiff](https://github.com/Tufin/oasdiff) | OpenAPI breaking-change detection; `--fail-on ERR`, `--format githubactions`/`junit`/`json` | REST APIs; a fast CLI gate that forces the contract review only on a real breaking diff |
-| [Optic](https://github.com/opticdev/optic) | In-PR OpenAPI breaking-change + governance checks; forwards-only rules via `optic.yml` | REST APIs; incremental adoption where you can't fix the whole spec at once |
+| [`openapi-changes`](https://pb33f.io/openapi-changes/) | OpenAPI diff across Git revisions; breaking-change detection with an HTML/markdown/JSON changelog | REST APIs; a PR gate that also shows reviewers a visual changelog of what changed |
 | [Spectral](https://github.com/stoplightio/spectral) | Rule-based OpenAPI/AsyncAPI/Arazzo linter (`given`/`then` JSONPath rules; `extends: spectral:oas`) | Enforcing API style/governance (naming, versioning, security) beyond strict breakage |
 | [buf breaking](https://buf.build/docs/breaking/usage/) via [buf-action](https://github.com/bufbuild/buf-action) | Protobuf breaking-change detection against a baseline ref; inline `.proto` comments | gRPC/protobuf contracts; set the baseline with `breaking_against` / a remote repo URL |
 | [Atlas `migrate lint`](https://atlasgo.io/versioned/lint) via [atlas-action](https://github.com/ariga/atlas-action) | Simulates migrations on a dev DB; flags destructive ops, table rewrites, locks; PR comment | SQL schema gate; pairs with a `migrations/**` path trigger as the floor |
@@ -177,7 +177,7 @@ so a PR cannot merge while classification is pending or failing.
 - GitHub — Merging a pull request with a merge queue: <https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/merging-a-pull-request-with-a-merge-queue>
 - GitLab — Code Owners (path-scoped approvals, protected branches, `[section][n]`): <https://docs.gitlab.com/ee/user/project/codeowners/>
 - oasdiff (OpenAPI breaking-change detection, `--fail-on`, output formats): <https://github.com/Tufin/oasdiff>
-- Optic (in-PR OpenAPI breaking-change + governance, forwards-only): <https://github.com/opticdev/optic>
+- openapi-changes (in-PR OpenAPI breaking-change detection + visual changelog): <https://pb33f.io/openapi-changes/>
 - Spectral (OpenAPI/AsyncAPI governance linter): <https://github.com/stoplightio/spectral>
 - buf breaking — usage: <https://buf.build/docs/breaking/usage/> ; buf-action: <https://github.com/bufbuild/buf-action>
 - Atlas — Verifying migration safety (`migrate lint`): <https://atlasgo.io/versioned/lint> ; atlas-action: <https://github.com/ariga/atlas-action>

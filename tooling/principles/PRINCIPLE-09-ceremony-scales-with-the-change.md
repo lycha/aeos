@@ -10,33 +10,33 @@
 > Are Wrong (Box)* — a spec is a model of what users need, useful but never finished, amended as
 > often as the team learns something new.
 
-This is an **enforcement-tooling** note, not a scaffold to copy. It describes how AEOS and its host
-repo route a change to a ceremony tier, and the concrete CI that keeps the two non-negotiables
-intact: a PR-with-green-checks floor under *every* lane, and an engineer review on *every*
-contract or schema change no matter how small the diff looks.
+This is an **enforcement-tooling** note, not a scaffold to copy. It shows how AEOS and its host
+repo route each change to a ceremony tier, and the CI that keeps two non-negotiables intact:
+
+- A PR with green checks under *every* lane.
+- An engineer review on *every* contract or schema change — no matter how small the diff looks.
 
 ## What it demands, operationally
 
 1. **Classify before you route.** Every change lands in exactly one tier. The classifier is a pure
-   function of observable facts — changed paths, PR labels, diff of the OpenAPI spec, diff of the
-   migrations directory — never a vibe. In AEOS terms this is the ticket `kind`: an **epic** takes
-   the full sequence (`PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN → INTEGRATION_REVIEW →
-   DOD_GATE`), a **task** takes the short one (`IMPLEMENTATION → CODE_REVIEW → QA`). The tier is
-   the entry column, not a discount on quality.
-2. **Fast lane for low-risk.** Docs, copy, a one-line behaviour tweak, a contained bugfix: these
-   run a reduced check set and are eligible for automated merge once green. They skip scoping and
-   tech-spec ceremony — they do not skip the PR or the checks.
+   function of observable facts — changed paths, PR labels, OpenAPI diff, migrations diff. Never a
+   vibe. In AEOS this is the ticket `kind`. An **epic** takes the full sequence (`PRODUCT_SCOPING →
+   TECH_SPEC → TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE`); a **task** takes the short one
+   (`IMPLEMENTATION → CODE_REVIEW → QA`). The tier is the entry column, not a discount on quality.
+2. **Fast lane for low-risk.** Docs, copy, a one-line behaviour tweak, a contained bugfix. These
+   run a reduced check set and can auto-merge once green. They skip scoping and tech-spec
+   ceremony — never the PR or the checks.
 3. **Full ceremony for risky.** A new capability, or anything touching a contract or schema, runs
    the whole panel (engineering, product, invariants, architecture, security — see VI) and the
    human gates (VII).
-4. **Two floors that no tier lowers.** (a) A PR with required checks green is mandatory on every
-   lane. (b) A contract (`openapi.yaml`) or schema (migrations) change always pulls in a human
-   engineer reviewer, even on a PR a human never would have thought to flag. These are the
-   always-on rails; tiering only varies what sits *above* them.
-5. **Slice small, measure each slice (Gall + Box).** The spec is decomposed into vertical slices,
-   each shippable and measurable on its own. `TASK_BREAKDOWN` is exactly this: the architect slices
-   an epic into child `T-NNN` tasks, each of which is released and measured before the next is
-   argued about. A slice that teaches the team something amends the spec rather than the code.
+4. **Two floors that no tier lowers.** (a) A PR with required checks green, on every lane. (b) A
+   contract (`openapi.yaml`) or schema (migrations) change always pulls in a human engineer
+   reviewer — even on a PR nobody would have thought to flag. These are the always-on rails.
+   Tiering only varies what sits *above* them.
+5. **Slice small, measure each slice (Gall + Box).** Decompose the spec into vertical slices, each
+   shippable and measurable on its own. `TASK_BREAKDOWN` is exactly this: the architect slices an
+   epic into child `T-NNN` tasks. Each one ships and is measured before the next is argued about. A
+   slice that teaches the team something amends the spec, not the code.
 
 ## Reference architecture
 
@@ -63,34 +63,34 @@ contract or schema change no matter how small the diff looks.
                                merge queue → trunk
 ```
 
-The classifier emits a tier; the tier selects a required-check set and a merge policy; two rules
-(`pr-floor`, `contract-schema-gate`) are injected into *every* tier unconditionally. The merge queue
-is the single serialization point so trunk stays green (trunk-based development, small PRs).
+The classifier emits a tier. The tier selects a required-check set and a merge policy. Two rules —
+`pr-floor` and `contract-schema-gate` — are injected into *every* tier unconditionally. The merge
+queue is the single serialization point, so trunk stays green (trunk-based development, small PRs).
 
-In AEOS this maps onto data, not code: `kind` chooses the column sequence, and each
-`.aeos/column-specs/*.yaml` sets its own `reviewLoop.maxIterations` (default 5, column overrides
-global), its reviewer agent and rubric, and validation rules. A fast-lane column is a spec with a
-lighter reviewer and a smaller rubric — the ceremony is tuned in YAML, per the repo's "specs are
-data, not code" rule, not forked in TypeScript.
+In AEOS this maps onto data, not code. `kind` chooses the column sequence. Each
+`.aeos/column-specs/*.yaml` sets its own `reviewLoop.maxIterations` (default 5; column overrides
+global), its reviewer agent and rubric, and its validation rules. A fast-lane column is just a spec
+with a lighter reviewer and a smaller rubric. The ceremony is tuned in YAML — per the repo's "specs
+are data, not code" rule — not forked in TypeScript.
 
 ## CI / automation
 
 **Change-type detection (the classifier).**
 - `dorny/paths-filter` (<https://github.com/dorny/paths-filter>) computes per-path booleans
-  (`docs`, `src`, `openapi`, `migrations`) at the *job* level so a job can be skipped without
-  wedging a required check. Deciding at the workflow level breaks required checks — a skipped
-  required workflow stays `pending` and blocks merge forever (GitHub community discussion #44490,
-  <https://github.com/orgs/community/discussions/44490>). Always gate at job level, or use a final
-  aggregator job that succeeds only when every job that *ran* passed.
+  (`docs`, `src`, `openapi`, `migrations`) at the *job* level. A job can then skip without wedging a
+  required check. Deciding at the *workflow* level breaks this: a skipped required workflow stays
+  `pending` and blocks merge forever (GitHub community discussion #44490,
+  <https://github.com/orgs/community/discussions/44490>). So gate at job level, or use a final
+  aggregator job that passes only when every job that *ran* passed.
 - `actions/labeler` (<https://github.com/actions/labeler>) applies `tier:*` / `area:*` labels from
   `.github/labeler.yml` globs, so humans and policy bots can read the classification on the PR.
 
 **Conditional required checks (the floor).**
 - GitHub **repository rulesets** carry "require status checks" and "require a pull request before
   merging" (<https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets>).
-  Keep a tiny set of *always-required* checks (the PR floor) that run on every PR, and make the
-  heavy jobs self-skip-to-success in the fast lane via the paths-filter outputs — not by removing
-  them from the required list per-PR, which GitHub cannot do.
+  Keep a tiny *always-required* set (the PR floor) that runs on every PR. Let the heavy jobs
+  self-skip-to-success in the fast lane via the paths-filter outputs. Do not remove them from the
+  required list per-PR — GitHub cannot do that.
 - An **aggregator / gatekeeper** job (e.g. `poseidon/wait-for-status-checks`,
   <https://github.com/poseidon/wait-for-status-checks>, or a hand-rolled "all-green" job) is the
   single required check. It resolves to success when skipped jobs are legitimately skipped and to
@@ -101,13 +101,13 @@ data, not code" rule, not forked in TypeScript.
   (<https://github.com/oasdiff/oasdiff-action>): run `oasdiff breaking` base-spec vs PR-spec and
   fail on `ERR`. The *presence* of any `openapi.yaml` diff (from paths-filter) forces an engineer
   into the review regardless of tier; `oasdiff` then classifies whether it is breaking.
-- Migrations: `squawk` (<https://squawkhq.com>, <https://github.com/sbdchd/squawk>) lints Postgres
-  migrations for locking / downtime-prone patterns; Atlas `migrate lint`
-  (<https://atlasgo.io/versioned/lint>) with `--git-base origin/main` checks only the migrations new
-  to the branch and blocks risky patterns (dropping a column/table that breaks older app versions).
+- Migrations, by ecosystem: `squawk` (<https://squawkhq.com>, <https://github.com/sbdchd/squawk>)
+  lints Postgres migrations for locking / downtime patterns. Atlas `migrate lint`
+  (<https://atlasgo.io/versioned/lint>) with `--git-base origin/main` checks only the branch's new
+  migrations and blocks risky ones (e.g. dropping a column/table that breaks older app versions).
   Liquibase Quality Checks (<https://docs.liquibase.com/quality-checks>) cover the changelog world.
   Any migration-path diff is a contract change for Hyrum's-Law reasons (VII) and routes to the full
-  lane — detection is path-based, the verdict is the linter's.
+  lane. Detection is path-based; the verdict is the linter's.
 - `CODEOWNERS` (<https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners>)
   with "require review from Code Owners" makes the engineer review on `openapi.yaml` / `migrations/`
   structurally unskippable: ownership of those paths *is* the gate.

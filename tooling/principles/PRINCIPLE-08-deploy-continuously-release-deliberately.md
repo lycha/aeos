@@ -3,7 +3,7 @@
 > **Principle.** Deployment runs automatically behind feature flags, automated rollback and detailed monitoring. Release is a human decision, and work is done when it is released, observed and measured against its success metric.
 > **Law.** Murphy's Law — anything that can go wrong will; deployment runs without a human only because automated rollback and detailed monitoring assume something *will* break.
 
-This is the operational translation of Principle VIII for projects AEOS drives. It says how to decouple **deploy** (an automated, reversible mechanical act) from **release** (a deliberate human act that exposes behaviour to users), and how to close the loop so a ticket is only `DONE` when its change is released, observed, and measured against a stated success metric. The human sign-off this principle protects is Principle VII's release gate; the measurement it demands feeds Principle XII.
+This is the operational translation of Principle VIII for projects AEOS drives. It decouples two acts. **Deploy** is automated, reversible, and mechanical. **Release** is a deliberate human act that exposes behaviour to users. Then it closes the loop: a ticket is `DONE` only once its change is released, observed, and measured against a stated success metric. The human sign-off is Principle VII's release gate. The measurement feeds Principle XII.
 
 ## What it demands, operationally
 
@@ -61,7 +61,7 @@ Two distinct control planes: **the CD/rollout plane** owns deploy and automated 
 - **Immutable, pinned artifacts.** CI builds once, tags by content digest, and that digest is the only thing promoted across environments. No rebuild between stage and prod.
 - **GitOps as the deploy trigger.** The deployed state is a commit. `Argo CD` / `Flux` reconcile the cluster to Git; a deploy is a PR that bumps an image digest, which makes every deploy diffable and every rollback a `git revert`.
 - **Environments as gates.** `GitHub Environments` carries **required reviewers** (up to 6, one approval needed) and a **wait timer** (1–43,200 min) on the production job, so the pipeline encodes Principle VII's human gate in the workflow file rather than in tribal knowledge.
-- **Analysis-gated promotion.** The rollout controller runs an `AnalysisTemplate` (Argo Rollouts) or `MetricTemplate` (Flagger) at each traffic step, querying the metrics backend; thresholds decide promote vs. abort. Automated canary analysis (the Kayenta pattern) scores the canary against the baseline statistically rather than on a single threshold.
+- **Analysis-gated promotion.** At each traffic step the rollout controller runs an `AnalysisTemplate` (Argo Rollouts) or `MetricTemplate` (Flagger) against the metrics backend. Thresholds decide promote vs. abort. Statistical canary analysis goes further: it scores the canary against the baseline instead of gating on a single reading.
 - **Flag lifecycle in CI.** A lint step fails the build if a PR adds flagged code without registering the flag, and a scheduled job flags stale (fully-rolled-out) flags for removal so flag debt does not accumulate.
 - **Release-to-metric binding.** The ticket's success metric and observation window are machine-readable; a post-release check reads the metric from the observability backend and is what flips the ticket to `DONE`. A release with no readable metric cannot be marked done.
 - **DORA extraction.** Deployment events, incident open/close, and release timestamps are emitted as structured events so change-failure rate and MTTR are computed, not estimated (see Principle XII).
@@ -116,7 +116,7 @@ success_metric:
 | [LaunchDarkly](https://launchdarkly.com/) | Mature commercial flag + experimentation + release-guardrail platform; OpenFeature provider | Enterprise scale, governance, managed guarded releases |
 | [Argo Rollouts](https://argoproj.github.io/rollouts/) | K8s controller: canary + blue-green with `AnalysisTemplate`-driven promotion/rollback, metric plugins | Argo CD users; declarative progressive delivery on Kubernetes |
 | [Flagger](https://flagger.app/) | K8s operator automating canary/blue-green via Istio, Linkerd, NGINX, Contour, Gateway API; metric-gated rollback | Flux/service-mesh users wanting mesh-native traffic shifting |
-| [Spinnaker + Kayenta](https://github.com/spinnaker/kayenta) | Automated canary analysis service: statistical scoring of canary vs. baseline | You want ACA as a scoring service, multi-cloud deploys |
+| [Kargo](https://kargo.io/) | Continuous-promotion controller for Argo CD: moves one artifact stage-to-stage via GitOps, each promotion gated | Multi-environment promotion without bespoke scripts; pairs with Argo CD/Rollouts |
 | [Argo CD](https://argo-cd.readthedocs.io/) | GitOps CD controller; cluster state reconciled to Git, rollback = revert | Kubernetes, pull-based GitOps, auditable deploys |
 | [Flux CD](https://fluxcd.io/) | GitOps toolkit (CNCF graduated); pairs with Flagger for progressive delivery | GitOps with mesh-native canaries, Helm/Kustomize native |
 | [GitHub Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments) | Deployment gates in the workflow: required reviewers, wait timers, env secrets | Encode the human release gate (Principle VII) directly in CI |
@@ -166,7 +166,7 @@ Cross-ecosystem: OpenFeature is the portable seam on the flag side; OpenTelemetr
 - LaunchDarkly: <https://launchdarkly.com/>
 - Argo Rollouts — Analysis & Progressive Delivery: <https://argo-rollouts.readthedocs.io/en/stable/features/analysis/>
 - Flagger — progressive delivery operator: <https://flagger.app/>
-- Spinnaker Kayenta — automated canary analysis: <https://github.com/spinnaker/kayenta>
+- Kargo — continuous promotion for Argo CD: <https://kargo.io/>
 - Argo CD — GitOps CD: <https://argo-cd.readthedocs.io/>
 - Flux CD — GitOps toolkit: <https://fluxcd.io/>
 - GitHub — Controlling deployments (environments, required reviewers, wait timers): <https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments>

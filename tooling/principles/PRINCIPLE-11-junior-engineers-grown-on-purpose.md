@@ -8,19 +8,22 @@
 > and agents are abstractions too, so an engineer who has never built the thing by hand cannot see where
 > it leaks or repair it when it does.
 
-This is the one principle that is mostly *not* a CI gate. It is a learning-and-mentoring system with a
-thin ring of automation around it. AEOS is the acute case of the problem: the pipeline
-(`BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE`) is built so that an agent writes the code and a
-human approves at each gate. Left alone, that produces operators who can click *approve* and nothing
-else — and the pipeline's reviewer rubrics, the convergence guards in `review-loop-policy.ts`, the
-budget ceilings in the orchestrator all assume a human on the gate who can tell a correct diff from a
-plausible one. That human has to be grown. The empirical backdrop is not reassuring: METR's randomized
-trial found even *experienced* developers were ~19% slower with AI yet believed they were faster
-([METR](https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/), arXiv 2507.09089),
-and the Microsoft/CMU study of 319 knowledge workers found higher trust in AI correlated with *less*
+This principle is mostly *not* a CI gate. It is a learning-and-mentoring system with a thin ring of
+automation around it.
+
+AEOS is the acute case. The pipeline (`BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE`) lets an
+agent write the code and a human approve at each gate. Left alone, that produces operators who can
+click *approve* and nothing else. Yet the whole design assumes the opposite: the reviewer rubrics, the
+convergence guards in `review-loop-policy.ts`, and the orchestrator's budget ceilings all need a human
+on the gate who can tell a correct diff from a plausible one. That human has to be grown.
+
+The evidence says this is hard. METR's randomized trial found even *experienced* developers were ~19%
+slower with AI, yet believed they were faster
+([METR](https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/), arXiv 2507.09089).
+The Microsoft/CMU study of 319 knowledge workers found that higher trust in AI correlated with *less*
 critical engagement with its output
 ([The Register summary](https://www.theregister.com/2025/02/11/microsoft_study_ai_critical_thinking/)).
-Juniors who never built by hand are the population most exposed to both effects.
+Juniors who never built by hand are the most exposed to both effects.
 
 ## What it demands, operationally
 
@@ -40,20 +43,21 @@ Juniors who never built by hand are the population most exposed to both effects.
 
 ## Reference architecture
 
-The system has five parts. None of them is a model in the control path — same discipline as the
+The system has six parts. None is a model in the control path — the same discipline as the
 orchestrator's pure scheduler.
 
-**1. The practice ladder (reference-practice, deliberate).** Juniors run a standing cadence of katas on
-an external platform plus an internal track. Use [Exercism](https://exercism.org) (free, ~75 language
-tracks, human mentoring on submissions) for fundamentals and [cyber-dojo](https://cyber-dojo.org) for
-timed, test-first group sessions; draw exercises from the
+**1. The practice ladder (deliberate practice).** Juniors run a standing cadence of katas: an external
+platform plus an internal track. Use [Exercism](https://exercism.org) (free, ~75 language tracks, human
+mentoring on submissions) for fundamentals, and [cyber-dojo](https://cyber-dojo.org) for timed,
+test-first group sessions. Draw exercises from the
 [codingdojo.org kata catalogue](https://codingdojo.org/practices/KataCatalogue/) and Dave Thomas's
-[CodeKata](http://codekata.com). The *reason* katas matter in an agent shop is specific: a kata is
-small enough that a leak in an abstraction (an off-by-one in a Roman-numerals boundary, a float
-comparison in Bowling scoring) shows up in minutes and cannot be delegated away. Repetition builds the
-reflex that lets a reviewer *smell* a wrong diff later. Internal katas should be carved out of real
-AEOS leaks — a past production bug reduced to a failing test — so practice compounds into domain
-knowledge rather than staying abstract.
+[CodeKata](http://codekata.com).
+
+Why katas matter in an agent shop: a kata is small enough that a leak shows up in minutes and cannot be
+delegated away — an off-by-one at a Roman-numerals boundary, a float comparison in Bowling scoring.
+Repetition builds the reflex that lets a reviewer *smell* a wrong diff later. Carve internal katas from
+real AEOS leaks — a past production bug reduced to a failing test — so practice compounds into domain
+knowledge instead of staying abstract.
 
 **2. AI-off mode and when to enforce it.** There must be a first-class, enforceable "agents off" state,
 not an honor system. Concretely:
@@ -64,29 +68,29 @@ not an honor system. Concretely:
   no-agent executor. AEOS already has the mechanism — `AEOS_EXECUTOR=stub` runs the whole pipeline
   without real LLM calls — so a practice run exercises spec → failing test → hand-written code →
   CODE_REVIEW with a human, and the *agent* step is a deliberate no-op. The junior is the worker.
-- **When to enforce it:** always for the first N weeks of onboarding; thereafter whenever the junior
-  meets a *new* layer they will later supervise (a new language track, a new framework, the git
-  internals under `simple-git`, the SQLite migration discipline). The rule of thumb is the Law itself —
-  turn agents off for exactly the abstractions whose leaks the junior will be expected to diagnose on
-  the gate. You do not need to hand-write everything forever; you need to have hand-written each layer
-  once.
+- **When to enforce it:** always for the first N weeks of onboarding. After that, whenever the junior
+  meets a *new* layer they will later supervise — a new language or framework, the git internals under
+  `simple-git`, the SQLite migration discipline. The rule of thumb is the Law itself: turn agents off
+  for exactly the abstractions whose leaks the junior must diagnose on the gate. Nobody hand-writes
+  everything forever. Everyone hand-writes each layer once.
 
 **3. Test-first scaffolds (start from a failing test).** A junior's task does not begin as prose. The
-senior (or the TECH_SPEC/architect artifact) delivers a **small spec plus a committed failing test**,
-and the junior's definition of done for the hand-written portion is "make it green without an agent."
-This mirrors AEOS's own `requiresRepoDiff` guarantee on IMPLEMENTATION: a run that claims to implement
-must leave a real diff. For juniors the inverted form is "a run that claims to *learn* must leave a
-real, human-authored diff against a test you did not write." Tooling: `vitest --watch` (the repo's
-runner) left running during the session; cyber-dojo for group test-first; cookiecutter kata templates
-(e.g. the [zhendrikse/tdd](https://github.com/zhendrikse/tdd) collection) to stamp out a red suite in
+senior (or the TECH_SPEC/architect artifact) delivers a **small spec plus a committed failing test**.
+Definition of done for the hand-written portion: make it green without an agent.
+
+This mirrors AEOS's own `requiresRepoDiff` guarantee on IMPLEMENTATION — a run that claims to implement
+must leave a real diff. The junior's inverted form: a run that claims to *learn* must leave a real,
+human-authored diff against a test you did not write. Tooling: `vitest --watch` (the repo's runner)
+left running through the session; cyber-dojo for group test-first; cookiecutter kata templates (e.g.
+the [zhendrikse/tdd](https://github.com/zhendrikse/tdd) collection) to stamp out a red suite in
 seconds.
 
-**4. Pairing and the review-as-teaching gate.** The CODE_REVIEW column's human approval gate is where a
-senior and junior review an **agent-produced diff together**. The reviewer rubric under
-`.aeos/rubrics/` is the teaching checklist: walk each rubric line against the diff out loud, and make
-the junior produce the `AEOS-VERDICT` reasoning before the senior does. This is deliberate — the
-Microsoft/CMU finding is that people verify less as they trust more, so the junior must practice
-*active* verification (reproduce the claim, find the leak) rather than *passive* acceptance. Format:
+**4. Pairing and the review-as-teaching gate.** At the CODE_REVIEW gate, a senior and junior review an
+**agent-produced diff together**. The reviewer rubric under `.aeos/rubrics/` is the teaching checklist:
+walk each line against the diff out loud, and make the junior produce the `AEOS-VERDICT` reasoning
+before the senior does. This is deliberate. The Microsoft/CMU finding is that people verify less as
+they trust more, so the junior must practice *active* verification — reproduce the claim, find the leak
+— not *passive* acceptance. Format:
 - **Pairing** (driver/navigator) with the junior driving the review for narrow changes; a remote pair
   tool with a shared editor, not screen-share, when distributed.
 - **Mobbing** for the first review of any genuinely new area, so the whole team's "smell" transfers at
@@ -113,12 +117,13 @@ teaching event, not a failure.
 **6. Knowledge capture as curriculum.** Every architecturally significant decision becomes an
 [ADR](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) in
 [MADR](https://adr.github.io/madr/) format, scaffolded with
-[adr-tools](https://github.com/npryce/adr-tools), stored in-repo next to the code it governs. AEOS's
-own `CONSTRAINTS.md` and the invariants in `CLAUDE.md` (verdict comes from a parsed trailer; escalation
-is not failure; keep DB deps lazy) are the canonical example: they are the *leaks a senior already
-paid for*, written down so a junior inherits them instead of rediscovering them in production. The
-`.aeos/tickets/<id>/` artifacts — tech specs, reviews, breakdowns — are a standing corpus of worked
-examples; onboarding points juniors at real DONE epics and asks them to reconstruct the reasoning.
+[adr-tools](https://github.com/npryce/adr-tools) and stored in-repo next to the code it governs.
+
+AEOS's own `CONSTRAINTS.md` and the invariants in `CLAUDE.md` (verdict comes from a parsed trailer;
+escalation is not failure; keep DB deps lazy) are the canonical example. They are the *leaks a senior
+already paid for*, written down so a junior inherits them instead of rediscovering them in production.
+The `.aeos/tickets/<id>/` artifacts — tech specs, reviews, breakdowns — are a standing corpus of worked
+examples. Onboarding points juniors at real DONE epics and asks them to reconstruct the reasoning.
 
 ## CI / automation
 
@@ -140,10 +145,9 @@ Lighter here by design — the work is human. Automation exists only to keep the
 
 | Tool / practice | What it does | When to use it |
 | --- | --- | --- |
-| [Exercism](https://exercism.org) | ~75 language tracks with free human mentoring on submissions | Fundamentals, new-language onboarding, async practice between tasks |
-| [cyber-dojo](https://cyber-dojo.org) | Browser TDD environment with a running test harness; good for groups | Timed test-first katas and mob sessions; no local setup |
-| [codingdojo.org catalogue](https://codingdojo.org/practices/KataCatalogue/) / [CodeKata](http://codekata.com) | Curated kata lists (FizzBuzz, Roman Numerals, Bowling, Game of Life…) | Picking the right difficulty for a given leak to practice |
-| [zhendrikse/tdd](https://github.com/zhendrikse/tdd) | Kata collection + cookiecutter templates that stamp a failing suite | Generating test-first scaffolds quickly in the repo's languages |
+| [Exercism](https://exercism.org) | ~75 language tracks, free human mentoring on submissions | Fundamentals, new-language onboarding, async practice between tasks |
+| [cyber-dojo](https://cyber-dojo.org) | Browser TDD with a running test harness; good for groups | Timed test-first katas and mob sessions; no local setup |
+| [codingdojo.org catalogue](https://codingdojo.org/practices/KataCatalogue/) + [zhendrikse/tdd](https://github.com/zhendrikse/tdd) | Curated kata lists, plus cookiecutter templates that stamp a failing suite | Pick the right kata for a leak; scaffold a red suite fast in the repo's languages |
 | `AEOS_EXECUTOR=stub` (in-repo) | Runs the full pipeline with the agent step as a no-op | Practice tasks: spec → failing test → hand-written code → human CODE_REVIEW |
 | `vitest --watch` (in-repo) | Red/green feedback loop during a session | Every hand-written practice session |
 | Mob/pair sessions ([mob programming](https://academy.threedots.tech/knowledge/mob-programming/)) | Whole-team or driver/navigator review of agent diffs | First review of any new area; transferring "smell" |

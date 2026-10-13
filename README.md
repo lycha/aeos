@@ -17,3 +17,4 @@
 - [**Manifesto — AI-Driven Development**](https://github.com/lycha/aeos/wiki/AI-Driven-Development-A-Manifesto) — my stand on AI-driven code generation and the modern SDLC, and the belief AEOS is built to enforce.
 - [**Twelve Principles of AI‐Driven Development**](Twelve-Principles-of-AI%E2%80%90Driven-Development), the short version of the manifesto.
 - [**Laws Behind the Principles**](Laws-Behind-the-Principles), the engineering laws each principle rests on.
+- [**Tooling for the Twelve Principles**](SUGGESTED_TOOLING.md) — one document per principle on how to *enforce* it with real tooling: reference architectures, CI gates and tool comparisons.

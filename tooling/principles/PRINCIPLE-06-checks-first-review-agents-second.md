@@ -9,38 +9,39 @@
 > - **Kerckhoffs's principle** — the agent may *read* every rubric and every check it is judged by; the protection is that it cannot *change* them.
 > - **Linus's Law** — given enough specialized eyeballs all bugs are shallow; the panel works because each reviewer hunts a different class of defect.
 
-This is the AEOS repo's reference for turning Principle VI into concrete 2024–2026 tooling. It is a
-map of options and an ordering discipline, not a script. The one rule that never bends: **a
-deterministic gate runs to green before any LLM reviewer is spawned**, per panel seat and per column.
+This is the AEOS repo's reference for turning Principle VI into concrete 2024–2026 tooling. It maps
+options and an ordering discipline — not a script. One rule never bends: **a deterministic gate runs
+to green before any LLM reviewer is spawned**, per panel seat and per column.
 
 ## What it demands, operationally
 
 1. **Two phases, in order, never merged.** Phase 1 is a deterministic gate: compilers, linters,
    type checkers, unit/property tests, SAST, policy-as-code, secret and dependency scanners. Phase 2
-   is the LLM review panel. Phase 2 does not start until Phase 1 is green — a red check is a hard
-   stop, not an input the reviewer "weighs". In AEOS terms this is already load-bearing:
-   `output-validation.ts` (word count, `requiresRepoDiff` for agentic `IMPLEMENTATION`) and the
-   preflight pass gate the run *before* the reviewer agent is invoked inside `runAttempt`
-   (`src/application/ticket-run.use-case.ts`).
-2. **Five seats, five lenses.** engineering (does it work / is it maintainable), product (does it
-   match the scenario and contract), invariants (does it violate a stated domain rule), architecture
-   (does it respect the layering and dependency direction), security (does it leak, inject, or pull a
-   bad dependency). Each seat gets its *own* deterministic checks first; the reviewer agent only sees
-   what rules cannot yet express.
-3. **The verdict is parsed, not read.** A reviewer's prose is advisory; the machine-actionable
+   is the LLM review panel. Phase 2 cannot start until Phase 1 is green. A red check is a hard stop —
+   not an input the reviewer "weighs". AEOS already works this way: `output-validation.ts` (word
+   count, `requiresRepoDiff` for agentic `IMPLEMENTATION`) and the preflight pass gate the run
+   *before* `runAttempt` invokes the reviewer (`src/application/ticket-run.use-case.ts`).
+2. **Five seats, five lenses.** Each seat runs its *own* deterministic checks first; the reviewer
+   agent sees only what rules cannot yet express.
+   - **engineering** — does it work and stay maintainable?
+   - **product** — does it match the scenario and contract?
+   - **invariants** — does it break a stated domain rule?
+   - **architecture** — does it respect layering and dependency direction?
+   - **security** — does it leak, inject, or pull a bad dependency?
+3. **The verdict is parsed, not read.** A reviewer's prose is advisory. The machine-actionable
    decision is a structured trailer. AEOS reads an `AEOS-VERDICT` HTML comment via
-   `domain/services/verdict-parser.ts`; a missing or unparseable trailer **escalates**, it is never
-   coerced to pass or reject. Substring-matching review prose misfires on the reviewer's own
-   output-format template — do not do it.
-4. **Rubrics are code, kept outside the writable scope.** Rubrics live as data under `.aeos/rubrics/`
-   and column/agent specs under `.aeos/column-specs/` and `.aeos/agents/`, loaded and Zod-validated by
-   `infrastructure/spec-loader/`. The agent under review reads them; it cannot edit them in the same
-   run that it is judged by them (Kerckhoffs). The check definitions sit in CI config and in
+   `domain/services/verdict-parser.ts`. A missing or unparseable trailer **escalates** — it is never
+   coerced to pass or reject. Never substring-match the prose: it misfires on the reviewer's own
+   output-format template.
+4. **Rubrics are code, kept outside the writable scope.** Rubrics live as data under `.aeos/rubrics/`;
+   column and agent specs under `.aeos/column-specs/` and `.aeos/agents/`. All are loaded and
+   Zod-validated by `infrastructure/spec-loader/`. The agent under review reads them but cannot edit
+   them in the same run it is judged by (Kerckhoffs). Check definitions live in CI config and in
    `tooling/` verifiers the agent does not own (Goodhart).
 5. **Findings graduate into rules.** When a review agent flags the same defect across runs, promote
-   it: write a Semgrep rule, a lint rule, an OPA policy, or a property test. The deterministic gate
-   grows; the panel is freed to look for genuinely novel problems. This is the only sanctioned way the
-   system "learns between runs" (agents do not — Principle XII).
+   it: a Semgrep rule, a lint rule, an OPA policy, or a property test. The gate grows; the panel is
+   freed for genuinely novel problems. This is the only sanctioned way the system "learns between
+   runs" (agents do not — Principle XII).
 
 ## Reference architecture
 
@@ -73,17 +74,16 @@ deterministic gate runs to green before any LLM reviewer is spawned**, per panel
 ```
 
 The gate is where Principle VI meets **Principle IV** (*generators build the scaffold*). The
-conformance verifiers under `tooling/` — `tooling/openapi-typescript`, `tooling/openapi-php-laravel`
-(`scripts/verify-contract.php`), `tooling/openapi-kotlin-spring`, and the `sqlmigrations-*` DB-codegen
-scaffolds — are **themselves deterministic checks that run inside Phase 1**: they refuse the build
-when the contract drifts from the generated code, before any review agent is spawned. A contract
-violation is caught by a verifier, not debated by a reviewer.
+conformance verifiers under `tooling/` are themselves Phase-1 checks: `tooling/openapi-typescript`,
+`tooling/openapi-php-laravel` (`scripts/verify-contract.php`), `tooling/openapi-kotlin-spring`, and
+the `sqlmigrations-*` DB-codegen scaffolds. Each refuses the build when the contract drifts from the
+generated code, before any review agent is spawned. A contract violation is caught by a verifier —
+never debated by a reviewer.
 
 ## CI / automation
 
-Model the two phases as dependent CI jobs so the ordering is enforced by the pipeline, not by
-convention. In GitHub Actions, a `needs:` edge makes the panel job literally unreachable until the
-gate is green:
+Model the two phases as dependent CI jobs, so the pipeline enforces the ordering — not convention. In
+GitHub Actions, a `needs:` edge makes the panel job unreachable until the gate is green:
 
 ```yaml
 jobs:
@@ -104,20 +104,20 @@ jobs:
 
 Notes that keep the ordering honest:
 
-- **One normalized output format: SARIF.** Semgrep, CodeQL, Trivy, Checkov, and most scanners emit
-  SARIF; GitHub's `upload-sarif` aggregates them into the Security tab and PR annotations, so the
-  gate speaks one dialect regardless of seat.
+- **One output format: SARIF.** Semgrep, CodeQL, Trivy, and most scanners emit it. GitHub's
+  `upload-sarif` aggregates them into the Security tab and PR annotations, so the gate speaks one
+  dialect across every seat.
 - **Fail closed.** Every Phase-1 step exits non-zero on a finding above threshold. A warn-only
   scanner is not a gate. Mirror the AEOS CI order locally — `typecheck → lint → build → test`
   (`npm run typecheck && npm run lint && npm run build && npm test`) before pushing.
 - **Shift left with the same rules.** Run the fast gate members in `pre-commit`
-  (https://pre-commit.com/) so the agent hits the same rule locally that CI enforces — identical
+  (https://pre-commit.com/) so the agent hits the same rule locally that CI enforces. Identical
   config, no drift.
-- **Keep the gate current automatically.** Pin scanner actions and rule packs, and let Renovate or
-  Dependabot bump them; a stale ruleset silently stops catching new classes of defect.
+- **Keep the gate current automatically.** Pin scanner actions and rule packs; let Renovate or
+  Dependabot bump them. A stale ruleset silently stops catching new classes of defect.
 - **Supply-chain gate.** `OSV-Scanner` on lockfiles and `Trivy fs`/`trivy config` on the tree run in
-  the security seat; Dependabot/Renovate open the fix PRs. A vulnerable transitive dependency is a
-  gate failure, not a reviewer's judgment call.
+  the security seat. Dependabot/Renovate open the fix PRs. A vulnerable transitive dependency is a
+  gate failure — not a reviewer's judgment call.
 
 ## Tooling options
 
@@ -127,7 +127,7 @@ Notes that keep the ordering honest:
 | [CodeQL](https://codeql.github.com/) | Semantic query engine, deep taint tracking; native GitHub code scanning | Scheduled deep security pass; free for public repos. Pair with Semgrep on PRs |
 | [SonarQube / SonarCloud](https://www.sonarsource.com/products/sonarqube/) | Quality gate: bugs, code smells, coverage, duplication, complexity | Engineering seat when you want a single pass/fail quality gate with trend history |
 | [Open Policy Agent](https://www.openpolicyagent.org/) + [Conftest](https://www.conftest.dev/) | Policy-as-code in Rego over structured config (YAML/JSON/Terraform) | Invariants & architecture seats — assert rules over specs, manifests, `.aeos/*.yaml`, IaC |
-| [Checkov](https://www.checkov.io/) | IaC/config misconfiguration scanning (Terraform, k8s, Dockerfile, GH Actions) | Security/architecture seat for infrastructure and pipeline hardening |
+| [fast-check](https://github.com/dubzzz/fast-check) · [Hypothesis](https://hypothesis.readthedocs.io/) | Property-based tests: generate inputs to break a stated invariant (JS/TS; Python) | Invariants seat — and a **promotion target** when a finding becomes a property test |
 | [Trivy](https://trivy.dev/) | Vulns + misconfig + secrets across filesystem, images, IaC; SARIF | One scanner covering several security concerns in the security seat |
 | [OSV-Scanner](https://google.github.io/osv-scanner/) | Lockfile deps vs the OSV vulnerability database | Dedicated dependency-vuln gate; cross-ecosystem, Google-maintained |
 | [gitleaks](https://github.com/gitleaks/gitleaks) · [TruffleHog](https://github.com/trufflesecurity/trufflehog) | Committed-secret detection; TruffleHog verifies credentials against live services | Security seat + `pre-commit` so a secret never reaches CI in the first place |
@@ -140,10 +140,10 @@ Notes that keep the ordering honest:
 | [Greptile](https://www.greptile.com/) | Repo-indexed review with whole-codebase context | **Phase 2** architecture/invariants seat needing cross-file context |
 | [GitHub Copilot code review](https://docs.github.com/en/copilot/using-github-copilot/code-review/using-copilot-code-review) | Zero-setup LLM review in GitHub (GA April 2025) | **Phase 2** for GitHub-native shops; note Actions-minute billing on private repos from 2026-06-01 |
 
-No single AI reviewer is sufficient: on Martian's independent Code Review Bench no tool found more
-than ~63% of known issues in its first published run, and no benchmark measures false-positive rate on
-*your* code — which is exactly why the deterministic gate carries the load it can, and why the panel is
-plural (Linus's Law).
+No single AI reviewer is enough. On Martian's independent Code Review Bench, no tool scores much
+above ~65% F1 at catching known issues. And no benchmark measures the false-positive rate on *your*
+code. That is why the deterministic gate carries every load it can, and why the panel is plural
+(Linus's Law).
 
 ## Anti-patterns
 
@@ -198,7 +198,7 @@ plural (Linus's Law).
 - SonarQube — https://www.sonarsource.com/products/sonarqube/
 - Open Policy Agent — https://www.openpolicyagent.org/
 - Conftest (Rego over structured config) — https://www.conftest.dev/
-- Checkov — https://www.checkov.io/
+- fast-check / Hypothesis (property-based testing) — https://github.com/dubzzz/fast-check
 - Trivy — https://trivy.dev/
 - OSV-Scanner (lockfiles vs OSV database) — https://google.github.io/osv-scanner/
 - gitleaks — https://github.com/gitleaks/gitleaks
@@ -216,4 +216,4 @@ plural (Linus's Law).
 - Qodo Merge / PR-Agent (open-source, self-hostable) — https://github.com/qodo-ai/pr-agent
 - Greptile (repo-indexed review) — https://www.greptile.com/
 - GitHub Copilot code review (GA April 2025; Actions-minute billing from 2026-06-01) — https://docs.github.com/en/copilot/using-github-copilot/code-review/using-copilot-code-review
-- AI code-review tool landscape & Code Review Bench (~63% first-run detection ceiling) — https://www.morphllm.com/github-ai-code-review
+- AI code-review tool landscape & Code Review Bench (top tools ~65% F1) — https://www.morphllm.com/github-ai-code-review

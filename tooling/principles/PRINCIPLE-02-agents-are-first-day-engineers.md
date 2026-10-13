@@ -7,14 +7,20 @@
 > **Law.** The Stochastic Parrot — a model emits statistically likely text, so fluent output is no
 > evidence of correctness; you rely on guardrails, not on trust in the prose.
 
-Treat every agent run as a competent engineer's **first hour on the job**: capable, fast, and
-completely without institutional memory. It knows nothing you did not hand it in the prompt, it
-cannot be "told once and trusted," and it will produce confident, well-formatted output whether or
-not that output is right. The engineering answer is not better trust — it is **context engineering**
-(make the written-down world complete), **least-privilege execution** (make the blast radius small),
-and **deterministic guardrails** (check the work mechanically, never believe it because it reads
-well). This is the operational twin of Principle I (Discipline is the control) and the enabling
-condition for Principle VI (Checks first, review agents second).
+Treat every agent run as a competent engineer's **first hour on the job**. Capable. Fast.
+Completely without institutional memory.
+
+It knows only what you hand it in the prompt. It cannot be "told once and trusted." It emits
+confident, well-formatted output whether or not that output is right.
+
+The answer is not more trust. It is three disciplines:
+
+- **Context engineering** — make the written-down world complete.
+- **Least-privilege execution** — make the blast radius small.
+- **Deterministic guardrails** — check the work mechanically; never believe it because it reads well.
+
+This is the operational twin of Principle I (Discipline is the control), and the enabling condition
+for Principle VI (Checks first, review agents second).
 
 ## What it demands, operationally
 
@@ -110,19 +116,19 @@ rubric + constraints     ─┘                                   │
 
 | Tool | What it does | When to pick it |
 | --- | --- | --- |
-| [AGENTS.md](https://agents.md) | Open, Linux-Foundation-stewarded plain-Markdown convention for repo-level agent instructions; read by Codex, Cursor, Jules, Copilot, Aider, goose, Gemini CLI, Zed, Amp, Augment and more | Default "written-down world" file for any repo; one format most agents already read |
-| [Claude Code memory — CLAUDE.md](https://docs.claude.com/en/docs/claude-code/memory) | Hierarchical `CLAUDE.md` (enterprise → project → user), `@`-imports, nearest-wins in subtrees | You use Claude Code and want layered, importable conventions; keep `AGENTS.md` as the portable root |
-| [Claude Code settings & permissions](https://docs.claude.com/en/docs/claude-code/settings) | `permissions.allow/ask/deny` rules (`Bash(git:*)`, `Read(src/*)`), deny-wins precedence, managed-only mode, `disableBypassPermissionsMode` | Least-privilege tool/path/command scoping you can commit and enforce per project |
-| [Claude Code sandboxing](https://docs.claude.com/en/docs/claude-code/sandboxing) | OS-level isolation of the bash tool: bubblewrap (Linux/WSL2) + socat proxy, `sandbox-exec` (macOS); writes confined to workdir, first-use prompt on each new network domain, `failIfUnavailable` | Containing untrusted command execution without a prompt on every call |
-| [Dev Containers spec (containers.dev)](https://containers.dev/) | `devcontainer.json` reproducible, declarative dev environment; one image for human + agent | Baseline reproducible env; agents and CI run the same pinned toolchain |
-| [Nix flakes](https://nixos.wiki/wiki/Flakes) + [direnv / nix-direnv](https://github.com/nix-community/nix-direnv) | Fully pinned, hash-locked environments (`flake.lock`) auto-activated on `cd` | Strongest reproducibility; "no cross-run memory" extends to a byte-identical toolchain |
-| [E2B](https://e2b.dev/) | Firecracker-microVM sandboxes with a per-sandbox kernel, sub-second boot, ephemeral by default | Running agent-authored/untrusted code with strong kernel isolation and low latency |
-| [Daytona](https://www.daytona.io/) | Open-source, self-hostable ephemeral dev-environment platform (selectable isolation: Docker/seccomp, Kata, Sysbox) | Self-hosted standardized agent dev environments you control |
-| [Firecracker](https://firecracker-microvm.github.io/) / [gVisor](https://gvisor.dev/) / [Kata Containers](https://katacontainers.io/) | The isolation primitives themselves — microVMs and user-space-kernel sandboxes | You build your own sandbox tier and need to choose the isolation/latency tradeoff |
-| [StepSecurity Harden-Runner](https://github.com/step-security/harden-runner) | Network egress filtering + runtime monitoring for GitHub Actions runners | Default-deny network egress for agent/CI runs; catch exfiltration and surprise domains |
-| [OpenAI Agents SDK tool filters](https://openai.github.io/openai-agents-python/mcp/) | `create_static_tool_filter(allowed_tool_names=…, blocked_tool_names=…)` + dynamic filters on MCP servers; hosted-tool `require_approval` | OpenAI-stack agents: restrict which MCP tools a given agent can even see |
-| [Anthropic MCP](https://modelcontextprotocol.io/) | Standard protocol for exposing tools/data to agents with explicit, enumerable tool surfaces | Giving agents capabilities as an auditable, allow-listable set rather than ad-hoc shell access |
-| [Anthropic: Effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) | Reference practice: curate the token budget — write, select, compress, isolate; sub-agents with isolated context | The "why" behind assembly-before-run and keeping the main agent's context clean |
+| [AGENTS.md](https://agents.md) | Open plain-Markdown standard for repo-level agent instructions, now governed by the Linux Foundation's Agentic AI Foundation (OpenAI, Anthropic, Block). Read by Codex, Cursor, Copilot, Aider, goose, Gemini CLI, Zed, Amp and more | Default "written-down world" file. One format most agents already read |
+| [Claude Code memory — CLAUDE.md](https://docs.claude.com/en/docs/claude-code/memory) | Hierarchical `CLAUDE.md` (enterprise → project → user), `@`-imports, nearest-wins in subtrees | You run Claude Code and want layered, importable conventions. Keep `AGENTS.md` as the portable root |
+| [Claude Code settings & permissions](https://docs.claude.com/en/docs/claude-code/settings) | `permissions.allow/ask/deny` rules (`Bash(git:*)`, `Read(src/*)`), deny-wins precedence, managed-only mode, `disableBypassPermissionsMode` | Least-privilege tool/path/command scoping you commit and enforce per project |
+| [Claude Code sandboxing](https://docs.claude.com/en/docs/claude-code/sandboxing) | OS-level isolation of the bash tool: bubblewrap (Linux/WSL2), `sandbox-exec` (macOS); writes confined to the workdir, a prompt on each new network domain | Containing command execution without a prompt on every call |
+| [Dev Containers (containers.dev)](https://containers.dev/) | `devcontainer.json` — a declarative, reproducible dev environment; one image for human and agent | Baseline reproducible env. Agents and CI run the same pinned toolchain |
+| [Nix flakes](https://nixos.wiki/wiki/Flakes) + [nix-direnv](https://github.com/nix-community/nix-direnv) | Hash-locked environments (`flake.lock`), auto-activated on `cd` | Strongest reproducibility. "No cross-run memory" extends to a byte-identical toolchain |
+| [E2B](https://e2b.dev/) | Firecracker-microVM sandboxes: per-sandbox kernel, sub-second boot, ephemeral by default | Running agent-authored code with strong kernel isolation and low latency |
+| [Coder](https://coder.com/) | Open-source, self-hostable workspaces defined in Terraform; each AI agent task runs in its own isolated workspace with audit logging and identity federation | Self-hosted, standardized agent workspaces on infrastructure you control |
+| [Firecracker](https://firecracker-microvm.github.io/) / [gVisor](https://gvisor.dev/) / [Kata Containers](https://katacontainers.io/) | The isolation primitives themselves — microVMs and user-space-kernel sandboxes | You build your own sandbox tier and need to pick the isolation/latency tradeoff |
+| [StepSecurity Harden-Runner](https://github.com/step-security/harden-runner) | Network egress filtering + runtime monitoring for GitHub Actions runners | Default-deny egress for agent/CI runs; catch exfiltration and surprise domains |
+| [OpenAI Agents SDK tool filters](https://openai.github.io/openai-agents-python/mcp/) | `create_static_tool_filter(allowed/blocked_tool_names)` + dynamic filters on MCP servers; hosted-tool `require_approval` | OpenAI-stack agents: restrict which MCP tools an agent can even see |
+| [Model Context Protocol](https://modelcontextprotocol.io/) | Standard protocol for exposing tools/data to agents with explicit, enumerable tool surfaces | Giving agents capabilities as an auditable, allow-listable set, not ad-hoc shell access |
+| [Anthropic: Effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) | Reference practice: curate the token budget — write, select, compress, isolate; sub-agents with isolated context | The "why" behind assembling context before the run and keeping the main agent's context clean |
 
 ## Anti-patterns
 
@@ -176,7 +182,7 @@ rubric + constraints     ─┘                                   │
 
 ## Sources
 
-- AGENTS.md open convention and compatible tools — <https://agents.md>
+- AGENTS.md open standard (Linux Foundation / Agentic AI Foundation) and compatible tools — <https://agents.md>
 - Claude Code settings & permissions (`allow`/`ask`/`deny`, deny-precedence, managed mode) — <https://docs.claude.com/en/docs/claude-code/settings>
 - Claude Code native sandboxing (bubblewrap, socat proxy, `sandbox-exec`, per-domain network prompts) — <https://docs.claude.com/en/docs/claude-code/sandboxing>
 - Claude Code memory / `CLAUDE.md` hierarchy & imports — <https://docs.claude.com/en/docs/claude-code/memory>
@@ -184,7 +190,7 @@ rubric + constraints     ─┘                                   │
 - Dev Container specification — <https://containers.dev/>
 - Nix Flakes — <https://nixos.wiki/wiki/Flakes> · nix-direnv — <https://github.com/nix-community/nix-direnv>
 - E2B (Firecracker-microVM sandboxes) — <https://e2b.dev/>
-- Daytona (open-source ephemeral dev environments) — <https://www.daytona.io/>
+- Coder (open-source self-hostable agent workspaces) — <https://coder.com/>
 - Firecracker — <https://firecracker-microvm.github.io/> · gVisor — <https://gvisor.dev/> · Kata Containers — <https://katacontainers.io/>
 - StepSecurity Harden-Runner (CI egress filtering) — <https://github.com/step-security/harden-runner>
 - OpenAI Agents SDK, MCP tool filtering (`create_static_tool_filter`, `require_approval`) — <https://openai.github.io/openai-agents-python/mcp/>

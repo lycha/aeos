@@ -11,12 +11,13 @@
 > and therefore more review, so model spend and review capacity are instrumented from day one, not
 > bolted on once the bill arrives.
 
-AEOS is the system under measurement. A ticket is an epic or task moving through a fixed column
-sequence (`domain/services/state-machine.ts`); every column has a worker, a reviewer with rubrics, and
-a human approval gate. This principle is about the data exhaust of that machine and the offline loop
-that retunes it — because the agents themselves are stateless between runs, the only thing that
-actually learns is the configuration: column specs, which gates stay manual, and the model assigned to
-each agent.
+AEOS is the system under measurement. A ticket — an epic or task — moves through a fixed column
+sequence (`domain/services/state-machine.ts`). Every column has a worker, a reviewer with rubrics, and
+a human approval gate.
+
+This principle covers two things: the data exhaust of that machine, and the offline loop that retunes
+it. The agents are stateless between runs, so they never learn. The only thing that learns is the
+configuration — column specs, which gates stay manual, and the model assigned to each agent.
 
 ## What it demands, operationally
 
@@ -53,26 +54,28 @@ the `TicketRunObserver` event stream — so instrumentation is mostly *exporting
 inventing new bookkeeping.
 
 **1. Instrument — OpenTelemetry traces over the pipeline.**
-Wrap one `TicketRunUseCase.execute()` as a root span, with child spans for each loop phase the observer
+Wrap one `TicketRunUseCase.execute()` as a root span. Add child spans for each loop phase the observer
 already emits (`ticket-run.working`, `…validate`, `…commit`, `…review`, `…verdict`). Executor calls
-become `gen_ai.*` spans carrying `gen_ai.request.model`, token counts, and cost — follow the
-OpenTelemetry **GenAI semantic conventions** so the data is portable across backends (the conventions
-have moved to their own repo and are still evolving, so pin a convention version:
-[opentelemetry.io/docs/specs/semconv/gen-ai](https://opentelemetry.io/docs/specs/semconv/gen-ai/)). The
-cleanest AEOS seam is a decorator on the `createExecutor(agentSpec)` factory in `container.ts`, so worker
-and reviewer executors are both traced without touching domain code. A span's attributes should let you
-reconstruct: which agent, which column, which model, how many revision-loop iterations, and whether the
-exit was `SIGNED_OFF`, `ESCALATED`, or `FAILED` (the escalation-is-not-failure invariant must survive
-into the trace).
+become `gen_ai.*` spans carrying `gen_ai.request.model`, token counts, and cost.
+
+Follow the OpenTelemetry **GenAI semantic conventions** so the data is portable across backends. They
+now live in their own repo and are still evolving, so pin a convention version
+([opentelemetry.io/docs/specs/semconv/gen-ai](https://opentelemetry.io/docs/specs/semconv/gen-ai/)).
+
+The cleanest AEOS seam is a decorator on the `createExecutor(agentSpec)` factory in `container.ts` —
+worker and reviewer executors are then both traced without touching domain code. Each span's attributes
+should let you reconstruct: which agent, which column, which model, how many revision-loop iterations,
+and whether the exit was `SIGNED_OFF`, `ESCALATED`, or `FAILED`. The escalation-is-not-failure invariant
+must survive into the trace.
 
 **2. Aggregate — DORA + LLM observability backends.**
 - **DORA:** feed deploy/release events (from CI and the deploy target) plus AEOS transition events into a
-  DORA computer. **Apache DevLake** ([devlake.apache.org](https://devlake.apache.org/)) is the open
-  self-hostable choice with prebuilt DORA dashboards; **Google Four Keys**
+  DORA computer. **Apache DevLake** ([devlake.apache.org](https://devlake.apache.org/)) is the open,
+  self-hostable choice, with prebuilt DORA dashboards. **Google Four Keys**
   ([github.com/dora-team/fourkeys](https://github.com/dora-team/fourkeys)) is the original reference
-  pipeline but the repo is archived/unmaintained as of 2024, so treat it as a pattern, not a dependency.
-  **Faros AI** ([faros.ai](https://faros.ai/)) is the managed option that attributes metrics per
-  team/app in a monorepo.
+  pipeline, but the repo was archived in 2024 — treat it as a pattern, not a dependency. **Faros AI**
+  ([faros.ai](https://faros.ai/)) is the managed option; it attributes metrics per team/app in a
+  monorepo.
 - **LLM cost + traces:** route executor calls through an LLM gateway so spend is captured at the edge,
   independent of the agent code. **Langfuse** ([langfuse.com](https://langfuse.com/)) for deep,
   workflow-topology tracing and eval storage; **Helicone** ([helicone.ai](https://www.helicone.ai/)) for
@@ -91,9 +94,9 @@ human eventually signed off). Then run two kinds of offline eval:
   eval set = the gate can drop to advisory/auto. **Promptfoo**
   ([promptfoo.dev](https://www.promptfoo.dev/)) for declarative YAML eval configs in CI; **Braintrust**
   ([braintrust.dev](https://www.braintrust.dev/)) or **Langfuse** for stored eval runs with regression
-  tracking; **OpenAI Evals** ([github.com/openai/evals](https://github.com/openai/evals)) and **DeepEval**
-  ([github.com/confident-ai/deepeval](https://github.com/confident-ai/deepeval), pytest-style) for custom
-  scoring; **Ragas** ([docs.ragas.io](https://docs.ragas.io/)) only where a column does retrieval.
+  tracking; **DeepEval** ([github.com/confident-ai/deepeval](https://github.com/confident-ai/deepeval))
+  for pytest-style custom scoring; **Ragas** ([docs.ragas.io](https://docs.ragas.io/)) only where a
+  column does retrieval.
 - **Model-right-sizing evals** (the "smallest model good enough" test): run each column's task against a
   ladder of models (e.g. Haiku → Sonnet → Opus) on the eval set, score quality, and pick the cheapest
   model whose quality clears the column's bar. The winner becomes the agent's `defaultExecutor`/model in
@@ -131,8 +134,7 @@ Twyman candidate — verify against human labels before acting.
 | **Apache DevLake** ([link](https://devlake.apache.org/)) | DORA | Self-hosted, open; prebuilt DORA dashboards; want to own the data |
 | **Google Four Keys** ([link](https://github.com/dora-team/fourkeys)) | DORA | Reference pattern only — repo archived (2024); fork or borrow the model |
 | **Faros AI** ([link](https://faros.ai/)) | DORA | Managed; per-team/app attribution in a monorepo; adds rework rate |
-| **Sleuth** ([link](https://www.sleuth.io/)) / **LinearB** ([link](https://linearb.io/)) | DORA | Managed deploy-tracking + DORA with workflow automation |
-| **DX** ([link](https://getdx.com/)) / **Haystack** ([link](https://www.usehaystack.io/)) | DORA + dev-experience | Want DORA alongside developer-experience and bottleneck analytics |
+| **Sleuth** ([link](https://www.sleuth.io/)) · **LinearB** ([link](https://linearb.io/)) · **DX** ([link](https://getdx.com/)) | DORA + dev-experience | Managed; want DORA alongside deploy-tracking, DX, and bottleneck analytics without self-hosting |
 | **OpenTelemetry GenAI semconv** ([link](https://opentelemetry.io/docs/specs/semconv/gen-ai/)) | Observability | Vendor-neutral span schema for the pipeline; pin a version (still evolving) |
 | **Langfuse** ([link](https://langfuse.com/)) | Observability + LLM-eval + cost | Deep workflow-topology traces, stored evals, and cost in one OSS tool |
 | **Helicone** ([link](https://www.helicone.ai/)) | Observability + cost | Proxy-based, near-zero-code cost tracking, caching, rate limits |
@@ -140,7 +142,6 @@ Twyman candidate — verify against human labels before acting.
 | **OpenMeter** ([link](https://openmeter.io/)) | Cost metering | Turn spend into per-project metered/chargeback data |
 | **Promptfoo** ([link](https://www.promptfoo.dev/)) | LLM-eval | Declarative YAML evals in CI; fast multi-model comparison; red-teaming |
 | **Braintrust** ([link](https://www.braintrust.dev/)) | LLM-eval | Managed eval + observability with strong CI/CD regression tracking |
-| **OpenAI Evals** ([link](https://github.com/openai/evals)) | LLM-eval | Model-agnostic custom eval sets (structured/code/SQL output) |
 | **DeepEval** ([link](https://github.com/confident-ai/deepeval)) | LLM-eval | Pytest-style, 50+ metrics; fits colocated-test convention — mind cost (LLM-judged) |
 | **Ragas** ([link](https://docs.ragas.io/)) | LLM-eval | Only where a column retrieves context; faithfulness/relevancy metrics |
 
@@ -192,8 +193,7 @@ Twyman candidate — verify against human labels before acting.
 - Apache DevLake: <https://devlake.apache.org/>
 - Google Four Keys (archived): <https://github.com/dora-team/fourkeys>
 - Faros AI: <https://faros.ai/>
-- Sleuth: <https://www.sleuth.io/> · LinearB: <https://linearb.io/>
-- DX: <https://getdx.com/> · Haystack: <https://www.usehaystack.io/>
+- Sleuth: <https://www.sleuth.io/> · LinearB: <https://linearb.io/> · DX: <https://getdx.com/>
 - OpenTelemetry GenAI semantic conventions: <https://opentelemetry.io/docs/specs/semconv/gen-ai/>
 - Langfuse: <https://langfuse.com/>
 - Helicone: <https://www.helicone.ai/>
@@ -201,6 +201,5 @@ Twyman candidate — verify against human labels before acting.
 - OpenMeter: <https://openmeter.io/>
 - Promptfoo: <https://www.promptfoo.dev/>
 - Braintrust: <https://www.braintrust.dev/>
-- OpenAI Evals: <https://github.com/openai/evals>
 - DeepEval: <https://github.com/confident-ai/deepeval>
 - Ragas: <https://docs.ragas.io/>

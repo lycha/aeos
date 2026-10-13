@@ -11,40 +11,41 @@
 > hand-written part a human has to understand small.
 
 This is the **keystone** principle, and this folder is its worked proof. Five scaffolds under `tooling/`
-already implement it end to end across three ecosystems; this document generalises their shared
-discipline and maps the landscape of tools that fit the same shape. Read the scaffold READMEs for the
-runnable detail — this is the pattern they instantiate.
+already implement it end to end across three ecosystems. This document generalises their shared
+discipline and maps the tools that fit the same shape. Read the scaffold READMEs for the runnable detail;
+this is the pattern they instantiate.
 
 ## What it demands, operationally
 
-Draw one line through the system: on the **derivable** side sit DTOs, API interfaces, serialisers,
-request/response validators, the database access layer, and the executable scenario harness — all a
-mechanical function of a specification a human owns. On the **non-derivable** side sits business logic:
-the body of a handler, a domain decision, a query's intent. Principle IV says the first side is never
-hand-written (by a human *or* an agent) and never produced by the model, because a generator produces it
-identically every time and an LLM does not. The agent's hand is allowed only on the second side, and the
-generated code is the contract it must satisfy.
+Draw one line through the system.
 
-Three things have to be true for that line to hold, and they are exactly the three disciplines every
-scaffold here enforces:
+- **Derivable side:** DTOs, API interfaces, serialisers, request/response validators, the database access
+  layer, the executable scenario harness. All a mechanical function of a specification a human owns.
+- **Non-derivable side:** business logic — a handler body, a domain decision, a query's intent.
 
-1. **Pin the generator.** A generator's output is an input to everything downstream, and its output shape
-   changes between releases. Hold the installed version against a value in the policy and refuse to run
-   against a different one until a human regenerates, reads the diff, and moves the pin *in the same
-   change*. Bumping the dependency must not silently retype the application.
-2. **No silent no-op.** Generators exit `0` while writing nothing useful when misconfigured. A green build
-   with no generated code surfaces much later as a wall of "module not found" / "unresolved reference"
-   errors pointing nowhere near the cause. Assert the output exists, is non-empty, and contains what it
-   should (at least one interface, at least one table).
+The derivable side is never hand-written — not by a human, not by an agent — and never produced by the
+model. A generator produces it identically every time; an LLM does not. The agent's hand touches only the
+non-derivable side, and the generated code is the contract it must satisfy.
+
+Three disciplines keep that line in place. Every scaffold here enforces all three.
+
+1. **Pin the generator.** Its output feeds everything downstream, and its shape changes between releases.
+   Hold the installed version against a value in the policy. Refuse to run against a different version
+   until a human regenerates, reads the diff, and moves the pin *in the same change*. Bumping the
+   dependency must never silently retype the application.
+2. **No silent no-op.** A misconfigured generator exits `0` while writing nothing useful. The green build
+   then surfaces much later as a wall of "module not found" / "unresolved reference" errors pointing
+   nowhere near the cause. Assert the output exists, is non-empty, and contains what it should — at least
+   one interface, at least one table.
 3. **A conformance gate fails the build on anything unmodelled.** Walk every construct of the spec/schema
    against an explicit allow-list. A construct on neither the allow-list nor an explicit *refusal* list
-   breaks the build with a message offering the two deliberate exits: **model it** or **refuse it**. A
-   green build for a construct nothing serves (a response header the server can never send, a Postgres
-   type the query layer cannot map) ships the gap hidden — strictly worse than a red build.
+   breaks the build. The message offers two deliberate exits: **model it** or **refuse it**. A green
+   build for a construct nothing serves — a response header the server can never send, a Postgres type the
+   query layer cannot map — ships the gap hidden. That is strictly worse than a red build.
 
-The refusal list is a record of deliberate decisions with the reason phrased as the *constraint*, not a
-backlog. When you decide to serve something refused, the move is always: honour it in your code, then
-move it from `refuse` to `allow` in the same commit.
+The refusal list is a record of deliberate decisions — each reason phrased as the *constraint*, not a
+backlog. To serve something refused: honour it in your code, then move it from `refuse` to `allow` in the
+same commit.
 
 ## Reference architecture
 
@@ -56,12 +57,16 @@ human-owned spec  ─▶  pinned deterministic generator  ─▶  generated arte
  Gherkin)                                                   committed reference)       allow/refuse walk)     domain, queries)
 ```
 
-Each scaffold splits into a **reusable verifier** (the core — you never edit it) and an **editable
-policy** (the one file a project owns: where the spec is, the pinned version, the allow/refuse lists, the
-value-level `checks`). The gate is wired into the build graph so no workflow ever compiles against a
-stale or unverified artefact — `prebuild`/`pretest` hooks in the TS scaffolds, `compileKotlin.dependsOn`
-in the Gradle ones, a `composer` script step in PHP — which means **a single CI job (`typecheck`, `build`,
-or `generate-db`) enforces the whole principle**.
+Each scaffold splits in two:
+
+- **A reusable verifier** — the core. You never edit it.
+- **An editable policy** — the one file a project owns: where the spec is, the pinned version, the
+  allow/refuse lists, the value-level `checks`.
+
+The gate is wired into the build graph, so no workflow ever compiles against a stale or unverified
+artefact: `prebuild`/`pretest` hooks in the TS scaffolds, `compileKotlin.dependsOn` in the Gradle ones, a
+`composer` script step in PHP. So **a single CI job (`typecheck`, `build`, or `generate-db`) enforces the
+whole principle**.
 
 The contract-first half (spec → server/types):
 
@@ -99,12 +104,14 @@ the point where DB-constraint invariants meet the gate.
 
 **Where the agent's hand goes.** The generator emits the interface; the agent writes the `@Component` /
 controller / handler body that implements it. The generator emits the `DB`/jOOQ types; the agent writes the
-query *using* them. The generator never emits business logic, and the agent never edits generated output
-(it is `.gitignore`d or held as a read-only reference). Invariants that are not expressible as a type live
-in two places the agent also cannot weaken: **database constraints** (`NOT NULL`, `CHECK`, `UNIQUE`, foreign
-keys, enums) and **property-based tests** that assert the invariant holds for generated inputs rather than a
-handful of examples. The third derivation — **Gherkin → executable suite** — binds the human-written
-scenarios (Principle III) to step definitions the agent fills, so the acceptance criteria run as code.
+query *using* them. The generator never emits business logic, and the agent never edits generated output —
+it is `.gitignore`d or held as a read-only reference.
+
+Invariants a type cannot express live in two places the agent also cannot weaken: **database constraints**
+(`NOT NULL`, `CHECK`, `UNIQUE`, foreign keys, enums) and **property-based tests** that assert the invariant
+over generated inputs, not a handful of examples. The third derivation — **Gherkin → executable suite** —
+binds the human-written scenarios (Principle III) to step definitions the agent fills, so the acceptance
+criteria run as code.
 
 ## CI / automation
 
@@ -137,11 +144,11 @@ scenarios (Principle III) to step definitions the agent fills, so the acceptance
 | [`openapi-generator`](https://openapi-generator.tech) | One engine, 50+ server/client generators (kotlin-spring, php-laravel, spring, go, python, …) | Polyglot shops; a JVM/PHP/other backend needing interface-only server stubs (the two `openapi-*-spring`/`-laravel` scaffolds). |
 | [`orval`](https://orval.dev) | OpenAPI → TS client + models + MSW mocks, framework-aware (React Query, Vue, Angular, SWR) | Frontend-heavy TS where you also want generated data-fetching hooks and mocks. |
 | [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen) | OpenAPI 3 → Go server + client boilerplate and models (moved off the `deepmap` org at v2.3.0) | Go services wanting contract-first server stubs for chi/echo/gin. |
+| [TypeSpec](https://typespec.io) | Concise spec language → deterministically emits OpenAPI 3, JSON Schema, Protobuf | You own many APIs and want one source language *upstream* of the OpenAPI generators above, not hand-written YAML. |
 | [`kysely-codegen`](https://github.com/RobinBlomberg/kysely-codegen) | Introspects a live/migrated DB → Kysely TS schema interfaces | TS services using the Kysely query builder; brownfield DBs (the `sqlmigrations-typescript` scaffold). |
 | [jOOQ](https://www.jooq.org) | Generates a typed SQL DSL (tables, records, keys) from the real schema | JVM services wanting type-safe SQL rather than an ORM (the `sqlmigrations-kotlin-spring` scaffold). |
 | [`sqlc`](https://sqlc.dev) | Hand-written SQL queries → type-safe Go/Kotlin/Python/TS code | You write SQL by hand and want the *result types* generated from it, not an ORM. |
 | [Prisma](https://www.prisma.io) | `schema.prisma` → generated client + migrations; types to `.d.ts` | Greenfield TS wanting a schema DSL as the source of truth with a generated client. |
-| [Drizzle](https://orm.drizzle.team) | Schema-in-TS; types inferred by the compiler, migrations generated | TS teams wanting SQL-like queries with inference and *no* separate codegen step. |
 | [Flyway](https://documentation.red-gate.com/flyway) / [`node-pg-migrate`](https://github.com/salsita/node-pg-migrate) | Versioned, human-owned SQL migrations — the schema source of truth | Any stack; the migrations are the human-owned input the DB generators read from. |
 | [`fast-check`](https://fast-check.dev) · [`jqwik`](https://jqwik.net) · [Hypothesis](https://hypothesis.works) | Property-based testing: assert invariants over generated inputs (TS · JVM · Python) | Enforcing domain invariants the type system can't express — the agent's logic must hold for *all* inputs, not examples. |
 | [Schemathesis](https://schemathesis.readthedocs.io) | Property-based API testing: drives a running service from its OpenAPI spec | Verifying the implementation conforms to the contract (stateful flows, 500s, schema-violating responses). |
@@ -209,10 +216,11 @@ scenarios (Principle III) to step definitions the agent fills, so the acceptance
 - [OpenAPI Generator](https://openapi-generator.tech) — multi-language server/client generators ([GitHub](https://github.com/OpenAPITools/openapi-generator)).
 - [Orval](https://orval.dev/overview) — TS clients, models, and MSW mocks from OpenAPI.
 - [oapi-codegen](https://github.com/oapi-codegen/oapi-codegen) — Go server/client from OpenAPI 3.
+- [TypeSpec](https://typespec.io) — spec language emitting OpenAPI 3, JSON Schema, and Protobuf.
 - [kysely-codegen](https://github.com/RobinBlomberg/kysely-codegen) — Kysely TS types from a live DB.
 - [jOOQ](https://www.jooq.org) and the [`dev.monosoul.jooq-docker`](https://github.com/monosoul/jooq-gradle-plugin) Gradle plugin.
 - [sqlc](https://sqlc.dev) — type-safe code from hand-written SQL.
-- [Prisma](https://www.prisma.io) and [Drizzle ORM](https://orm.drizzle.team) — schema-first TS data layers.
+- [Prisma](https://www.prisma.io) — schema-first TS data layer with a generated client.
 - [Flyway](https://documentation.red-gate.com/flyway) and [node-pg-migrate](https://github.com/salsita/node-pg-migrate) — versioned SQL migrations.
 - [fast-check](https://fast-check.dev), [jqwik](https://jqwik.net), [Hypothesis](https://hypothesis.works) — property-based testing (TS / JVM / Python).
 - [Schemathesis](https://schemathesis.readthedocs.io) — property-based API conformance testing from OpenAPI ([GitHub](https://github.com/schemathesis/schemathesis)).

@@ -62,21 +62,22 @@ spec/
     NNNN-*.md              # MADR-format ADRs — the only source an agent may draft from
 ```
 
-The dependency arrow runs **spec → generators → code**, never backward. `openapi.yaml` here is the
-same file the [`openapi-typescript`](../openapi-typescript/README.md),
+The dependency arrow runs **spec → generators → code**, never backward. The `openapi.yaml` here is
+the same file the [`openapi-typescript`](../openapi-typescript/README.md),
 [`openapi-kotlin-spring`](../openapi-kotlin-spring/README.md) and
-[`openapi-php-laravel`](../openapi-php-laravel/README.md) scaffolds treat as their human-owned input;
-`schema.dbml` compiles to the SQL that [`sqlmigrations-typescript`](../sqlmigrations-typescript/README.md)
+[`openapi-php-laravel`](../openapi-php-laravel/README.md) scaffolds treat as their human-owned input.
+The `schema.dbml` compiles to the SQL that [`sqlmigrations-typescript`](../sqlmigrations-typescript/README.md)
 and [`sqlmigrations-kotlin-spring`](../sqlmigrations-kotlin-spring/README.md) turn into typed DB code.
-Keep one canonical copy of each contract; a generator that reads a *second* copy is a drift bug
+Keep one canonical copy of each contract — a generator that reads a *second* copy is a drift bug
 waiting to happen.
 
-Authoring surfaces are a free choice per team — Stoplight Studio or Redocly for OpenAPI, AsyncAPI
-Studio for events, dbdiagram.io for the ERD — but the committed artefact is always the plain-text DSL,
-and the editor is disposable. The human-drafts/agent-reviews loop maps onto AEOS directly: the human
-commits the draft, the reviewer agent runs its rubric against it, `decideNextAttempt` returns
-advance / retry / escalate, and an unresolved gap escalates to a second human rather than being
-coerced into a pass.
+Authoring surfaces are a free choice per team — Redocly or Swagger Editor for OpenAPI, AsyncAPI
+Studio for events, dbdiagram.io for the ERD. The editor is disposable; the committed artefact is
+always the plain-text DSL.
+
+The human-drafts/agent-reviews loop maps onto AEOS directly. The human commits the draft. The
+reviewer agent runs its rubric against it. `decideNextAttempt` returns advance, retry or escalate.
+An unresolved gap escalates to a second human rather than being coerced into a pass.
 
 ## CI / automation
 
@@ -88,11 +89,11 @@ gate that makes "humans write the spec" more than a slogan.
   naming, required descriptions, error-model consistency, no unversioned paths. Spectral also lints
   AsyncAPI; [Redocly CLI](https://redocly.com/docs/cli/guides/lint-asyncapi) validates AsyncAPI 3.0
   including protocol bindings.
-- **Gate breaking changes.** Diff each PR's contract against `main` and fail on a breaking change
-  with [`oasdiff`](https://github.com/oasdiff/oasdiff) (`--fail-on BREAKING`) or
-  [Optic](https://github.com/opticdev/optic) (`optic diff --check`, which resolves versions from Git
-  tags/branches and exits non-zero on a break). A breaking contract change must be a deliberate,
-  reviewed act — never a silent side effect of an edit.
+- **Gate breaking changes.** Diff each PR's contract against `main` and fail on a breaking change.
+  Use [`oasdiff`](https://github.com/oasdiff/oasdiff) (`--fail-on BREAKING`) or
+  [`openapi-changes`](https://pb33f.io/openapi-changes/) (diffs across Git revisions, exits non-zero
+  on a break). A breaking contract change must be deliberate and reviewed — never a silent side
+  effect of an edit.
 - **Validate Gherkin.** A dry run of the BDD runner (`cucumber --dry-run`, `reqnroll`/`pytest-bdd
   --collect-only`) proves every `.feature` parses and every step has a binding — catching a scenario
   that references a step nobody implemented.
@@ -124,8 +125,7 @@ generators.
 | [Spectral](https://github.com/stoplightio/spectral) | YAML/JSON rulesets (`given`/`then`) for OpenAPI 2/3, AsyncAPI, Arazzo | Programmable API governance you own and version; the de-facto standard |
 | [`vacuum`](https://quobix.com/vacuum/) | Very fast Go OpenAPI/AsyncAPI linter, Spectral-ruleset compatible | Large specs or monorepos where Spectral's Node runtime is the bottleneck |
 | [Redocly CLI](https://redocly.com/docs/cli/) | Lint + bundle + preview for OpenAPI and AsyncAPI 3.0 (bindings) | One CLI for both contract families, docs preview included |
-| [Stoplight Studio](https://stoplight.io/) | Design-first visual OpenAPI editor backed by Spectral | Authors who want a form/visual surface but a plain-YAML artefact |
-| [Optic](https://github.com/opticdev/optic) | Semantic contract diff + breaking-change `--check` from Git refs | PR-time breaking-change gate wired to branches/tags |
+| [`openapi-changes`](https://pb33f.io/openapi-changes/) | OpenAPI diff across Git revisions; breaking-change detection with HTML/markdown/JSON changelog | PR-time breaking-change gate with a visual changelog; shares `vacuum`'s engine |
 | [`oasdiff`](https://github.com/oasdiff/oasdiff) | OpenAPI diff + changelog + `--fail-on BREAKING` | CLI breaking-change gate with zero service dependency |
 | [AsyncAPI CLI / Studio](https://www.asyncapi.com/tools) | Validate, lint and model event-driven contracts (3.0) | Any system where events are first-class, not an afterthought |
 | [Structurizr DSL](https://docs.structurizr.com/dsl) | C4 model as code; one model, many consistent views | Architecture at scale where diagrams must not drift from each other |
@@ -194,10 +194,9 @@ generators.
   [pytest-bdd](https://pytest-bdd.readthedocs.io/) · [behave](https://behave.readthedocs.io/)
 - OpenAPI governance — [Spectral](https://github.com/stoplightio/spectral) ·
   [vacuum](https://quobix.com/vacuum/) · [Redocly CLI](https://redocly.com/docs/cli/) ·
-  [Stoplight](https://stoplight.io/) ·
   [API Evangelist: properties of Spectral governance rules](https://apievangelist.com/2025/01/21/the-properties-of-spectral-api-governance-rules/)
-- Breaking-change diff — [Optic](https://github.com/opticdev/optic) ·
-  [oasdiff](https://github.com/oasdiff/oasdiff) ·
+- Breaking-change diff — [oasdiff](https://github.com/oasdiff/oasdiff) ·
+  [openapi-changes](https://pb33f.io/openapi-changes/) ·
   [Detecting breaking changes in OpenAPI specs](https://reuvenharrison.medium.com/detecting-breaking-changes-in-openapi-specifications-df19971321c8)
 - AsyncAPI — [AsyncAPI tools](https://www.asyncapi.com/tools) ·
   [AsyncAPI validate guide](https://www.asyncapi.com/docs/guides/validate) ·
