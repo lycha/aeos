@@ -5,3 +5,6 @@
 # Composer install artifacts
 /vendor/
 composer.lock
+
+# Stray openapi-generator-CLI version file (this scaffold invokes the generator, not the CLI config).
+openapitools.json
