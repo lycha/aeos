@@ -1,0 +1,21 @@
+{
+  "name": "sqlmigrations-typescript-scaffold",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runnable scaffold: SQL migrations -> TypeScript DB types (Kysely) with Principle IV enforcement.",
+  "scripts": {
+    "generate-db-types": "node scripts/generate-db-types.mjs",
+    "verify-schema": "node scripts/verify-schema.mjs",
+    "generate-db": "node scripts/generate-db-types.mjs && node scripts/verify-schema.mjs"
+  },
+  "dependencies": {
+    "kysely": "^0.27.4"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^10.13.2",
+    "kysely-codegen": "^0.17.0",
+    "node-pg-migrate": "^7.7.1",
+    "pg": "^8.13.1"
+  }
+}
