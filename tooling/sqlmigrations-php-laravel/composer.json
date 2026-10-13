@@ -1,0 +1,28 @@
+{
+    "name": "example/sqlmigrations-php-laravel-scaffold",
+    "description": "Runnable scaffold: human-owned SQL migrations (Phinx) -> typed PHP DB schema (@phpstan-type) with Principle IV enforcement.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.2",
+        "ext-pdo_pgsql": "*"
+    },
+    "require-dev": {
+        "robmorgan/phinx": "^0.16.12",
+        "doctrine/dbal": "^4.5",
+        "testcontainers/testcontainers": "^1.1"
+    },
+    "scripts": {
+        "generate-db-types": "@php scripts/generate-db-types.php",
+        "verify-schema": "@php scripts/verify-schema.php",
+        "generate-db": [
+            "@generate-db-types",
+            "@verify-schema"
+        ]
+    },
+    "scripts-descriptions": {
+        "generate-db-types": "Start a throwaway Postgres, run the Phinx SQL migrations, introspect the real schema, emit .generated/schema.php.",
+        "verify-schema": "Pin the engine, assert generation happened, and fail on any unmapped column type.",
+        "generate-db": "generate-db-types + verify-schema (the command you run)."
+    }
+}

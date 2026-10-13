@@ -1,0 +1,7 @@
+# Live generation output — produced by `composer generate-db-types`, never hand-edited.
+# The committed reference output lives under examples/generated/ and is NOT ignored.
+/.generated/
+
+# Composer install artifacts
+/vendor/
+composer.lock

@@ -1,0 +1,19 @@
+{
+    "_comment": "Merge these into your project's composer.json, then copy db-codegen.policy.php, phinx.php and scripts/ into the project (plus your db/migrations). Point `out`/`namespace` in db-codegen.policy.php at your paths, keep phinx.php pointed at your migrations dir, and run `composer generate-db`. Wire it into CI by running `composer generate-db` AND your static analyser (PHPStan/Psalm) over the generated namespace before build/test, so nothing ever runs against a stale or unverified schema. Generation needs Docker running (Docker Desktop, colima, ...) for testcontainers, plus the pdo_pgsql extension.",
+    "require": {
+        "ext-pdo_pgsql": "*"
+    },
+    "require-dev": {
+        "robmorgan/phinx": "^0.16.12",
+        "doctrine/dbal": "^4.5",
+        "testcontainers/testcontainers": "^1.1"
+    },
+    "scripts": {
+        "generate-db-types": "@php scripts/generate-db-types.php",
+        "verify-schema": "@php scripts/verify-schema.php",
+        "generate-db": [
+            "@generate-db-types",
+            "@verify-schema"
+        ]
+    }
+}
