@@ -1,0 +1,19 @@
+{
+  "_comment": "Merge these into your project's package.json. The pre* hooks make every workflow regenerate first, so nothing ever runs against a stale contract. Adjust the dev/build/test hooks to your framework.",
+  "scripts": {
+    "generate-api-types": "node scripts/generate-openapi-types.mjs",
+    "predev": "npm run generate-api-types",
+    "prebuild": "npm run generate-api-types",
+    "pretest": "npm run generate-api-types",
+    "typecheck": "npm run generate-api-types && tsc --noEmit",
+    "contract:lint": "redocly lint openapi.yaml"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "^0.99.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "yaml": "^2.0.0",
+    "zod": "^4.0.0"
+  }
+}

@@ -1,0 +1,13 @@
+# Generated API types/validators — produced by `npm run generate-api-types`, never hand-edited.
+# Anchored to this dir so the committed reference output in examples/generated/ stays tracked.
+/generated/
+
+# Local install artifacts
+node_modules/
+
+# Files added only to run the bundled example in place (not part of the scaffold).
+# The scaffold is meant to be copied into a project; these belong in that project, not here.
+# Anchored to this dir so the scaffold's own examples/openapi.yaml is still tracked.
+/package.json
+/package-lock.json
+/openapi.yaml
