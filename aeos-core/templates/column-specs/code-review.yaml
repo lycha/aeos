@@ -8,6 +8,7 @@ minWordCount: 50
 requiredSections: []
 reviewerRubrics:
   - rubrics/structure/code-structure.md
+  - rubrics/drift/spec-fidelity.md
   - rubrics/drift/intent-drift.md
 maxIterations: 3
 escalation: escalate_to_human

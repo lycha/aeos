@@ -77,6 +77,16 @@ describe('scaffolded project integrity', () => {
     }
   });
 
+  it('has the code reviewer of a single task check fidelity to the spec', () => {
+    repo.scaffoldDefaults(tmpDir);
+
+    const rubrics = new YamlColumnSpecLoader().load(Column.CODE_REVIEW, tmpDir).reviewerRubrics;
+
+    expect(rubrics).toContain('rubrics/drift/spec-fidelity.md');
+    const rubric = fs.readFileSync(path.join(tmpDir, '.aeos', 'rubrics/drift/spec-fidelity.md'));
+    expect(rubric.toString()).toMatch(/^## When reviewing a single task/m);
+  });
+
   it('reports what it created', () => {
     const created = repo.scaffoldDefaults(tmpDir);
 

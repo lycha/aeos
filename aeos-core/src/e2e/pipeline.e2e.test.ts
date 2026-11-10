@@ -220,6 +220,15 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
         expect(read(record.output!).trimEnd().split('\n').pop()).toMatch(/^<!-- AEOS-RUN: RUN-/);
       }
     }
+    // Code review of a single task is briefed with the pinned spec and the
+    // rubric that checks fidelity to it.
+    const codeReview = records.find(
+      (record) =>
+        record.ticket === tasks[0] && record.column === 'CODE_REVIEW' && record.role === 'reviewer',
+    )!;
+    expect(read(codeReview.brief!.path)).toContain('# Spec Fidelity Rubric');
+    expect(read(codeReview.brief!.path)).toContain('## Specification (pinned EE-aeos@');
+
     // Later attempts overwrite an artefact, so check the link from the artefact's side too.
     for (const id of [epic, ...tasks, standalone]) {
       for (const file of fs.readdirSync(path.join(aeosDir, 'tickets', id))) {
@@ -289,7 +298,14 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       path.join(aeosDir, 'column-specs', 'spec-review.yaml'),
       path.join(aeosDir, 'column-specs', 'product-scoping.yaml'),
     );
+    // ...and a code-review spec from before the spec-fidelity rubric is drift.
+    const codeReviewSpec = path.join(aeosDir, 'column-specs', 'code-review.yaml');
+    fs.writeFileSync(
+      codeReviewSpec,
+      fs.readFileSync(codeReviewSpec, 'utf-8').replace('  - rubrics/drift/spec-fidelity.md\n', ''),
+    );
     const sync = (await runCli('project', 'sync')).output;
+    expect(sync).toMatch(/drift\s+column-specs\/code-review\.yaml/);
     expect(sync).toMatch(/obsolete\s+column-specs\/product-scoping\.yaml/);
     expect(sync).toMatch(/missing\s+column-specs\/spec-review\.yaml/);
   });

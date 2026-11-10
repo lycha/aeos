@@ -447,6 +447,17 @@ The pin is the triple `{ repo, commit, path }`: `<project key>-aeos`, the `HEAD`
 
 Every prompt for a spec-backed epic and for its tasks (preflight, worker and reviewer) opens its context with a `## Specification (pinned <repo>@<commit>)` section: `spec.md`, `decisions.yaml` and every `features/*.feature`, plus `contexts/<context>/glossary.md` when the front matter of `spec.md` (or `meta` of `decisions.yaml`) names a `context`. That context's `CONSTRAINTS.md` is appended to the project's `.aeos/CONSTRAINTS.md`. All of it is read through git at the pinned commit, never from the working tree, so editing the spec does not change what a running epic is told; a pinned commit that can no longer be read fails the run. A task still receives its epic's tech spec as before. A ticket with no pin gets exactly the prompt it got before.
 
+### Spec fidelity at code review
+
+`CODE_REVIEW` of a single task now applies `rubrics/drift/spec-fidelity.md` as well as the
+structure and intent-drift rubrics, so the reviewer checks the task's diff against the pinned
+spec's acceptance criteria and the tech spec's decisions (the rubric says how each criterion
+scopes down to one task). A new project has this from `aeos project init`. In an existing
+project `aeos project sync` reports `column-specs/code-review.yaml` and the rubric as drifted:
+`aeos project sync --force` takes the new versions (each old file is kept as `.bak`), or add
+`- rubrics/drift/spec-fidelity.md` to `reviewerRubrics` by hand. `--apply` alone only adds
+missing files and will not change a file you already have.
+
 ### Projects created before `SPEC_REVIEW`
 
 The column `PRODUCT_SCOPING` is now `SPEC_REVIEW`; the database is migrated on the next command. An epic that was in that column with no spec is kept, set `ESCALATED`, and says why in `aeos ticket show`: create a new epic with `--spec` and close the old one with `aeos ticket move`. In the project, `aeos project sync` lists `column-specs/spec-review.yaml`, `agents/spec-reviewer-agent.yaml` and `rubrics/structure/spec-review-structure.md` as missing (`--apply` adds them) and the retired `product-scoping.yaml`, `pm-agent.yaml` and PRD rubrics as obsolete; it never deletes those. The reworded agents and rubrics show as drifted (`--force` overwrites, with a backup).
