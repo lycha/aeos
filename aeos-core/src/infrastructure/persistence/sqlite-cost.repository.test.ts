@@ -75,4 +75,71 @@ describe('SqliteCostRepository', () => {
     expect(records).toHaveLength(1);
     expect(records[0].costUsd).toBeNull();
   });
+
+  describe('findByFilters', () => {
+    let repo: SqliteCostRepository;
+
+    const ticket = (projectId: string, id: string, parentId: string | null = null): void => {
+      db.prepare(
+        `INSERT INTO tickets (id, project_id, title, "column", parent_id, created_at, updated_at)
+         VALUES (?, ?, 'T', 'TECH_SPEC', ?, 'x', 'x')`,
+      ).run(id, projectId, parentId);
+    };
+    const spend = (projectId: string, ticketId: string, recordedAt: string): void =>
+      repo.record({ ...cost(0.1), projectId, ticketId, recordedAt });
+    const found = (filters: Parameters<SqliteCostRepository['findByFilters']>[0]): string[] =>
+      repo.findByFilters(filters).map((r) => `${r.projectId}/${r.ticketId}`);
+
+    beforeEach(() => {
+      initSchema(db);
+      repo = new SqliteCostRepository(db);
+      ticket('p', 'AEOS-1');
+      ticket('p', 'AEOS-2', 'AEOS-1');
+      ticket('p', 'AEOS-3', 'AEOS-1');
+      ticket('p', 'AEOS-4');
+      ticket('q', 'QQ-1');
+      spend('p', 'AEOS-1', '2026-10-30T10:00:00.000Z');
+      spend('p', 'AEOS-2', '2026-11-01T00:00:00.000Z');
+      spend('p', 'AEOS-3', '2026-11-02T10:00:00.000Z');
+      spend('p', 'AEOS-4', '2026-11-03T10:00:00.000Z');
+      spend('q', 'QQ-1', '2026-11-04T10:00:00.000Z');
+    });
+
+    it('returns every record of every project without filters', () => {
+      expect(found({})).toEqual(['p/AEOS-1', 'p/AEOS-2', 'p/AEOS-3', 'p/AEOS-4', 'q/QQ-1']);
+    });
+
+    it('filters by project and by ticket', () => {
+      expect(found({ projectId: 'q' })).toEqual(['q/QQ-1']);
+      expect(found({ ticketId: 'AEOS-4' })).toEqual(['p/AEOS-4']);
+    });
+
+    it('returns an epic with its child tasks and nothing else', () => {
+      expect(found({ epicId: 'AEOS-1' })).toEqual(['p/AEOS-1', 'p/AEOS-2', 'p/AEOS-3']);
+    });
+
+    it('excludes records from before the since date', () => {
+      expect(found({ since: '2026-11-01' })).toEqual([
+        'p/AEOS-2',
+        'p/AEOS-3',
+        'p/AEOS-4',
+        'q/QQ-1',
+      ]);
+    });
+
+    it('combines filters', () => {
+      expect(found({ epicId: 'AEOS-1', since: '2026-11-02' })).toEqual(['p/AEOS-3']);
+    });
+  });
+
+  it('round-trips the role, and reads a row without one as having none', () => {
+    initSchema(db);
+    insertTicket(db);
+    const repo = new SqliteCostRepository(db);
+
+    repo.record({ ...cost(0.1), role: 'reviewer' });
+    repo.record(cost(0.1));
+
+    expect(repo.findByFilters({}).map((r) => r.role)).toEqual(['reviewer', undefined]);
+  });
 });

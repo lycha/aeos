@@ -119,6 +119,7 @@ function createMockCostRepo(): CostRepository {
     record: vi.fn(),
     findByProject: vi.fn().mockReturnValue([]),
     findByTicket: vi.fn().mockReturnValue([]),
+    findByFilters: vi.fn().mockReturnValue([]),
   };
 }
 
@@ -1423,6 +1424,26 @@ describe('TicketRunUseCase', () => {
         [`/runs/${record.run_id}.json`],
         `[${TICKET_ID}][RUN][${record.run_id}][preflight][ok]`,
       ]);
+    });
+
+    it('records the cost of each role, preflight included', async () => {
+      (preflight.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_t, _p, _path, _ctx, _spec, _agent, preflightExecutor: Executor) => {
+          await preflightExecutor.run({
+            prompt: 'preflight prompt',
+            outputPath: '/tmp/preflight.md',
+            ticketId: TICKET_ID,
+            column: 'IMPLEMENTATION',
+          });
+          return { blocked: false };
+        },
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(
+        (costRepo.record as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0].role),
+      ).toEqual(['preflight', 'worker', 'reviewer']);
     });
 
     it('commits a blocked preflight record with its questions', async () => {

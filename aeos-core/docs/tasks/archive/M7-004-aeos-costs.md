@@ -1,5 +1,7 @@
 # Task: Implement `aeos costs` Spend Report Command
 
+> Superseded by [I1-M1-004](../iteration-1/I1-M1-004-costs-command.md), which implemented the command.
+
 **Milestone:** M7 — Polish & Distribution
 **Agent:** typescript-pro
 **Method:** Manual

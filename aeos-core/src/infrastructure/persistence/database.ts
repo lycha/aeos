@@ -169,6 +169,15 @@ CREATE TABLE IF NOT EXISTS orchestrator_state (
       }
     },
   },
+  {
+    version: 7,
+    description: 'Record the role (preflight, worker, reviewer) on a cost record',
+    apply: (db) => {
+      if (!hasColumn(db, 'cost_records', 'role')) {
+        db.exec(`ALTER TABLE cost_records ADD COLUMN role TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

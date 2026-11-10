@@ -36,6 +36,7 @@ import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
 import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
 import { runRecordPaths, type RunRecord } from '../domain/model/run-record.js';
 import type { ExecutorResult } from '../domain/model/executor-result.js';
+import type { CostRole } from '../domain/model/cost-record.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { ContextAssembler } from './services/context-assembler.js';
 import type { PreflightService } from './services/preflight.js';
@@ -611,6 +612,7 @@ export class TicketRunUseCase implements TicketRunPort {
       ctx.workerExecutorType,
       ctx.workerModel,
       executorResult,
+      'worker',
     );
     this.emitCostEvent(emitter, 'worker', executorResult);
 
@@ -799,6 +801,7 @@ export class TicketRunUseCase implements TicketRunPort {
       ctx.reviewerExecutorType,
       ctx.reviewerModel,
       reviewResult,
+      'reviewer',
     );
     this.emitCostEvent(emitter, 'reviewer', reviewResult);
 
@@ -907,6 +910,16 @@ export class TicketRunUseCase implements TicketRunPort {
         const startedAt = new Date();
         const settle = (result: ExecutorResult): ExecutorResult => {
           invoked = { prompt: invocation.prompt, result, startedAt, endedAt: new Date() };
+          this.recordCost(
+            projectId,
+            ticketId,
+            ctx.column,
+            ctx.workerAgentSpec.name,
+            ctx.workerExecutorType,
+            ctx.workerModel,
+            result,
+            'preflight',
+          );
           return result;
         };
         try {
@@ -1257,9 +1270,11 @@ export class TicketRunUseCase implements TicketRunPort {
     executor: string,
     model: string | undefined,
     result: ExecutorResult,
+    role: CostRole,
   ): void {
     const usage = result.ok ? result.usage : undefined;
     this.costRepo.record({
+      role,
       ticketId,
       projectId,
       column,

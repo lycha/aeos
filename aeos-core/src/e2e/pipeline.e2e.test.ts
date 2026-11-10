@@ -155,6 +155,13 @@ describe('stub end-to-end pipeline', () => {
       records.find((record) => record.ticket === epic)!.run_id,
     );
 
+    // `aeos costs` is registered and reads what the runs recorded.
+    const costs = (await runCli('costs', '--epic', epic)).output;
+    expect(costs).toContain('AEOS Cost Report');
+    for (const id of [epic, ...tasks]) expect(costs).toContain(id);
+    expect(costs).not.toContain(standalone);
+    for (const role of ['preflight', 'worker', 'reviewer']) expect(costs).toContain(role);
+
     // One git spawn for all commit assertions.
     const subjects = git('log', '--format=%s').split('\n');
     for (const id of [...tasks, standalone]) {

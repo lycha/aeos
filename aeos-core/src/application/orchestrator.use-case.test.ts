@@ -67,6 +67,7 @@ describe('OrchestratorUseCase', () => {
       record: vi.fn(),
       findByProject: vi.fn().mockReturnValue([]),
       findByTicket: vi.fn().mockReturnValue([]),
+      findByFilters: vi.fn().mockReturnValue([]),
     };
     stateRepo = {
       find: vi.fn().mockReturnValue(null),

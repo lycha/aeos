@@ -21,6 +21,7 @@ import { registerTicketMoveCommand } from './commands/ticket-move.command.js';
 import { registerTicketReadyCommand } from './commands/ticket-ready.command.js';
 import { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
 import { registerOrchestratorCommand } from './commands/orchestrator.command.js';
+import { registerCostsCommand } from './commands/costs.command.js';
 
 export { createContainer } from './container.js';
 export type { Container } from './container.js';
@@ -96,6 +97,7 @@ export function buildProgram(): Command {
     container.artifactStore,
   );
   registerOrchestratorCommand(program, () => container.orchestrator, container.projectRepo);
+  registerCostsCommand(program, () => container.costs);
 
   return program;
 }

@@ -274,7 +274,7 @@ Notes:
 | `aeos ticket resolve <id>`                                   | Resume an `ESCALATED` ticket after writing a decision in its `escalation.md` |
 | `aeos ticket dod-approve <id>`                               | Final human gate — mark ticket as DONE _(not yet implemented)_             |
 | `aeos dashboard`                                             | Cross-project Kanban summary _(not yet implemented)_                       |
-| `aeos costs [--project] [--ticket]`                          | LLM spend report _(not yet implemented)_                                   |
+| `aeos costs [--project] [--epic] [--ticket] [--since]`       | LLM spend report across all projects                                       |
 
 ## Epics and Tasks
 
@@ -490,13 +490,25 @@ Domain is pure (zero external imports). Infrastructure implements domain ports. 
 
 ## Cost Tracking
 
-Every executor invocation (both agent and reviewer) records token usage and cost to a local SQLite database at `~/.aeos/state.db`. All projects share one database, isolated by `project_id`.
+Every executor invocation (preflight, worker and reviewer) records token usage and cost to a local SQLite database at `~/.aeos/state.db`. All projects share one database, isolated by `project_id`.
 
 `claude-cli` runs with `--output-format stream-json --verbose`; tokens and cost come from the final `result` line of that stream. The cost is the CLI's client-side estimate, not billing data. The other executors do not report usage yet.
 
 An unknown cost is stored and shown as `unknown`, never as `$0.00`. Only `claude-cli` and `stub` report cost, so `aeos orchestrator run --budget` (or a budget persisted earlier) is refused when any agent of the epic or task columns resolves to `auggie-cli`, `opencode-cli` or `ollama-cli`; the message names the agent and the executor. Spend is the sum of known costs. If a run with an unknown cost is recorded against a budgeted epic anyway (an `--executor` override, or an executor failure), the orchestrator halts with `COST_UNKNOWN`.
 
 `aeos ticket show <id>` surfaces this history back to the operator as an `Executions:` section showing the column, agent, executor, model, and cost of each run.
+
+`aeos costs` reports the spend across every project in the database, so it works outside a project directory:
+
+```bash
+aeos costs                       # every project
+aeos costs --project AEOS        # one project, by key
+aeos costs --epic AEOS-1         # an epic and its child tasks
+aeos costs --ticket AEOS-2       # one ticket
+aeos costs --since 2026-11-01    # records from that date on
+```
+
+It shows a total per project and per ticket, and within a ticket per column and per role (`preflight`, `worker`, `reviewer`; records written before roles were stored show as `unrecorded`). Totals sum known costs only. A ticket whose records are all unknown shows `unknown`, and a footer counts the records left out. Preflight invocations are recorded too, so they count towards an orchestrator budget.
 
 ## Run Records
 

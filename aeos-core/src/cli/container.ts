@@ -15,6 +15,8 @@ import type { TicketMovePort } from '../domain/ports/driving/ticket-move.port.js
 import type { TicketReadyPort } from '../domain/ports/driving/ticket-ready.port.js';
 import type { TicketDodApprovePort } from '../domain/ports/driving/ticket-dod-approve.port.js';
 import type { OrchestratorPort } from '../domain/ports/driving/orchestrator.port.js';
+import type { CostsPort } from '../domain/ports/driving/costs.port.js';
+import { CostsUseCase } from '../application/costs.use-case.js';
 import { OrchestratorUseCase } from '../application/orchestrator.use-case.js';
 import { SqliteOrchestratorStateRepository } from '../infrastructure/persistence/sqlite-orchestrator-state.repository.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
@@ -76,6 +78,7 @@ export interface Container {
   ticketReady: TicketReadyPort;
   ticketDodApprove: TicketDodApprovePort;
   orchestrator: OrchestratorPort;
+  costs: CostsPort;
   projectRepo: ProjectRepository;
   rubricLoader: RubricLoader;
   artifactStore: ArtifactStore;
@@ -235,6 +238,9 @@ export function createContainer(): Container {
         gitGateway,
         getCostRepo(),
       );
+    },
+    get costs() {
+      return new CostsUseCase(getCostRepo(), configStore);
     },
     projectRepo,
     rubricLoader: new FsRubricLoader(),

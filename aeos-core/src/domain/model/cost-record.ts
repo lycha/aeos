@@ -1,5 +1,7 @@
 // Domain model — CostRecord: tracks LLM spend per executor invocation
 
+export type CostRole = 'preflight' | 'worker' | 'reviewer';
+
 export interface CostRecord {
   readonly ticketId: string;
   readonly projectId: string;
@@ -12,6 +14,8 @@ export interface CostRecord {
   /** Null means the executor did not report a cost. Never written as 0. */
   readonly costUsd: number | null;
   readonly recordedAt: string;
+  /** Absent on records written before roles were stored (migration v7). */
+  readonly role?: CostRole;
 }
 
 /** Display text for a cost: an unknown cost is never shown as $0. */

@@ -37,6 +37,7 @@ function createMockCostRepo(): CostRepository {
     record: vi.fn(),
     findByProject: vi.fn().mockReturnValue([]),
     findByTicket: vi.fn().mockReturnValue([]),
+    findByFilters: vi.fn().mockReturnValue([]),
   };
 }
 
