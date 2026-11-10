@@ -3,7 +3,6 @@ import { ContextAssembler, MAX_DIFF_CHARS } from './context-assembler.js';
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import type { GitGateway } from '../../domain/ports/driven/git-gateway.port.js';
-import { Column } from '../../domain/model/column.js';
 
 function createMockArtifactStore(): ArtifactStore {
   return {
@@ -64,7 +63,7 @@ describe('ContextAssembler', () => {
 
   const TICKET_ID = 'AEOS-1';
   const PROJECT_ROOT = '/projects/test';
-  const NON_REVIEW_COLUMN = Column.IMPLEMENTATION;
+  const NON_REVIEW_COLUMN = 'none';
 
   beforeEach(() => {
     artifactStore = createMockArtifactStore();
@@ -124,7 +123,7 @@ describe('ContextAssembler', () => {
         '# Ticket\n- Parent: AEOS-9\n- Implements: AC-1\n',
       );
 
-      const context = await assembler.assemble('AEOS-1', '/projects/test', 'IMPLEMENTATION', pin);
+      const context = await assembler.assemble('AEOS-1', '/projects/test', 'none', pin);
 
       const features = context.spec.filter((file) => file.name.endsWith('.feature'));
       expect(features.map((file) => file.name)).toEqual(['features/pay.feature']);
@@ -374,7 +373,7 @@ describe('ContextAssembler', () => {
     (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket');
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.IMPLEMENTATION);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, 'none');
 
     expect(result.codeDiff).toBeNull();
     expect(gitGateway.diff).not.toHaveBeenCalled();
@@ -387,7 +386,7 @@ describe('ContextAssembler', () => {
       'diff --git a/foo.ts b/foo.ts\n+hello',
     );
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.CODE_REVIEW);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, 'task');
 
     expect(gitGateway.diff).toHaveBeenCalledWith(PROJECT_ROOT);
     expect(result.codeDiff).toBe('diff --git a/foo.ts b/foo.ts\n+hello');
@@ -398,7 +397,7 @@ describe('ContextAssembler', () => {
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
     (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('');
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.CODE_REVIEW);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, 'task');
 
     expect(result.codeDiff).toBe('No changes detected');
   });
@@ -408,7 +407,7 @@ describe('ContextAssembler', () => {
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
     (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('  \n  \n');
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.CODE_REVIEW);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, 'task');
 
     expect(result.codeDiff).toBe('No changes detected');
   });
@@ -419,7 +418,7 @@ describe('ContextAssembler', () => {
     const largeDiff = 'x'.repeat(MAX_DIFF_CHARS + 5000);
     (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue(largeDiff);
 
-    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, Column.CODE_REVIEW);
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, 'task');
 
     expect(result.codeDiff).toContain('[DIFF TRUNCATED');
     expect(result.codeDiff).toContain(`of ${largeDiff.length} total`);
@@ -479,7 +478,7 @@ describe('ContextAssembler — epic context (WI-3)', () => {
               : 'other',
     );
 
-    const result = await assembler.assemble('AEOS-2', PROJECT_ROOT, Column.IMPLEMENTATION);
+    const result = await assembler.assemble('AEOS-2', PROJECT_ROOT, 'none');
 
     // The human-written spec arrives through the pin (`spec`), not from the epic's artifacts.
     expect(result.epicContext).toEqual([
@@ -493,7 +492,7 @@ describe('ContextAssembler — epic context (WI-3)', () => {
       '# Ticket: AEOS-1\n## AEOS Metadata\n- Kind: EPIC\n',
     );
 
-    const result = await assembler.assemble('AEOS-1', PROJECT_ROOT, Column.IMPLEMENTATION);
+    const result = await assembler.assemble('AEOS-1', PROJECT_ROOT, 'none');
 
     expect(result.epicContext).toEqual([]);
   });
@@ -523,7 +522,7 @@ describe('ContextAssembler — integration-review diff (WI-2)', () => {
     (gitGateway.refExists as ReturnType<typeof vi.fn>).mockReturnValue(true);
     (gitGateway.diffRange as ReturnType<typeof vi.fn>).mockReturnValue('diff --git a/x b/x');
 
-    const result = await assembler.assemble('AEOS-1', '/root', Column.INTEGRATION_REVIEW);
+    const result = await assembler.assemble('AEOS-1', '/root', 'epic');
 
     expect(gitGateway.refExists).toHaveBeenCalledWith('/root', 'aeos-base/AEOS-1');
     expect(gitGateway.diffRange).toHaveBeenCalledWith('/root', 'aeos-base/AEOS-1', 'HEAD');
@@ -534,17 +533,17 @@ describe('ContextAssembler — integration-review diff (WI-2)', () => {
     (gitGateway.refExists as ReturnType<typeof vi.fn>).mockReturnValue(false);
     (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('');
 
-    const result = await assembler.assemble('AEOS-1', '/root', Column.INTEGRATION_REVIEW);
+    const result = await assembler.assemble('AEOS-1', '/root', 'epic');
 
     expect(gitGateway.diffRange).not.toHaveBeenCalled();
     expect(result.codeDiff).toBe('No changes detected');
   });
 
-  it('gives the final gate the whole epic diff too: criteria are judged against the code', async () => {
+  it('gives any column that asks for the epic diff the base..HEAD range', async () => {
     (gitGateway.refExists as ReturnType<typeof vi.fn>).mockReturnValue(true);
     (gitGateway.diffRange as ReturnType<typeof vi.fn>).mockReturnValue('diff --git a/x b/x');
 
-    const result = await assembler.assemble('AEOS-1', '/root', Column.DOD_GATE);
+    const result = await assembler.assemble('AEOS-1', '/root', 'epic');
 
     expect(gitGateway.diffRange).toHaveBeenCalledWith('/root', 'aeos-base/AEOS-1', 'HEAD');
     expect(result.codeDiff).toContain('diff --git');
@@ -557,7 +556,7 @@ describe('ContextAssembler — integration-review diff (WI-2)', () => {
       'AEOS-1-repro.md',
     ]);
 
-    const result = await assembler.assemble('AEOS-1', '/root', Column.CODE_REVIEW);
+    const result = await assembler.assemble('AEOS-1', '/root', 'task');
 
     expect(result.priorArtifacts.map((artifact) => artifact.name)).toEqual(['AEOS-1-repro.md']);
   });

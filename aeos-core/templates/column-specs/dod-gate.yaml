@@ -1,5 +1,7 @@
 column: DOD_GATE
 label: DoD gate
+role: final-gate
+diffContext: epic
 phase: DEPLOY
 # The final human gate: approving out of it (`aeos ticket dod-approve`) is the
 # recorded release decision. When the column runs, the engine first builds the

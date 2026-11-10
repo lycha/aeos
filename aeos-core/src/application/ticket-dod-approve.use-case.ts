@@ -26,6 +26,8 @@ import {
 } from '../domain/services/conformance-builder.js';
 import { parseConformanceVerdicts } from '../domain/services/conformance-verdict-parser.js';
 import type { ConformanceService } from './services/conformance.service.js';
+import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
+import { roleOf } from './services/column-roles.js';
 import type { GateRecorder } from './services/gate-recorder.js';
 import { fillConformance } from './services/pull-request-text.js';
 import { syncTicketDocument } from './services/ticket-document.js';
@@ -41,6 +43,7 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
     private readonly conformance: ConformanceService,
     private readonly runRecordStore: RunRecordStore,
     private readonly pullRequestGateway: PullRequestGateway,
+    private readonly columnSpecLoader: ColumnSpecLoader,
   ) {}
 
   async review(
@@ -49,7 +52,7 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
     ticketId: string,
     verified: readonly string[] = [],
   ): Promise<{ ok: true; review: DodReview } | { ok: false; error: string }> {
-    const found = this.atTheGate(projectId, ticketId);
+    const found = this.atTheGate(projectId, projectPath, ticketId);
     if (!found.ok) return found;
     const { ticket } = found;
     const prUrl = ticket.prUrl ?? null;
@@ -114,11 +117,13 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
 
   private atTheGate(
     projectId: string,
+    projectPath: string,
     ticketId: string,
   ): { ok: true; ticket: Ticket } | { ok: false; error: string } {
     const ticket = this.ticketRepo.findById(projectId, ticketId);
     if (!ticket) return { ok: false, error: `Ticket ${ticketId} not found` };
-    if (ticket.column !== Column.DOD_GATE) {
+    // The final gate is the column whose spec says so, whatever it is called.
+    if (roleOf(this.columnSpecLoader, projectPath)(ticket.column) !== 'final-gate') {
       return {
         ok: false,
         error: `Ticket ${ticketId} is not in DOD_GATE (current column: ${ticket.column}). Only DOD_GATE tickets can be approved via dod-approve.`,
@@ -136,7 +141,7 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
     review?: DodReview,
   ): TicketDodApproveResult {
     // 1. Load ticket; it must be at the gate
-    const found = this.atTheGate(projectId, ticketId);
+    const found = this.atTheGate(projectId, projectPath, ticketId);
     if (!found.ok) return { status: 'error', ticketId, error: found.error };
     const { ticket } = found;
 
@@ -170,7 +175,7 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
     const decision = {
       gate: 'definition-of-done',
       verdict: 'approved',
-      fromColumn: Column.DOD_GATE,
+      fromColumn: ticket.column,
       toColumn: Column.DONE,
       ...(reason?.trim() ? { reason } : {}),
     } as const;
@@ -214,10 +219,13 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
       subState: null,
     });
     try {
-      this.gitGateway.commit(aeosDir, `[${ticketId}][HUMAN][v1][dod-approve: DOD_GATE → DONE]`);
+      this.gitGateway.commit(
+        aeosDir,
+        `[${ticketId}][HUMAN][v1][dod-approve: ${ticket.column} → DONE]`,
+      );
     } catch (err) {
-      // Compensate: revert column back to DOD_GATE and restore previous sub-state
-      this.stateMachine.transition(projectId, ticketId, Column.DOD_GATE);
+      // Compensate: revert column back to the gate and restore previous sub-state
+      this.stateMachine.transition(projectId, ticketId, ticket.column);
       if (ticket.subState !== null) {
         this.stateMachine.setSubState(projectId, ticketId, ticket.subState);
       }

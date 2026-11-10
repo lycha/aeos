@@ -1,5 +1,7 @@
 column: QA
 label: QA
+role: standard
+diffContext: none
 phase: DEPLOY
 workerAgentFile: agents/qa-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml

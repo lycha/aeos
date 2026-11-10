@@ -12,11 +12,12 @@ import { Column } from '../model/column.js';
 import { SubState } from '../model/sub-state.js';
 import { TicketKind } from '../model/ticket-kind.js';
 import type { Ticket } from '../model/ticket.js';
+import type { ColumnRole } from '../model/column-spec.js';
 
 export const HaltReason = {
   /** Every task and the epic itself reached DONE. */
   COMPLETE: 'COMPLETE',
-  /** The epic reached the human-only DoD gate. */
+  /** The epic reached its final gate, which only a person decides. */
   HUMAN_GATE: 'HUMAN_GATE',
   /** A ticket escalated — a human must resolve it before work continues. */
   NEEDS_HUMAN: 'NEEDS_HUMAN',
@@ -56,6 +57,8 @@ export interface OrchestratorPolicyInput {
   readonly budgetUsd: number | null;
   /** Whether the given column may advance without a human. */
   readonly autoAdvance: (column: Column) => boolean;
+  /** What each column is for, from its spec. The scheduler never goes by a column's name. */
+  readonly roleOf: (column: Column) => ColumnRole;
 }
 
 /** Appends the recorded escalation reason to a halt message, when present. */
@@ -76,11 +79,11 @@ function needsHuman(ticket: Ticket): HaltReason | null {
 }
 
 /** A ticket is runnable when it is queued and not already terminal. */
-function isRunnable(ticket: Ticket): boolean {
+function isRunnable(ticket: Ticket, roleOf: (column: Column) => ColumnRole): boolean {
   return (
     ticket.column !== Column.DONE &&
     ticket.column !== Column.BACKLOG &&
-    ticket.column !== Column.DOD_GATE &&
+    roleOf(ticket.column) !== 'final-gate' &&
     (ticket.subState === SubState.READY || ticket.subState === null)
   );
 }
@@ -88,6 +91,7 @@ function isRunnable(ticket: Ticket): boolean {
 function decideForTicket(
   ticket: Ticket,
   autoAdvance: (column: Column) => boolean,
+  roleOf: (column: Column) => ColumnRole,
 ): OrchestratorAction | null {
   const halt = needsHuman(ticket);
   if (halt) {
@@ -116,7 +120,7 @@ function decideForTicket(
     };
   }
 
-  if (isRunnable(ticket)) {
+  if (isRunnable(ticket, roleOf)) {
     return {
       kind: 'run',
       ticketId: ticket.id,
@@ -144,7 +148,7 @@ function decideForTicket(
  * one step at a time keeps the loop restartable and every decision auditable.
  */
 export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAction {
-  const { epic, children, spentUsd, costUnknown, budgetUsd, autoAdvance } = input;
+  const { epic, children, spentUsd, costUnknown, budgetUsd, autoAdvance, roleOf } = input;
 
   // Budget is checked first: an exhausted budget stops everything, regardless
   // of what the pipeline would otherwise do next.
@@ -174,11 +178,11 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
   }
 
   // DoD is human-only by design: its column runs when a person asks, never from here.
-  if (epic.column === Column.DOD_GATE) {
+  if (roleOf(epic.column) === 'final-gate') {
     return {
       kind: 'halt',
       reason: HaltReason.HUMAN_GATE,
-      message: `Epic ${epic.id} reached DOD_GATE. Final sign-off is human-only — run \`aeos ticket dod-approve ${epic.id}\`.`,
+      message: `Epic ${epic.id} reached ${epic.column}. Final sign-off is human-only — run \`aeos ticket dod-approve ${epic.id}\`.`,
     };
   }
 
@@ -196,7 +200,8 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
 
   // Once decomposed, the epic waits on its children; their build pipelines are
   // the work. The epic itself never implements anything.
-  const decomposed = epic.column === Column.TASK_BREAKDOWN && epic.subState === SubState.SIGNED_OFF;
+  const decomposed =
+    roleOf(epic.column) === 'decomposition' && epic.subState === SubState.SIGNED_OFF;
   if (decomposed) {
     if (children.length === 0) {
       return {
@@ -226,7 +231,7 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
     // tasks touching overlapping paths would otherwise race in the worktree.
     for (const child of children) {
       if (child.column === Column.DONE) continue;
-      const action = decideForTicket(child, autoAdvance);
+      const action = decideForTicket(child, autoAdvance, roleOf);
       if (action) return action;
     }
 
@@ -245,7 +250,7 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
     };
   }
 
-  const epicAction = decideForTicket(epic, autoAdvance);
+  const epicAction = decideForTicket(epic, autoAdvance, roleOf);
   if (epicAction) return epicAction;
 
   return {

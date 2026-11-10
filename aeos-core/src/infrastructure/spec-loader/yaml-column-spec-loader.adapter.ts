@@ -15,41 +15,71 @@ import {
   type ColumnLabels,
 } from '../../domain/services/column-labels.js';
 
-/** Maps Column enum values to their YAML spec filenames (without extension). */
-const COLUMN_SPEC_FILENAMES: Partial<Record<Column, string>> = {
-  [Column.SPEC_REVIEW]: 'spec-review',
-  [Column.TECH_SPEC]: 'tech-spec',
-  [Column.TASK_BREAKDOWN]: 'task-breakdown',
-  [Column.IMPLEMENTATION]: 'implementation',
-  [Column.CODE_REVIEW]: 'code-review',
-  [Column.QA]: 'qa',
-  [Column.INTEGRATION_REVIEW]: 'integration-review',
-  [Column.DOD_GATE]: 'dod-gate',
-};
+const SPECS_DIR = 'column-specs';
+
+/** What `.aeos/column-specs/` holds: each spec file under the column it declares. */
+interface SpecFiles {
+  /** Column identifier → the file that declares it, and its parsed content. */
+  readonly byColumn: ReadonlyMap<string, { file: string; parsed: unknown }>;
+  /** Files that are not readable YAML, for the message when a column turns out to have no spec. */
+  readonly unreadable: readonly string[];
+}
+
+/**
+ * Reads every `*.yaml` of the directory and indexes it by its own `column:`
+ * field: the file's name means nothing. Throws when two files claim one column.
+ */
+function specFiles(root?: string): SpecFiles {
+  const dir = path.join(aeosDir(root), SPECS_DIR);
+  const byColumn = new Map<string, { file: string; parsed: unknown }>();
+  const unreadable: string[] = [];
+  const names = fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter((name) => name.endsWith('.yaml'))
+    : [];
+  for (const name of names.sort()) {
+    const file = `${SPECS_DIR}/${name}`;
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(fs.readFileSync(path.join(dir, name), 'utf-8'), {
+        schema: yaml.DEFAULT_SCHEMA,
+      });
+    } catch {
+      unreadable.push(file);
+      continue;
+    }
+    const column = (parsed as { column?: unknown } | null)?.column;
+    if (typeof column !== 'string') continue;
+    const claimed = byColumn.get(column);
+    if (claimed) {
+      throw new Error(
+        `Column ${column} is declared by two column specs: ${claimed.file} and ${file}. A column has one spec; remove or re-point one of them.`,
+      );
+    }
+    byColumn.set(column, { file, parsed });
+  }
+  return { byColumn, unreadable };
+}
 
 export class YamlColumnSpecLoader implements ColumnSpecLoader {
   /**
-   * Loads and validates the column spec for the given column.
-   * Throws ColumnSpecNotFoundError if the column has no spec or the file does not exist.
+   * Loads and validates the spec that declares the given column.
+   * Throws ColumnSpecNotFoundError if the column has no spec (BACKLOG and DONE never do).
    * Throws ZodError if the file content does not match the schema.
    */
   load(column: Column, root?: string): ColumnSpec {
-    const filename = COLUMN_SPEC_FILENAMES[column];
-    if (!filename) {
+    if (column === Column.BACKLOG || column === Column.DONE) {
       throw new ColumnSpecNotFoundError(`Column '${column}' does not have a column spec`);
     }
-
-    const specPath = path.join(aeosDir(root), 'column-specs', filename + '.yaml');
-
-    let raw: string;
-    try {
-      raw = fs.readFileSync(specPath, 'utf-8');
-    } catch {
-      throw new ColumnSpecNotFoundError(`Column spec file not found: ${specPath}`);
+    const { byColumn, unreadable } = specFiles(root);
+    const found = byColumn.get(column);
+    if (!found) {
+      const dir = path.join(aeosDir(root), SPECS_DIR);
+      throw new ColumnSpecNotFoundError(
+        `Column spec file not found: no file in ${dir} declares \`column: ${column}\`.${unreadable.length > 0 ? ` Not readable as YAML: ${unreadable.join(', ')}.` : ''}`,
+      );
     }
 
-    const parsed: unknown = yaml.load(raw, { schema: yaml.DEFAULT_SCHEMA });
-    const spec = ColumnSpecSchema.parse(parsed);
+    const spec = ColumnSpecSchema.parse(found.parsed);
     // Labels are valid across the project or no column loads.
     this.labels(root);
     return spec;
@@ -68,14 +98,11 @@ export class YamlColumnSpecLoader implements ColumnSpecLoader {
         return null;
       }
     };
+    const { byColumn } = specFiles(root);
     const specs: Partial<Record<Column, { label?: string }>> = {};
-    const sourceOf = (column: Column): string => {
-      const filename = COLUMN_SPEC_FILENAMES[column];
-      return filename ? `column-specs/${filename}.yaml` : 'project.json';
-    };
+    const sourceOf = (column: Column): string => byColumn.get(column)?.file ?? 'project.json';
     for (const column of COLUMN_ORDER) {
-      const parsed = COLUMN_SPEC_FILENAMES[column] ? readYaml(sourceOf(column)) : null;
-      const label = (parsed as { label?: unknown } | null)?.label;
+      const label = (byColumn.get(column)?.parsed as { label?: unknown } | null)?.label;
       if (typeof label === 'string') specs[column] = { label };
     }
     // project.json is JSON, which is YAML.

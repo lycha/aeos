@@ -347,6 +347,7 @@ export function createContainer(): Container {
         newConformanceService(),
         runRecordStore,
         newPullRequestGateway(),
+        new YamlColumnSpecLoader(),
       );
     },
     get costs() {

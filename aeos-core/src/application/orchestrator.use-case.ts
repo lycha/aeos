@@ -30,6 +30,7 @@ import { reportsCost } from '../domain/services/executor-capabilities.js';
 import type { ExecutorConfigResolver } from './services/executor-config-resolver.js';
 import type { OrchestratorStateRepository } from '../domain/ports/driven/orchestrator-state-repository.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
+import { columnSpecOf, roleOf } from './services/column-roles.js';
 import type { TicketRunObserver } from '../domain/model/ticket-run-event.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
@@ -172,6 +173,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
           costUnknown: costs.includes(null),
           budgetUsd,
           autoAdvance: (column) => this.autoAdvance(projectPath, column),
+          roleOf: roleOf(this.columnSpecLoader, projectPath),
         });
 
         if (action.kind === 'halt') {
@@ -389,7 +391,9 @@ export class OrchestratorUseCase implements OrchestratorPort {
   private assertExecutorsReportCost(projectId: string, projectPath: string, epic: Ticket): void {
     const epicId = epic.id;
     const epicAt = EPIC_COLUMN_ORDER.indexOf(epic.column as (typeof EPIC_COLUMN_ORDER)[number]);
-    const canDecompose = epicAt <= EPIC_COLUMN_ORDER.indexOf(Column.TASK_BREAKDOWN);
+    const role = roleOf(this.columnSpecLoader, projectPath);
+    const canDecompose =
+      epicAt <= EPIC_COLUMN_ORDER.findIndex((column) => role(column) === 'decomposition');
     const children = this.ticketRepo.findChildren(projectId, epicId);
     const taskOrder: readonly Column[] = TASK_COLUMN_ORDER;
     const ahead = [
@@ -400,10 +404,9 @@ export class OrchestratorUseCase implements OrchestratorPort {
       ),
     ];
     for (const column of ahead) {
-      if (column === Column.BACKLOG || column === Column.DONE || column === Column.DOD_GATE) {
-        continue;
-      }
-      const spec = this.columnSpecLoader.load(column, projectPath);
+      const spec = columnSpecOf(this.columnSpecLoader, projectPath, column);
+      // The final gate is a person's: nothing the orchestrator runs spends there.
+      if (!spec || spec.role === 'final-gate') continue;
       for (const agentFile of [spec.workerAgentFile, spec.reviewerAgentFile]) {
         const agent = this.agentSpecLoader.load(agentFile, projectPath);
         const { executorType } = this.executorConfigResolver.resolveExecutorConfig(
@@ -441,20 +444,19 @@ export class OrchestratorUseCase implements OrchestratorPort {
   /**
    * Column spec wins over the global setting when it has one.
    *
-   * Columns with no spec (BACKLOG, DONE, DOD_GATE) fall back to the global
-   * mode — loading a spec for them throws by design.
+   * BACKLOG and DONE have no spec and fall back to the global mode, and so
+   * does a final gate, which the policy never advances anyway.
    */
   private autoAdvance(projectPath: string, column: Column): boolean {
     const globalMode =
       (this.configStore.readConfig() ?? DEFAULT_GLOBAL_CONFIG).advanceMode === 'auto';
 
-    if (column === Column.BACKLOG || column === Column.DONE || column === Column.DOD_GATE) {
-      return globalMode;
-    }
     if (!isValidColumn(column)) return globalMode;
 
     try {
-      return this.columnSpecLoader.load(column, projectPath).advanceMode === 'auto';
+      const spec = columnSpecOf(this.columnSpecLoader, projectPath, column);
+      if (!spec || spec.role === 'final-gate') return globalMode;
+      return spec.advanceMode === 'auto';
     } catch {
       return globalMode;
     }

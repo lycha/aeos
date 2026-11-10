@@ -40,24 +40,32 @@ describe('CheckRegistry — pre-worker checks', () => {
   });
 
   it('adds criterion tracing for a spec-backed epic at integration review, whatever is configured', () => {
-    const checks = registryWith(null, anyRunner).preWorkerChecksFor(epic, PIN);
+    const checks = registryWith(null, anyRunner).preWorkerChecksFor(epic, PIN, 'integration');
 
     expect(checks.map((check) => [check.name, check.phase])).toEqual([
       ['criteria-trace', 'pre-worker'],
     ]);
   });
 
-  it('has none for an epic with no spec, another column, or a task', () => {
+  it('goes by the role of the column, not its name', () => {
+    const elsewhere = { ...epic, column: 'TECH_SPEC' as const };
+
+    expect(
+      registryWith(null, anyRunner).preWorkerChecksFor(elsewhere, PIN, 'integration'),
+    ).toHaveLength(1);
+  });
+
+  it('has none for an epic with no spec, another role, or a task', () => {
     const registry = registryWith(null, anyRunner);
 
-    expect(registry.preWorkerChecksFor(epic, null)).toEqual([]);
-    expect(registry.preWorkerChecksFor({ ...epic, column: 'TECH_SPEC' }, PIN)).toEqual([]);
-    expect(registry.preWorkerChecksFor({ ...epic, kind: 'TASK' }, PIN)).toEqual([]);
+    expect(registry.preWorkerChecksFor(epic, null, 'integration')).toEqual([]);
+    expect(registry.preWorkerChecksFor(epic, PIN, 'standard')).toEqual([]);
+    expect(registry.preWorkerChecksFor({ ...epic, kind: 'TASK' }, PIN, 'integration')).toEqual([]);
   });
 
   it('fails in process when a criterion is unclaimed, and writes the report both ways', async () => {
     collector.collect.mockReturnValue(traceOf(['AC-1']));
-    const [check] = registryWith(null, anyRunner).preWorkerChecksFor(epic, PIN);
+    const [check] = registryWith(null, anyRunner).preWorkerChecksFor(epic, PIN, 'integration');
 
     const result = await check!.run({ projectPath: '/project' });
 
@@ -78,7 +86,7 @@ describe('CheckRegistry — pre-worker checks', () => {
 
   it('passes when every criterion is claimed and tagged', async () => {
     collector.collect.mockReturnValue(traceOf(['AC-1', 'AC-2']));
-    const [check] = registryWith(null, anyRunner).preWorkerChecksFor(epic, PIN);
+    const [check] = registryWith(null, anyRunner).preWorkerChecksFor(epic, PIN, 'integration');
 
     expect((await check!.run({ projectPath: '/project' })).passed).toBe(true);
   });

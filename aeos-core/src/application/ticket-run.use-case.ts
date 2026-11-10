@@ -241,7 +241,14 @@ export class TicketRunUseCase implements TicketRunPort {
         return { status: 'failed', ticketId, error: `Invalid column value: ${columnSpec.column}` };
       }
 
-      const workerMode = this.resolveWorkerExecutorMode(columnSpec, column);
+      // The gate's column builds a conformance report, which takes a spec.
+      const finalGate = columnSpec.role === 'final-gate';
+      if (finalGate && !mirroredTicket.specPin) {
+        return { status: 'failed', ticketId, error: 'DoD gate is human-only' };
+      }
+
+      // A column whose worker edits the repository says so in its spec.
+      const workerMode = columnSpec.executorMode ?? 'artifact';
       if (
         workerMode === 'agentic' &&
         !this.supportsAgenticExecution(resolvedWorkerConfig.executorType)
@@ -303,7 +310,7 @@ export class TicketRunUseCase implements TicketRunPort {
       // Built before the context is assembled, so the worker and the reviewer
       // are both briefed with it.
       let judging: string[] | null = null;
-      if (column === Column.DOD_GATE) {
+      if (finalGate) {
         try {
           judging = await this.writeConformance(projectPath, ticketId);
         } catch (err) {
@@ -321,7 +328,7 @@ export class TicketRunUseCase implements TicketRunPort {
         baseContext = await this.contextAssembler.assemble(
           ticketId,
           projectPath,
-          columnSpec.column,
+          columnSpec.diffContext ?? 'none',
           specPin,
         );
       } catch (err) {
@@ -370,7 +377,11 @@ export class TicketRunUseCase implements TicketRunPort {
       // ── Pre-worker checks ────────────────────────────────────────
       // Before preflight: a failure here is a person's to resolve, so no model
       // is asked anything and no attempt is used.
-      const preWorkerChecks = this.checkRegistry.preWorkerChecksFor(mirroredTicket, specPin);
+      const preWorkerChecks = this.checkRegistry.preWorkerChecksFor(
+        mirroredTicket,
+        specPin,
+        columnSpec.role ?? 'standard',
+      );
       if (preWorkerChecks.length > 0) {
         const escalation = await this.runPreWorkerChecks(ctx, preWorkerChecks);
         if (escalation) return this.finishEscalatedRun(ctx, mirroredTicket, escalation, 0);
@@ -639,7 +650,7 @@ export class TicketRunUseCase implements TicketRunPort {
       const fresh = await this.contextAssembler.assemble(
         ticketId,
         projectPath,
-        columnSpec.column,
+        columnSpec.diffContext ?? 'none',
         ctx.specPin,
       );
       workerContext = this.withExtraArtifact(
@@ -1326,7 +1337,7 @@ export class TicketRunUseCase implements TicketRunPort {
     const reviewContext = await this.contextAssembler.assemble(
       ticketId,
       projectPath,
-      ctx.columnSpec.column,
+      ctx.columnSpec.diffContext ?? 'none',
       ctx.specPin,
     );
     const enrichedContext =
@@ -1672,13 +1683,6 @@ export class TicketRunUseCase implements TicketRunPort {
         result: { status: 'failed', ticketId, error: `Ticket ${ticketId} is already DONE.` },
       };
     }
-    // The gate's column builds a conformance report, which takes a spec.
-    if (ticket.column === Column.DOD_GATE && !ticket.specPin) {
-      return {
-        ok: false,
-        result: { status: 'failed', ticketId, error: 'DoD gate is human-only' },
-      };
-    }
     if (ticket.subState === SubState.WORKING) {
       return {
         ok: false,
@@ -1824,11 +1828,11 @@ export class TicketRunUseCase implements TicketRunPort {
   }
 
   /**
-   * For the reviewer of a spec-backed epic's task breakdown: which criteria no
+   * For the reviewer of a spec-backed epic's decomposition: which criteria no
    * task claims, so an unowned criterion is rejected here and not at integration.
    */
   private withCriteriaClaims(ctx: RunContext, context: AssembledContext): AssembledContext {
-    if (ctx.column !== Column.TASK_BREAKDOWN || !ctx.specPin) return context;
+    if (ctx.columnSpec.role !== 'decomposition' || !ctx.specPin) return context;
     const trace = this.criteriaCollector.collect(
       ctx.projectPath,
       { id: ctx.ticketId, projectId: ctx.projectId },
@@ -1851,16 +1855,6 @@ export class TicketRunUseCase implements TicketRunPort {
 
   private resolveColumn(columnString: string): Column | null {
     return isValidColumn(columnString) ? columnString : null;
-  }
-
-  private resolveWorkerExecutorMode(
-    columnSpec: ColumnSpec,
-    column: Column,
-  ): 'artifact' | 'agentic' {
-    if (columnSpec.executorMode) {
-      return columnSpec.executorMode;
-    }
-    return column === Column.IMPLEMENTATION ? 'agentic' : 'artifact';
   }
 
   private supportsAgenticExecution(executorType: AgentSpec['executor']['type']): boolean {

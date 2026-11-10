@@ -5,7 +5,7 @@
 import type { Check } from '../../domain/model/check.js';
 import type { ChecksRunner } from '../../domain/ports/driven/checks-runner.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
-import { Column } from '../../domain/model/column.js';
+import type { ColumnRole } from '../../domain/model/column-spec.js';
 import type { SpecPin } from '../../domain/model/spec-pin.js';
 import type { Ticket } from '../../domain/model/ticket.js';
 import { TicketKind } from '../../domain/model/ticket-kind.js';
@@ -41,14 +41,11 @@ export class CheckRegistry {
 
   /**
    * The checks that run before any agent does. Criterion tracing, for a
-   * spec-backed epic at its integration column.
+   * spec-backed epic at a column whose role is `integration`.
    */
-  preWorkerChecksFor(ticket: Ticket, specPin: SpecPin | null): Check[] {
-    // shortcut: the column by name; I1-M4-005a makes it the column's role.
+  preWorkerChecksFor(ticket: Ticket, specPin: SpecPin | null, role: ColumnRole): Check[] {
     const tracesCriteria =
-      specPin !== null &&
-      ticket.kind === TicketKind.EPIC &&
-      ticket.column === Column.INTEGRATION_REVIEW;
+      specPin !== null && ticket.kind === TicketKind.EPIC && role === 'integration';
     return tracesCriteria
       ? [new CriteriaTraceCheck(this.criteriaCollector, this.artifactStore, ticket, specPin)]
       : [];

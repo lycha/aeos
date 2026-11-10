@@ -111,6 +111,7 @@ Each column follows the same cycle:
 .aeos/
 ├── project.json          project identity and optional executor defaults
 ├── CONSTRAINTS.md         placeholder for your architecture/style/security rules
+├── pipelines.yaml         the approved column order and role vocabulary (not read yet, see Column roles)
 ├── column-specs/          one YAML per pipeline column
 ├── agents/                worker and reviewer agent specs
 ├── rubrics/               reviewer rubrics and artifact templates
@@ -160,6 +161,33 @@ Labels are checked whenever a column spec is loaded: unique within the project w
 the case, not empty, at most 40 characters, and not the identifier of another column. A
 clash fails the command and names both files. Renaming a column changes nothing that is
 stored. Column **order** is not configurable yet.
+
+### Column roles
+
+What a column *does* comes from its spec, never from what it is called. Each file in `.aeos/column-specs/` declares:
+
+```yaml
+column: TASK_BREAKDOWN      # the identifier this file is the spec of
+role: decomposition
+diffContext: none
+executorMode: agentic
+```
+
+| `role` | What it makes the column |
+| --- | --- |
+| `standard` (default) | worker → checks → reviewer → gate |
+| `spec-review` | approving out of it is recorded as the `spec` gate |
+| `decomposition` | the epic waits here while the orchestrator drives its child tasks, and cannot leave until every child is `DONE`; its reviewer is told which criteria no task claims |
+| `integration` | criteria are traced before the worker runs; approving an epic out of it opens the pull request |
+| `final-gate` | `ticket run` builds the conformance report; approval is `ticket dod-approve`; the orchestrator halts here whatever `advanceMode` says |
+
+`diffContext` is the diff the column's agents are given: `none` (default), `task` (the working tree of one task, for its code review; that column's review is the one a task's pull request cites) or `epic` (the epic's `base..HEAD`). `executorMode` is `artifact` unless the spec says `agentic`; no column is agentic because of its name.
+
+A spec is found by its `column:` field, not by its file name: every `*.yaml` in `column-specs/` is read. Two files that declare the same column are an error naming both, and no column loads until one is removed.
+
+The vocabulary is the approved one in `templates/pipelines.yaml`, which `project init` now copies to `.aeos/pipelines.yaml`. **Nothing reads the order from that file yet**: the two pipelines are still fixed in code, and editing the file changes nothing until column order becomes data (I1-M4-005b).
+
+A project scaffolded before roles has specs without these fields. `aeos project sync` reports each as `drifted` (and `pipelines.yaml` as `missing`). Take the change: a spec with no `role` is `standard`, so until you do, the spec gate is recorded as an ordinary approval, the epic join and the criterion trace do not run, the final gate is not treated as one, and reviews are given no diff.
 
 ## Ticket State Machine
 
@@ -259,7 +287,7 @@ Every human decision at a gate is appended, as a structured record, to a YAML fi
 
 | Command | `gate` | `verdict` |
 | --- | --- | --- |
-| `ticket approve` out of `SPEC_REVIEW` | `spec` | `approved` |
+| `ticket approve` out of the `spec-review` column (`SPEC_REVIEW`) | `spec` | `approved` |
 | `ticket approve` anywhere else | `column-approval` | `approved` |
 | `ticket dod-approve` (yes / no) | `definition-of-done` | `approved` / `rejected` |
 | `ticket sign-off` | `sign-off-override` | `overridden` |

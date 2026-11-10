@@ -3,10 +3,14 @@
 
 import { z } from 'zod';
 
+import { COLUMN_ROLES, DIFF_CONTEXTS } from '../../domain/model/column-spec.js';
+
 export const ColumnSpecSchema = z.object({
   column: z.string().min(1),
   // Length and uniqueness are checked across all columns, in `labelErrors`.
   label: z.string().optional(),
+  role: z.enum(COLUMN_ROLES).default('standard'),
+  diffContext: z.enum(DIFF_CONTEXTS).default('none'),
   executorMode: z.enum(['artifact', 'agentic']).optional(),
   requiresRepoDiff: z.boolean().optional(),
   runChecks: z.boolean().optional(),

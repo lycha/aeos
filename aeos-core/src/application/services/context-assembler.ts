@@ -6,7 +6,7 @@ import type { GitGateway } from '../../domain/ports/driven/git-gateway.port.js';
 import type { ArtefactTree } from '../../domain/ports/driven/artefact-tree.port.js';
 import type { AssembledContext, PriorArtifact } from '../../domain/model/assembled-context.js';
 import type { SpecPin } from '../../domain/model/spec-pin.js';
-import { Column } from '../../domain/model/column.js';
+import type { DiffContext } from '../../domain/model/column-spec.js';
 import { scenariosFor } from '../../domain/services/criteria-trace.js';
 
 /** Maximum characters before a diff is truncated. */
@@ -55,13 +55,14 @@ export class ContextAssembler {
   ) {}
 
   /**
+   * `diffContext` is the column spec's (`none` when it declares none).
    * `specPin` is the ticket's pin (its own or its parent epic's, see
    * `resolveSpecPin`), or null for a ticket that is not spec-backed.
    */
   async assemble(
     ticketId: string,
     projectRoot: string,
-    column: string,
+    diffContext: DiffContext,
     specPin: SpecPin | null = null,
   ): Promise<AssembledContext> {
     // 1. Read ticket content
@@ -112,17 +113,15 @@ export class ContextAssembler {
         .filter((part) => part !== null)
         .join('\n\n') || null;
 
-    // 5. Inject a git diff for the review columns.
-    //    - CODE_REVIEW reviews the working-tree diff of one task.
-    //    - INTEGRATION_REVIEW reviews the whole assembled feature: every task
-    //      commit on the epic branch, i.e. the range from the epic's base tag to
-    //      HEAD. Task work is committed by then, so a plain `git diff HEAD` would
-    //      be empty.
-    //    - DOD_GATE judges the criteria no test answered against that same diff.
+    // 5. Inject the git diff the column's spec asks for.
+    //    - `task`: the working-tree diff of one task, for its code review.
+    //    - `epic`: the whole assembled feature — every task commit on the epic
+    //      branch, i.e. the range from the epic's base tag to HEAD. Task work is
+    //      committed by then, so a plain `git diff HEAD` would be empty.
     let codeDiff: string | null = null;
-    if (column === Column.CODE_REVIEW) {
+    if (diffContext === 'task') {
       codeDiff = this.clampDiff(this.gitGateway.diff(projectRoot));
-    } else if (column === Column.INTEGRATION_REVIEW || column === Column.DOD_GATE) {
+    } else if (diffContext === 'epic') {
       const baseTag = `aeos-base/${ticketId}`;
       const raw = this.gitGateway.refExists(projectRoot, baseTag)
         ? this.gitGateway.diffRange(projectRoot, baseTag, 'HEAD')

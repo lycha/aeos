@@ -10,6 +10,7 @@ import type { Ticket } from '../domain/model/ticket.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
+import type { ColumnRole } from '../domain/model/column-spec.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
 import type { AgentSpecLoader } from '../domain/ports/driven/agent-spec-loader.port.js';
 import type { ExecutorConfigResolver } from './services/executor-config-resolver.js';
@@ -36,6 +37,14 @@ function epic(overrides: Partial<Ticket> = {}): Ticket {
     ...overrides,
   };
 }
+
+/** The roles the shipped column specs declare. */
+const TEMPLATE_ROLES: Record<string, ColumnRole | undefined> = {
+  SPEC_REVIEW: 'spec-review',
+  TASK_BREAKDOWN: 'decomposition',
+  INTEGRATION_REVIEW: 'integration',
+  DOD_GATE: 'final-gate',
+};
 
 describe('OrchestratorUseCase', () => {
   let ticketRepo: TicketRepository;
@@ -78,11 +87,12 @@ describe('OrchestratorUseCase', () => {
       touch: vi.fn(),
     };
     columnSpecLoader = {
-      load: vi.fn().mockReturnValue({
+      load: vi.fn((column: Column) => ({
+        role: TEMPLATE_ROLES[column] ?? 'standard',
         advanceMode: 'auto',
         workerAgentFile: 'agents/worker.yaml',
         reviewerAgentFile: 'agents/reviewer.yaml',
-      }),
+      })),
     } as unknown as ColumnSpecLoader;
     agentSpecLoader = {
       load: vi.fn((file: string) => ({ name: file.includes('worker') ? 'worker' : 'reviewer' })),
@@ -277,6 +287,7 @@ describe('OrchestratorUseCase', () => {
     // Puts the worker of one column on an executor that cannot report cost.
     const ollamaIn = (column: Column): void => {
       (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockImplementation((c: Column) => ({
+        role: TEMPLATE_ROLES[c] ?? 'standard',
         advanceMode: 'auto',
         workerAgentFile: `agents/worker-${c}.yaml`,
         reviewerAgentFile: 'agents/reviewer.yaml',
@@ -428,6 +439,23 @@ describe('OrchestratorUseCase', () => {
     expect(result.steps[0].column).toBe(Column.SPEC_REVIEW);
     // One run attempted, then the escalated sub-state stops the loop.
     expect(ticketRun.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('halts for a human at a final gate of any name, though the column and the project advance automatically', async () => {
+    // TECH_SPEC is this project's final gate; nothing is called DOD_GATE.
+    (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockImplementation((column: Column) => ({
+      role: column === Column.TECH_SPEC ? 'final-gate' : 'standard',
+      advanceMode: 'auto',
+    }));
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      epic({ column: Column.TECH_SPEC, subState: SubState.SIGNED_OFF }),
+    );
+
+    const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+    expect(result.haltReason).toBe(HaltReason.HUMAN_GATE);
+    expect(ticketApprove.execute).not.toHaveBeenCalled();
+    expect(ticketRun.execute).not.toHaveBeenCalled();
   });
 
   it('honours a manual column even when the global mode is auto', async () => {

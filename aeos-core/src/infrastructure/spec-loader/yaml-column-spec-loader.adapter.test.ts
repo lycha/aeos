@@ -77,6 +77,67 @@ describe('YamlColumnSpecLoader', () => {
     expect(result.column).toBe('TASK_BREAKDOWN');
   });
 
+  it('finds a spec by its own `column:` field, whatever the file is called', () => {
+    const dir = path.join(tmpDir, '.aeos', 'column-specs');
+    fs.writeFileSync(
+      path.join(dir, 'slicing.yaml'),
+      validColumnSpecYaml({ column: 'TASK_BREAKDOWN' }),
+    );
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'not a spec');
+
+    expect(loader.load(Column.TASK_BREAKDOWN, tmpDir).column).toBe('TASK_BREAKDOWN');
+  });
+
+  it('refuses two files that claim one column, naming both', () => {
+    const dir = path.join(tmpDir, '.aeos', 'column-specs');
+    fs.writeFileSync(path.join(dir, 'spec-review.yaml'), validColumnSpecYaml());
+    fs.writeFileSync(path.join(dir, 'product-scoping.yaml'), validColumnSpecYaml());
+
+    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(
+      /SPEC_REVIEW.*column-specs\/product-scoping\.yaml.*column-specs\/spec-review\.yaml/,
+    );
+    // No column loads while the specs disagree about which is which.
+    expect(() => loader.labels(tmpDir)).toThrow(/product-scoping\.yaml/);
+  });
+
+  it('says which file it could not read when a column has no spec because of it', () => {
+    const dir = path.join(tmpDir, '.aeos', 'column-specs');
+    fs.writeFileSync(path.join(dir, 'spec-review.yaml'), 'column: [unclosed');
+
+    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(
+      /column-specs\/spec-review\.yaml/,
+    );
+  });
+
+  it('defaults a column to the standard role with no diff, and loads what a spec declares', () => {
+    const dir = path.join(tmpDir, '.aeos', 'column-specs');
+    fs.writeFileSync(path.join(dir, 'spec-review.yaml'), validColumnSpecYaml());
+    fs.writeFileSync(
+      path.join(dir, 'integration-review.yaml'),
+      validColumnSpecYaml({
+        column: 'INTEGRATION_REVIEW',
+        role: 'integration',
+        diffContext: 'epic',
+      }),
+    );
+
+    expect(loader.load(Column.SPEC_REVIEW, tmpDir)).toMatchObject({
+      role: 'standard',
+      diffContext: 'none',
+    });
+    expect(loader.load(Column.INTEGRATION_REVIEW, tmpDir)).toMatchObject({
+      role: 'integration',
+      diffContext: 'epic',
+    });
+  });
+
+  it('refuses a role outside the approved vocabulary', () => {
+    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
+    fs.writeFileSync(specPath, validColumnSpecYaml({ role: 'release' }), 'utf-8');
+
+    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(ZodError);
+  });
+
   it('throws ColumnSpecNotFoundError for BACKLOG column', () => {
     expect(() => loader.load(Column.BACKLOG, tmpDir)).toThrow(ColumnSpecNotFoundError);
     expect(() => loader.load(Column.BACKLOG, tmpDir)).toThrow('does not have a column spec');

@@ -7,7 +7,16 @@ import { readTemplates } from './template-source.js';
 import { FsProjectRepository } from './fs-project.repository.js';
 import { YamlColumnSpecLoader } from '../spec-loader/yaml-column-spec-loader.adapter.js';
 import { YamlAgentSpecLoader } from '../spec-loader/yaml-agent-spec-loader.adapter.js';
-import { Column, COLUMN_ORDER } from '../../domain/model/column.js';
+import yaml from 'js-yaml';
+import {
+  Column,
+  COLUMN_ORDER,
+  EPIC_COLUMN_ORDER,
+  TASK_COLUMN_ORDER,
+} from '../../domain/model/column.js';
+import { COLUMN_ROLES } from '../../domain/model/column-spec.js';
+import { ProjectSyncUseCase } from '../../application/project-sync.use-case.js';
+import { FsTemplateCatalog } from './fs-template-catalog.js';
 
 /** Columns with no agent pipeline, and therefore no column spec. */
 const SPECLESS: readonly Column[] = [Column.BACKLOG, Column.DONE];
@@ -21,7 +30,69 @@ describe('readTemplates', () => {
   it('ships templates under the expected top-level directories', () => {
     const dirs = new Set(readTemplates().map((t) => t.relativePath.split(path.sep)[0]));
 
-    expect(dirs).toEqual(new Set(['column-specs', 'agents', 'rubrics', 'schemas']));
+    expect(dirs).toEqual(
+      new Set(['column-specs', 'agents', 'rubrics', 'schemas', 'pipelines.yaml']),
+    );
+  });
+
+  it('ships the approved pipelines file, whose role vocabulary and order are what the code has', () => {
+    const pipelines = readTemplates().find((t) => t.relativePath === 'pipelines.yaml')!.content;
+
+    expect(pipelines.split('\n')[0]).toBe(
+      '# Approved by Kris, 10 Nov 2026 (signed off as drafted).',
+    );
+    // The roles a column spec may declare are the ones the file names, and no other.
+    expect([...new Set([...pipelines.matchAll(/^#\s+role: (\S+)/gm)].map((m) => m[1]))]).toEqual([
+      ...COLUMN_ROLES,
+    ]);
+    // Nothing reads the order from it yet (I1-M4-005b); until then it must say what the constants say.
+    expect(yaml.load(pipelines)).toMatchObject({
+      pipelines: { EPIC: [...EPIC_COLUMN_ORDER], TASK: [...TASK_COLUMN_ORDER] },
+    });
+  });
+
+  it('declares the role and the diff of every column, as the engine used to infer them from names', () => {
+    const declared = Object.fromEntries(
+      readTemplates()
+        .filter((t) => t.relativePath.startsWith('column-specs'))
+        .map((t) => yaml.load(t.content) as { column: string; role?: string; diffContext?: string })
+        .map((spec) => [spec.column, `${spec.role} ${spec.diffContext}`]),
+    );
+
+    expect(declared).toEqual({
+      SPEC_REVIEW: 'spec-review none',
+      TECH_SPEC: 'standard none',
+      TASK_BREAKDOWN: 'decomposition none',
+      IMPLEMENTATION: 'standard none',
+      CODE_REVIEW: 'standard task',
+      QA: 'standard none',
+      INTEGRATION_REVIEW: 'integration epic',
+      DOD_GATE: 'final-gate epic',
+    });
+  });
+
+  it('reports a column spec from before roles as drifted in project sync', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-sync-'));
+    try {
+      new FsProjectRepository().scaffoldDefaults(tmp);
+      const spec = path.join(tmp, '.aeos', 'column-specs', 'tech-spec.yaml');
+      fs.writeFileSync(
+        spec,
+        fs.readFileSync(spec, 'utf-8').replace(/^(role|diffContext): .*\n/gm, ''),
+      );
+
+      const { files } = new ProjectSyncUseCase(new FsTemplateCatalog()).execute({
+        projectPath: tmp,
+        apply: false,
+        force: false,
+      });
+
+      expect(files.filter((file) => file.status !== 'unchanged')).toMatchObject([
+        { relativePath: 'column-specs/tech-spec.yaml', status: 'drifted' },
+      ]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it('has no agent that drafts requirements: a person writes the spec', () => {

@@ -9,6 +9,7 @@ import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
 import type { ConformanceReport } from '../domain/model/conformance-report.js';
 import type { GateRecord } from '../domain/model/gate-record.js';
 import type { RunRecord } from '../domain/model/run-record.js';
@@ -128,6 +129,7 @@ describe('TicketDodApproveUseCase', () => {
   let conformance: { buildConformance: ReturnType<typeof vi.fn> };
   let runRecordStore: RunRecordStore;
   let pullRequests: PullRequestGateway;
+  let columnSpecLoader: { load: ReturnType<typeof vi.fn> };
   let useCase: TicketDodApproveUseCase;
 
   beforeEach(() => {
@@ -139,6 +141,12 @@ describe('TicketDodApproveUseCase', () => {
     conformance = { buildConformance: vi.fn() };
     runRecordStore = { write: vi.fn(), list: vi.fn().mockReturnValue([]) };
     pullRequests = { isAvailable: vi.fn(), create: vi.fn(), updateBody: vi.fn() };
+    // As the templates declare it: the column called DOD_GATE is the final gate.
+    columnSpecLoader = {
+      load: vi.fn((column: string) => ({
+        role: column === 'DOD_GATE' ? 'final-gate' : 'standard',
+      })),
+    };
     useCase = new TicketDodApproveUseCase(
       ticketRepo,
       artifactStore,
@@ -149,8 +157,40 @@ describe('TicketDodApproveUseCase', () => {
       conformance as unknown as ConformanceService,
       runRecordStore,
       pullRequests,
+      columnSpecLoader as ColumnSpecLoader,
     );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(dodGateTicket());
+  });
+
+  describe('the final gate is a role, not a name', () => {
+    it('decides a ticket at a final gate called anything, and records that column', () => {
+      columnSpecLoader.load.mockImplementation((column: string) => ({
+        role: column === 'INTEGRATION_REVIEW' ? 'final-gate' : 'standard',
+      }));
+      const atRelease = { ...dodGateTicket(), column: 'INTEGRATION_REVIEW' as const };
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(atRelease);
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true);
+
+      expect(result.status).toBe('approved');
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, atRelease, {
+        gate: 'definition-of-done',
+        verdict: 'approved',
+        fromColumn: 'INTEGRATION_REVIEW',
+        toColumn: 'DONE',
+      });
+      expect(gitGateway.commit).toHaveBeenCalledWith(
+        path.join(PROJECT_PATH, '.aeos'),
+        `[${TICKET_ID}][HUMAN][v1][dod-approve: INTEGRATION_REVIEW → DONE]`,
+      );
+    });
+
+    it('refuses a ticket in a column that is merely called DOD_GATE', () => {
+      columnSpecLoader.load.mockReturnValue({ role: 'standard' });
+
+      expect(useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true).status).toBe('error');
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
   });
 
   describe('conformance at the gate', () => {

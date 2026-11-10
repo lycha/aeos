@@ -11,6 +11,8 @@ import type { CostRepository } from '../domain/ports/driven/cost-repository.port
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { ColumnSpec } from '../domain/model/column-spec.js';
+import { columnSpecOf, findColumnSpec } from './services/column-roles.js';
 import { parseVerdict } from '../domain/services/verdict-parser.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type {
@@ -64,9 +66,13 @@ export class TicketApproveUseCase implements TicketApprovePort {
       return { status: 'already_done', ticketId };
     }
 
-    // The epic join: an epic leaving TASK_BREAKDOWN is claiming its children
-    // are finished. Verify that rather than trusting it.
-    if (ticket.kind === TicketKind.EPIC && currentColumn === Column.TASK_BREAKDOWN) {
+    // What this column is for decides what leaving it means: never its name.
+    const columnSpec = columnSpecOf(this.columnSpecLoader, projectPath, currentColumn);
+    const role = columnSpec?.role ?? 'standard';
+
+    // The epic join: an epic leaving its decomposition column is claiming its
+    // children are finished. Verify that rather than trusting it.
+    if (ticket.kind === TicketKind.EPIC && role === 'decomposition') {
       const children = this.ticketRepo.findChildren(projectId, ticketId);
       const unfinished = children.filter((child) => child.column !== Column.DONE);
       if (unfinished.length > 0) {
@@ -78,7 +84,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
         return {
           status: 'error',
           ticketId,
-          error: `Epic ${ticketId} has ${unfinished.length} unfinished task(s): ${summary}${overflow}. Finish them before advancing to DOD_GATE.`,
+          error: `Epic ${ticketId} has ${unfinished.length} unfinished task(s): ${summary}${overflow}. Finish them before advancing the epic.`,
         };
       }
     }
@@ -120,20 +126,19 @@ export class TicketApproveUseCase implements TicketApprovePort {
     // Before the transition, so a pull request that cannot be opened leaves the
     // ticket SIGNED_OFF and re-running approve retries it.
     const opensPullRequest =
-      (ticket.kind === TicketKind.EPIC && currentColumn === Column.INTEGRATION_REVIEW) ||
+      (ticket.kind === TicketKind.EPIC && role === 'integration') ||
       (taskFinished && ticket.parentId === null);
     if (
       opensPullRequest &&
       this.projectRepo.readExecutorConfig(projectPath)?.pullRequests?.enabled !== false
     ) {
-      const error = this.openPullRequest(projectId, projectPath, ticket);
+      const error = this.openPullRequest(projectId, projectPath, ticket, columnSpec);
       if (error) return { status: 'error', ticketId, error };
     }
 
     if (byPerson) {
       this.gateRecorder.record(projectPath, ticket, {
-        // shortcut: keyed on the column's name; I1-M4-005a replaces it with the column's role.
-        gate: currentColumn === Column.SPEC_REVIEW ? 'spec' : 'column-approval',
+        gate: role === 'spec-review' ? 'spec' : 'column-approval',
         verdict: 'approved',
         fromColumn: currentColumn,
         toColumn: nextColumn,
@@ -170,7 +175,12 @@ export class TicketApproveUseCase implements TicketApprovePort {
    * Pushes the ticket's `aeos/<id>` branch and opens its pull request against
    * the default branch. Returns the needs-human message when it cannot.
    */
-  private openPullRequest(projectId: string, projectPath: string, ticket: Ticket): string | null {
+  private openPullRequest(
+    projectId: string,
+    projectPath: string,
+    ticket: Ticket,
+    columnSpec: ColumnSpec | null,
+  ): string | null {
     const needsHuman = (cause: string): string =>
       `Cannot open a pull request for ${ticket.id}: ${cause} The ticket stays SIGNED_OFF; once that is fixed, re-run \`aeos ticket approve ${ticket.id}\`. For a project without pull requests, set "pullRequests": { "enabled": false } in .aeos/project.json.`;
 
@@ -186,7 +196,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
         base: this.gitGateway.defaultBranch(projectPath),
         head,
         title: `[${ticket.id}] ${ticket.title}`,
-        body: this.pullRequestBody(projectId, projectPath, ticket),
+        body: this.pullRequestBody(projectId, projectPath, ticket, columnSpec),
       });
       this.ticketRepo.setPrUrl(projectId, ticket.id, url);
       return null;
@@ -195,16 +205,33 @@ export class TicketApproveUseCase implements TicketApprovePort {
     }
   }
 
-  private pullRequestBody(projectId: string, projectPath: string, ticket: Ticket): string {
+  private pullRequestBody(
+    projectId: string,
+    projectPath: string,
+    ticket: Ticket,
+    /** The spec of the column being left. */
+    columnSpec: ColumnSpec | null,
+  ): string {
     const isEpic = ticket.kind === TicketKind.EPIC;
     const read = (filename: string): string | null =>
       this.artifactStore.artifactExists(projectPath, ticket.id, filename)
         ? this.artifactStore.readArtifact(projectPath, ticket.id, filename)
         : null;
 
-    const reviewColumn = isEpic ? Column.INTEGRATION_REVIEW : Column.CODE_REVIEW;
-    const reviewArtifact = `${ticket.id}-${this.columnSpecLoader.load(reviewColumn, projectPath).outputArtifact}`;
-    const reviewersVerdict = parseVerdict(read(reviewArtifact.replace('.md', '-review.md')) ?? '');
+    // An epic cites the review of the integration column it is leaving; a task,
+    // the review of the column that was given its diff.
+    const reviewSpec = isEpic
+      ? columnSpec
+      : findColumnSpec(
+          this.columnSpecLoader,
+          projectPath,
+          ticket.kind,
+          (spec) => spec.diffContext === 'task',
+        );
+    const reviewArtifact = reviewSpec ? `${ticket.id}-${reviewSpec.outputArtifact}` : null;
+    const reviewersVerdict = parseVerdict(
+      (reviewArtifact && read(reviewArtifact.replace('.md', '-review.md'))) ?? '',
+    );
     const checksTable = (read(`${ticket.id}-checks.md`) ?? '')
       .split('\n')
       .filter((line) => line.startsWith('|'))
@@ -219,7 +246,9 @@ export class TicketApproveUseCase implements TicketApprovePort {
       title: ticket.title,
       reviewLabel: isEpic ? 'Integration review' : 'Code review',
       reviewPath:
-        read(reviewArtifact) === null ? null : `.aeos/tickets/${ticket.id}/${reviewArtifact}`,
+        reviewArtifact && read(reviewArtifact) !== null
+          ? `.aeos/tickets/${ticket.id}/${reviewArtifact}`
+          : null,
       reviewSummary: reviewersVerdict.ok
         ? `${reviewersVerdict.verdict.verdict}, ${reviewersVerdict.verdict.blockers} blockers, ${reviewersVerdict.verdict.warnings} warnings`
         : null,

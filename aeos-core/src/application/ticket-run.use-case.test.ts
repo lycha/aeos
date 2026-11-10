@@ -220,6 +220,8 @@ function defaultColumnSpec(overrides: Partial<ColumnSpec> = {}): ColumnSpec {
 function baseColumnSpec(): ColumnSpec {
   return {
     column: 'IMPLEMENTATION',
+    // As the template states it: the column that writes code says so itself.
+    executorMode: 'agentic',
     workerAgentFile: 'agents/worker.yaml',
     reviewerAgentFile: 'agents/reviewer.yaml',
     outputArtifact: 'impl.md',
@@ -392,6 +394,119 @@ describe('TicketRunUseCase', () => {
       files: call[2] as { brief: string; transcript: string },
     }));
   }
+
+  describe('roles, not names', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    /** An epic in TECH_SPEC, whose spec declares `declared`. */
+    const inTechSpec = (declared: Partial<ColumnSpec>, specPin: typeof PIN | null = PIN): void => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'TECH_SPEC', subState: 'READY', specPin }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ column: 'TECH_SPEC', executorMode: 'artifact', ...declared }),
+      );
+    };
+    const reviewerContext = (): AssembledContext =>
+      (buildPromptFn as ReturnType<typeof vi.fn>).mock.calls[1]![0] as AssembledContext;
+    const fullTrace = traceCriteria({
+      criteria: ['AC-1'],
+      nonGoals: [],
+      claims: new Map([['AEOS-2', ['AC-1']]]),
+      instruments: new Map([['AC-1', ['a.test.ts']]]),
+    });
+
+    it('builds the conformance report at a final gate of any name', async () => {
+      inTechSpec({ role: 'final-gate' });
+      conformanceService.buildConformance.mockResolvedValue({
+        report: { criteria: [] },
+        markdown: '# Conformance report',
+      });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(conformanceService.buildConformance).toHaveBeenCalledWith(PROJECT_PATH, TICKET_ID);
+      expect(executor.run).not.toHaveBeenCalled();
+    });
+
+    it('runs a column called DOD_GATE like any other when its spec does not make it the final gate', async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'DOD_GATE', subState: 'READY' }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ column: 'DOD_GATE', executorMode: 'artifact' }),
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(conformanceService.buildConformance).not.toHaveBeenCalled();
+      expect(executor.run).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives the unclaimed criteria to the reviewer of a decomposition column of any name, and of no other', async () => {
+      criteriaCollector.collect.mockReturnValue(fullTrace);
+      inTechSpec({ role: 'decomposition' });
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(reviewerContext().priorArtifacts.map((a) => a.name)).toContain('criteria-claims.md');
+
+      (buildPromptFn as ReturnType<typeof vi.fn>).mockClear();
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'TASK_BREAKDOWN', subState: 'READY', specPin: PIN }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ column: 'TASK_BREAKDOWN', executorMode: 'artifact' }),
+      );
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(reviewerContext().priorArtifacts.map((a) => a.name)).not.toContain(
+        'criteria-claims.md',
+      );
+    });
+
+    it('traces criteria before the worker of an integration column of any name', async () => {
+      criteriaCollector.collect.mockReturnValue(
+        traceCriteria({
+          criteria: ['AC-1'],
+          nonGoals: [],
+          claims: new Map(),
+          instruments: new Map(),
+        }),
+      );
+      inTechSpec({ role: 'integration' });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'escalated', reason: 'PRE_WORKER_CHECK_FAILED' });
+    });
+
+    it('runs the worker of a column called IMPLEMENTATION as an artifact unless its spec says agentic', async () => {
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ executorMode: undefined }),
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const worker = (executor.run as ReturnType<typeof vi.fn>).mock
+        .calls[0]![0] as ExecutorInvocation;
+      expect(worker).toMatchObject({ mode: 'artifact', workingDirectory: undefined });
+      expect(gitGateway.stageAll).not.toHaveBeenCalled();
+    });
+
+    it.each(['none', 'task', 'epic'] as const)(
+      'assembles every context of a column with the diff its spec asks for: %s',
+      async (diffContext) => {
+        inTechSpec({ diffContext }, null);
+
+        await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+        const asked = (contextAssembler.assemble as ReturnType<typeof vi.fn>).mock.calls.map(
+          (call) => call[2] as string,
+        );
+        expect(asked.length).toBeGreaterThan(1);
+        expect(new Set(asked)).toEqual(new Set([diffContext]));
+      },
+    );
+  });
 
   describe('the bug track', () => {
     const COMMAND = 'npx vitest run src/foo.test.ts -t "returns 404"';
@@ -667,7 +782,12 @@ describe('TicketRunUseCase', () => {
         runnableTicket({ column: 'DOD_GATE', subState: 'READY', specPin: PIN }),
       );
       (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
-        defaultColumnSpec({ column: 'DOD_GATE', outputArtifact: 'dod-verification.md' }),
+        defaultColumnSpec({
+          column: 'DOD_GATE',
+          role: 'final-gate',
+          executorMode: 'artifact',
+          outputArtifact: 'dod-verification.md',
+        }),
       );
     });
 
@@ -748,7 +868,12 @@ describe('TicketRunUseCase', () => {
         runnableTicket({ column: 'INTEGRATION_REVIEW', specPin }),
       );
       (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
-        defaultColumnSpec({ column: 'INTEGRATION_REVIEW', outputArtifact: 'integration.md' }),
+        defaultColumnSpec({
+          column: 'INTEGRATION_REVIEW',
+          role: 'integration',
+          executorMode: 'artifact',
+          outputArtifact: 'integration.md',
+        }),
       );
     };
     const written = (): Record<string, string> =>
@@ -855,7 +980,12 @@ describe('TicketRunUseCase', () => {
         runnableTicket({ column: 'TASK_BREAKDOWN', specPin: PIN }),
       );
       (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
-        defaultColumnSpec({ column: 'TASK_BREAKDOWN', outputArtifact: 'tasks.md' }),
+        defaultColumnSpec({
+          column: 'TASK_BREAKDOWN',
+          role: 'decomposition',
+          executorMode: 'artifact',
+          outputArtifact: 'tasks.md',
+        }),
       );
       criteriaCollector.collect.mockReturnValue(trace(['AC-1', 'AC-9']));
 
@@ -1510,6 +1640,9 @@ describe('TicketRunUseCase', () => {
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
       runnableTicket({ column: 'DOD_GATE' }),
     );
+    (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+      defaultColumnSpec({ column: 'DOD_GATE', role: 'final-gate', executorMode: 'artifact' }),
+    );
 
     const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
@@ -2010,6 +2143,10 @@ describe('TicketRunUseCase', () => {
     });
 
     it('records a worker whose output fails validation as failed', async () => {
+      // An artifact column: the word count is not asked of an agentic summary.
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ executorMode: 'artifact' }),
+      );
       (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: true,
         artifactPath: '/tmp/artifact',
