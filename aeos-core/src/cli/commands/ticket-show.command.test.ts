@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { registerTicketShowCommand } from './ticket-show.command.js';
-import { Column } from '../../domain/model/column.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketShowPort } from '../../domain/ports/driving/ticket-show.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { displayOrder } from '../../domain/model/column.js';
+import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// Every column of the shipped pipelines.
+const COLUMNS = displayOrder(templatePipelines());
 
 // The tech spec column is labelled; every other column shows its default.
-const labelsOf = () => columnLabels({ [Column.TECH_SPEC]: { label: 'Shaping' } }, null);
+const labelsOf = () => columnLabels(COLUMNS, { TECH_SPEC: { label: 'Shaping' } }, null);
 
 function createMockTicketShowUseCase(): TicketShowPort {
   return {

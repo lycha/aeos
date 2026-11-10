@@ -1,95 +1,59 @@
-// Value Object — Column enum (9 pipeline stages across two ticket kinds)
+// Value Object — Column: a pipeline stage, named by the project's pipelines file
 
-import { TicketKind } from './ticket-kind.js';
+import type { TicketKind } from './ticket-kind.js';
 
+/** The two structural columns every pipeline has. Every other column is the project's to name. */
 export const Column = {
   BACKLOG: 'BACKLOG',
-  SPEC_REVIEW: 'SPEC_REVIEW',
-  TECH_SPEC: 'TECH_SPEC',
-  TASK_BREAKDOWN: 'TASK_BREAKDOWN',
-  IMPLEMENTATION: 'IMPLEMENTATION',
-  CODE_REVIEW: 'CODE_REVIEW',
-  QA: 'QA',
-  INTEGRATION_REVIEW: 'INTEGRATION_REVIEW',
-  DOD_GATE: 'DOD_GATE',
   DONE: 'DONE',
 } as const;
 
-export type Column = (typeof Column)[keyof typeof Column];
+/** A column identifier: valid when a loaded pipeline lists it (see `isValidColumn`). */
+export type Column = string;
 
-/**
- * Canonical display ordering across both pipelines.
- *
- * This is NOT the advancement sequence — neither kind visits every column.
- * Use `nextColumnFor` for advancement; this exists for rendering and for
- * reasoning about relative position.
- */
-export const COLUMN_ORDER = [
-  Column.BACKLOG,
-  Column.SPEC_REVIEW,
-  Column.TECH_SPEC,
-  Column.TASK_BREAKDOWN,
-  Column.IMPLEMENTATION,
-  Column.CODE_REVIEW,
-  Column.QA,
-  Column.INTEGRATION_REVIEW,
-  Column.DOD_GATE,
-  Column.DONE,
-] as const;
+/** The ordered columns of each ticket kind, as loaded from `.aeos/pipelines.yaml`. */
+export type Pipelines = Readonly<Record<TicketKind, readonly Column[]>>;
 
-export type ColumnOrder = typeof COLUMN_ORDER;
-
-/**
- * An epic has its spec reviewed, is specced technically, and decomposed — then it waits.
- * It never implements anything itself; its child tasks do that.
- */
-export const EPIC_COLUMN_ORDER = [
-  Column.BACKLOG,
-  Column.SPEC_REVIEW,
-  Column.TECH_SPEC,
-  Column.TASK_BREAKDOWN,
-  // Once every child task is DONE, the epic reviews the assembled feature diff
-  // against its pinned spec and tech spec before the human DoD gate.
-  Column.INTEGRATION_REVIEW,
-  Column.DOD_GATE,
-  Column.DONE,
-] as const;
-
-/**
- * A task is already specified by the time it exists — its parent epic's tech
- * spec and task breakdown are its input — so it goes straight to building.
- */
-export const TASK_COLUMN_ORDER = [
-  Column.BACKLOG,
-  Column.IMPLEMENTATION,
-  Column.CODE_REVIEW,
-  Column.QA,
-  Column.DONE,
-] as const;
-
-export function columnOrderFor(kind: TicketKind): readonly Column[] {
-  return kind === TicketKind.TASK ? TASK_COLUMN_ORDER : EPIC_COLUMN_ORDER;
+export function columnOrderFor(pipelines: Pipelines, kind: TicketKind): readonly Column[] {
+  return pipelines[kind];
 }
 
 /**
  * The next column for a ticket of this kind, or null when the current column
  * is terminal or is not part of that kind's pipeline.
  */
-export function nextColumnFor(kind: TicketKind, current: Column): Column | null {
-  const order = columnOrderFor(kind);
+export function nextColumnFor(
+  pipelines: Pipelines,
+  kind: TicketKind,
+  current: Column,
+): Column | null {
+  const order = columnOrderFor(pipelines, kind);
   const index = order.indexOf(current);
   if (index < 0 || index === order.length - 1) return null;
   return order[index + 1];
 }
 
 /** True when the column belongs to the given kind's pipeline. */
-export function isColumnInPipeline(kind: TicketKind, column: Column): boolean {
-  return columnOrderFor(kind).includes(column);
+export function isColumnInPipeline(
+  pipelines: Pipelines,
+  kind: TicketKind,
+  column: Column,
+): boolean {
+  return columnOrderFor(pipelines, kind).includes(column);
 }
 
-const COLUMN_VALUES: ReadonlySet<string> = new Set(Object.values(Column));
+/**
+ * Every column of every pipeline once, for rendering: BACKLOG, the epic's
+ * columns, the task's, DONE. This is NOT an advancement sequence.
+ */
+export function displayOrder(pipelines: Pipelines): Column[] {
+  const columns = [...pipelines.EPIC, ...pipelines.TASK].filter(
+    (column) => column !== Column.BACKLOG && column !== Column.DONE,
+  );
+  return [...new Set([Column.BACKLOG, ...columns, Column.DONE])];
+}
 
-/** Type guard — narrows an arbitrary string to `Column`. */
-export function isValidColumn(value: string): value is Column {
-  return COLUMN_VALUES.has(value);
+/** True when a loaded pipeline lists the column. */
+export function isValidColumn(value: string, pipelines: Pipelines): boolean {
+  return displayOrder(pipelines).includes(value);
 }

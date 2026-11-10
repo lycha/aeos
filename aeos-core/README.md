@@ -111,7 +111,7 @@ Each column follows the same cycle:
 .aeos/
 ├── project.json          project identity and optional executor defaults
 ├── CONSTRAINTS.md         placeholder for your architecture/style/security rules
-├── pipelines.yaml         the approved column order and role vocabulary (not read yet, see Column roles)
+├── pipelines.yaml         the column order of each ticket kind (see Pipelines)
 ├── column-specs/          one YAML per pipeline column
 ├── agents/                worker and reviewer agent specs
 ├── rubrics/               reviewer rubrics and artifact templates
@@ -185,7 +185,22 @@ executorMode: agentic
 
 A spec is found by its `column:` field, not by its file name: every `*.yaml` in `column-specs/` is read. Two files that declare the same column are an error naming both, and no column loads until one is removed.
 
-The vocabulary is the approved one in `templates/pipelines.yaml`, which `project init` now copies to `.aeos/pipelines.yaml`. **Nothing reads the order from that file yet**: the two pipelines are still fixed in code, and editing the file changes nothing until column order becomes data (I1-M4-005b).
+The vocabulary is the approved one in `templates/pipelines.yaml`.
+
+### Pipelines
+
+The order of the columns is the project's own: `.aeos/pipelines.yaml`, which `project init` writes from the template, lists the columns of each ticket kind (`EPIC`, `TASK`) in order. `ticket approve`, `ticket move`, `ticket list --column`, the orchestrator and the labels all read it. To reorder columns, reorder the list. To add a column, write its column spec (`column: SECURITY_REVIEW`, …) and list it; to drop one, remove it from the list. A project with no `pipelines.yaml` gets the template order, and `aeos project sync --apply` writes the file.
+
+The file is checked every time it is loaded, and a command that needs it fails with every reason:
+
+- every pipeline starts at `BACKLOG` and ends at `DONE`
+- a column appears at most once in a pipeline
+- every column listed (other than `BACKLOG` and `DONE`) has a column spec in `.aeos/column-specs/`
+- an `EPIC` pipeline has exactly one `decomposition` column, before any `integration` or `final-gate` column
+- a pipeline has at most one `final-gate` column, and it is the last before `DONE`
+- only the kinds `EPIC` and `TASK` exist; any other key is refused
+
+`ticket move` takes a column of that ticket's own pipeline; anything else is refused with the list. The file is a protected path: an agentic run may not edit it.
 
 A project scaffolded before roles has specs without these fields. `aeos project sync` reports each as `drifted` (and `pipelines.yaml` as `missing`). Take the change: a spec with no `role` is `standard`, so until you do, the spec gate is recorded as an ordinary approval, the epic join and the criterion trace do not run, the final gate is not treated as one, and reviews are given no diff.
 
@@ -200,7 +215,7 @@ Think of the state machine as `column + sub-state`.
 
 ### Columns
 
-The forward order depends on the ticket's kind:
+The forward order depends on the ticket's kind, and is the project's `.aeos/pipelines.yaml` (see [Pipelines](#pipelines)). As scaffolded:
 
 | Kind   | Pipeline                                                                   |
 | ------ | -------------------------------------------------------------------------- |
@@ -277,7 +292,7 @@ Operators can deliberately override the normal path:
 
 - `aeos ticket ready <id>` sets any non-`BACKLOG`, non-`DONE` ticket to `READY`
 - `aeos ticket sign-off <id> --reason <text>` manually marks any non-`BACKLOG`, non-`DONE` ticket as `SIGNED_OFF`
-- `aeos ticket move <id> <status> --reason <text>` moves a ticket to any column; non-terminal targets are reset to `READY`, while `BACKLOG` and `DONE` use `null`
+- `aeos ticket move <id> <status> --reason <text>` moves a ticket to any column of its own pipeline; non-terminal targets are reset to `READY`, while `BACKLOG` and `DONE` use `null`
 
 So the domain state machine is intentionally permissive for operator control, while the normal workflow policy is enforced by the higher-level ticket commands.
 

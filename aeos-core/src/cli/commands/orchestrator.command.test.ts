@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 import { registerOrchestratorCommand } from './orchestrator.command.js';
-import { Column } from '../../domain/model/column.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { OrchestratorPort } from '../../domain/ports/driving/orchestrator.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { displayOrder } from '../../domain/model/column.js';
+import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// Every column of the shipped pipelines.
+const COLUMNS = displayOrder(templatePipelines());
 
 describe('aeos orchestrator clear-budget', () => {
   let program: Command;
@@ -23,7 +27,7 @@ describe('aeos orchestrator clear-budget', () => {
         findRoot: vi.fn().mockReturnValue('/test'),
         read: vi.fn().mockReturnValue({ id: 'proj-1' }),
       } as unknown as ProjectRepository,
-      () => columnLabels({ [Column.TECH_SPEC]: { label: 'Shaping' } }, null),
+      () => columnLabels(COLUMNS, { TECH_SPEC: { label: 'Shaping' } }, null),
     );
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   });

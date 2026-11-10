@@ -6,7 +6,6 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 
-import { Column } from '../../domain/model/column.js';
 import type { ExecutorInvocation } from '../../domain/model/executor-invocation.js';
 import { OpenCodeCliExecutor } from './opencode-cli-executor.adapter.js';
 
@@ -72,7 +71,7 @@ describe('OpenCodeCliExecutor', () => {
       prompt: 'Test prompt',
       outputPath: path.join(tmpDir, 'output.md'),
       ticketId: 'T-77',
-      column: Column.IMPLEMENTATION,
+      column: 'IMPLEMENTATION',
       ...overrides,
     };
   }

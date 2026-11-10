@@ -18,6 +18,10 @@ import type { OrchestratorStateRepository } from '../domain/ports/driven/orchest
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
+import { templatePipelines } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// The shipped pipelines, whatever the project path.
+const pipelineLoader = { load: () => templatePipelines() };
 
 const PROJECT_ID = 'p';
 const PROJECT_PATH = '/tmp/proj';
@@ -30,7 +34,7 @@ function epic(overrides: Partial<Ticket> = {}): Ticket {
     title: 'Epic',
     kind: TicketKind.EPIC,
     parentId: null,
-    column: Column.SPEC_REVIEW,
+    column: 'SPEC_REVIEW',
     subState: SubState.READY,
     createdAt: 'x',
     updatedAt: 'y',
@@ -163,6 +167,7 @@ describe('OrchestratorUseCase', () => {
       gitGateway,
       agentSpecLoader,
       executorConfigResolver,
+      pipelineLoader,
     );
   });
 
@@ -177,7 +182,7 @@ describe('OrchestratorUseCase', () => {
   });
 
   it('runs a READY epic, then halts at the human gate', async () => {
-    let column: Column = Column.SPEC_REVIEW;
+    let column: Column = 'SPEC_REVIEW';
     let subState: SubState = SubState.READY;
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockImplementation(() =>
       epic({ column, subState }),
@@ -194,7 +199,7 @@ describe('OrchestratorUseCase', () => {
     });
     (ticketApprove.execute as ReturnType<typeof vi.fn>).mockImplementation(() => {
       const from = column;
-      column = Column.DOD_GATE;
+      column = 'DOD_GATE';
       subState = SubState.READY;
       return { status: 'advanced', ticketId: EPIC_ID, fromColumn: from, toColumn: column };
     });
@@ -208,7 +213,7 @@ describe('OrchestratorUseCase', () => {
 
   it('halts for a human when an approval fails, instead of retrying it', async () => {
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
-      epic({ column: Column.INTEGRATION_REVIEW, subState: SubState.SIGNED_OFF }),
+      epic({ column: 'INTEGRATION_REVIEW', subState: SubState.SIGNED_OFF }),
     );
     (ticketApprove.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       status: 'error',
@@ -315,36 +320,36 @@ describe('OrchestratorUseCase', () => {
       useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { budgetUsd: 5, maxSteps: 1 });
 
     it('accepts a budget when the non-reporting executor is on an epic column already passed', async () => {
-      at(Column.TECH_SPEC, []);
-      ollamaIn(Column.SPEC_REVIEW);
+      at('TECH_SPEC', []);
+      ollamaIn('SPEC_REVIEW');
 
       await expect(run()).resolves.toBeDefined();
     });
 
     it("refuses when it is on the epic's current column", async () => {
-      at(Column.TECH_SPEC, []);
-      ollamaIn(Column.TECH_SPEC);
+      at('TECH_SPEC', []);
+      ollamaIn('TECH_SPEC');
 
       await expect(run()).rejects.toThrow(/TECH_SPEC.*'ollama-cli'/);
     });
 
     it('accepts when the epic is beyond decomposition and every child is past the task column', async () => {
-      at(Column.INTEGRATION_REVIEW, [Column.DONE, Column.QA]);
-      ollamaIn(Column.CODE_REVIEW);
+      at('INTEGRATION_REVIEW', [Column.DONE, 'QA']);
+      ollamaIn('CODE_REVIEW');
 
       await expect(run()).resolves.toBeDefined();
     });
 
     it('refuses while a child still has the task column ahead', async () => {
-      at(Column.INTEGRATION_REVIEW, [Column.DONE, Column.CODE_REVIEW]);
-      ollamaIn(Column.QA);
+      at('INTEGRATION_REVIEW', [Column.DONE, 'CODE_REVIEW']);
+      ollamaIn('QA');
 
       await expect(run()).rejects.toThrow(/QA.*'ollama-cli'/);
     });
 
     it('refuses on any task column while the epic can still decompose', async () => {
-      at(Column.TASK_BREAKDOWN, [Column.DONE]);
-      ollamaIn(Column.IMPLEMENTATION);
+      at('TASK_BREAKDOWN', [Column.DONE]);
+      ollamaIn('IMPLEMENTATION');
 
       await expect(run()).rejects.toThrow(/IMPLEMENTATION.*'ollama-cli'/);
     });
@@ -379,7 +384,7 @@ describe('OrchestratorUseCase', () => {
   it('sets up an isolated epic branch + base tag when the repo is git', async () => {
     (gitGateway.isRepo as ReturnType<typeof vi.fn>).mockReturnValue(true);
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
-      epic({ column: Column.DOD_GATE, subState: SubState.READY }),
+      epic({ column: 'DOD_GATE', subState: SubState.READY }),
     );
 
     await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
@@ -391,7 +396,7 @@ describe('OrchestratorUseCase', () => {
   it('skips git isolation when the project path is not a repo', async () => {
     (gitGateway.isRepo as ReturnType<typeof vi.fn>).mockReturnValue(false);
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
-      epic({ column: Column.DOD_GATE, subState: SubState.READY }),
+      epic({ column: 'DOD_GATE', subState: SubState.READY }),
     );
 
     await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
@@ -436,7 +441,7 @@ describe('OrchestratorUseCase', () => {
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0].outcome).toContain('escalated');
     // The step records the column it drove, so the progress log can show it.
-    expect(result.steps[0].column).toBe(Column.SPEC_REVIEW);
+    expect(result.steps[0].column).toBe('SPEC_REVIEW');
     // One run attempted, then the escalated sub-state stops the loop.
     expect(ticketRun.execute).toHaveBeenCalledTimes(1);
   });
@@ -444,11 +449,11 @@ describe('OrchestratorUseCase', () => {
   it('halts for a human at a final gate of any name, though the column and the project advance automatically', async () => {
     // TECH_SPEC is this project's final gate; nothing is called DOD_GATE.
     (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockImplementation((column: Column) => ({
-      role: column === Column.TECH_SPEC ? 'final-gate' : 'standard',
+      role: column === 'TECH_SPEC' ? 'final-gate' : 'standard',
       advanceMode: 'auto',
     }));
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
-      epic({ column: Column.TECH_SPEC, subState: SubState.SIGNED_OFF }),
+      epic({ column: 'TECH_SPEC', subState: SubState.SIGNED_OFF }),
     );
 
     const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);

@@ -7,7 +7,6 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { OpenCodeCliExecutor } from './opencode-cli-executor.adapter.js';
-import { Column } from '../../domain/model/column.js';
 import type { ExecutorInvocation } from '../../domain/model/executor-invocation.js';
 
 const TIMEOUT_MS = 120_000;
@@ -36,7 +35,7 @@ async function main(): Promise<void> {
         'Edit target.txt in the workspace root by replacing the exact text OLD with NEW. Do not change any other file. Then provide a short summary of what you changed.',
       outputPath: path.join(tmpDir, 'opencode-summary.md'),
       ticketId: 'SMOKE-OPENCODE-1',
-      column: Column.IMPLEMENTATION,
+      column: 'IMPLEMENTATION',
       mode: 'agentic',
       workingDirectory: tmpDir,
     };

@@ -1,7 +1,6 @@
 // CLI command — aeos ticket move
 
 import type { Command } from 'commander';
-import { Column } from '../../domain/model/column.js';
 import {
   resolveColumn,
   withColumnLabels,
@@ -49,15 +48,9 @@ export function registerTicketMoveCommand(
 
         // An identifier or a label; only the identifier goes any further.
         const labels = getLabels(projectPath);
-        const targetColumn = resolveColumn(rawStatus, labels);
-        if (!targetColumn) {
-          // eslint-disable-next-line no-console
-          console.error(
-            `Error: Unknown status '${rawStatus}'. Valid statuses: ${Object.values(Column).join(', ')}`,
-          );
-          process.exitCode = 1;
-          return;
-        }
+        // An unknown one goes on as typed: the use case answers with the
+        // columns of this ticket's pipeline.
+        const targetColumn = resolveColumn(rawStatus, labels) ?? rawStatus;
 
         const project = projectRepo.read(projectPath);
         const result = getTicketMoveUseCase().execute({

@@ -67,6 +67,8 @@ import { AuggieCliExecutor } from '../infrastructure/executor/auggie-cli-executo
 import { OpenCodeCliExecutor } from '../infrastructure/executor/opencode-cli-executor.adapter.js';
 import { OllamaCliExecutor } from '../infrastructure/executor/ollama-cli-executor.adapter.js';
 import { YamlColumnSpecLoader } from '../infrastructure/spec-loader/yaml-column-spec-loader.adapter.js';
+import { YamlPipelineLoader } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+import { Column } from '../domain/model/column.js';
 import { YamlAgentSpecLoader } from '../infrastructure/spec-loader/yaml-agent-spec-loader.adapter.js';
 import { FsRubricLoader } from '../infrastructure/filesystem/fs-rubric-loader.adapter.js';
 import { PreflightService } from '../application/services/preflight.js';
@@ -157,6 +159,9 @@ export function createContainer(): Container {
     process.env.AEOS_EXECUTOR === 'stub'
       ? new StubPullRequestGateway()
       : new GhPullRequestGateway();
+
+  const newPipelineLoader = (): YamlPipelineLoader =>
+    new YamlPipelineLoader(new YamlColumnSpecLoader());
 
   const createExecutor = (agentSpec: AgentSpec) => {
     if (agentSpec.executor.type === 'stub') {
@@ -300,6 +305,7 @@ export function createContainer(): Container {
         new YamlColumnSpecLoader(),
         projectRepo,
         getGateRecorder(),
+        newPipelineLoader(),
       );
     },
     get ticketSignOff() {
@@ -317,6 +323,7 @@ export function createContainer(): Container {
         getStateMachine(),
         gitGateway,
         getGateRecorder(),
+        newPipelineLoader(),
       );
     },
     get ticketReady() {
@@ -334,6 +341,7 @@ export function createContainer(): Container {
         gitGateway,
         new YamlAgentSpecLoader(),
         newExecutorConfigResolver(),
+        newPipelineLoader(),
       );
     },
     get ticketDodApprove() {
@@ -362,7 +370,8 @@ export function createContainer(): Container {
       } catch {
         // A report across projects must not fail on one project's labels.
       }
-      return columnLabels({}, null);
+      // Only the structural columns are known; any other identifier is shown as it is.
+      return columnLabels([Column.BACKLOG, Column.DONE], {}, null);
     },
   };
 }

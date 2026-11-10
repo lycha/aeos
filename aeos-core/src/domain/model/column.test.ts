@@ -1,58 +1,40 @@
 import { describe, it, expect } from 'vitest';
-import { Column, COLUMN_ORDER, isValidColumn } from './column.js';
+import { Column, displayOrder, isValidColumn, type Pipelines } from './column.js';
+
+const pipelines: Pipelines = {
+  EPIC: ['BACKLOG', 'SPEC_REVIEW', 'TASK_BREAKDOWN', 'DONE'],
+  TASK: ['BACKLOG', 'IMPLEMENTATION', 'QA', 'DONE'],
+};
 
 describe('Column', () => {
-  it('Column.BACKLOG equals the string "BACKLOG"', () => {
-    expect(Column.BACKLOG).toBe('BACKLOG');
-  });
-
-  it('all 10 column values are distinct strings', () => {
-    const values = Object.values(Column);
-    expect(values).toHaveLength(10);
-    expect(new Set(values).size).toBe(10);
+  it('names only the two structural columns', () => {
+    expect(Column).toEqual({ BACKLOG: 'BACKLOG', DONE: 'DONE' });
   });
 });
 
-describe('COLUMN_ORDER', () => {
-  it('contains all 10 columns in correct pipeline order', () => {
-    expect(COLUMN_ORDER).toHaveLength(10);
-    expect([...COLUMN_ORDER]).toEqual([
+describe('displayOrder', () => {
+  it('lists every column of every pipeline once, BACKLOG first and DONE last', () => {
+    expect(displayOrder(pipelines)).toEqual([
       'BACKLOG',
       'SPEC_REVIEW',
-      'TECH_SPEC',
       'TASK_BREAKDOWN',
       'IMPLEMENTATION',
-      'CODE_REVIEW',
       'QA',
-      'INTEGRATION_REVIEW',
-      'DOD_GATE',
       'DONE',
     ]);
-  });
-
-  it('contains every Column value exactly once', () => {
-    const allColumns = Object.values(Column);
-    for (const col of allColumns) {
-      expect(COLUMN_ORDER).toContain(col);
-    }
-    expect(COLUMN_ORDER).toHaveLength(allColumns.length);
   });
 });
 
 describe('isValidColumn', () => {
-  it.each(Object.values(Column))('returns true for valid column "%s"', (col) => {
-    expect(isValidColumn(col)).toBe(true);
+  it('is true for a column of any loaded pipeline', () => {
+    expect(isValidColumn('QA', pipelines)).toBe(true);
+    expect(isValidColumn('SPEC_REVIEW', pipelines)).toBe(true);
+    expect(isValidColumn('DONE', pipelines)).toBe(true);
   });
 
-  it('returns false for an invalid string', () => {
-    expect(isValidColumn('NOT_A_COLUMN')).toBe(false);
-  });
-
-  it('returns false for empty string', () => {
-    expect(isValidColumn('')).toBe(false);
-  });
-
-  it('returns false for lowercase variant', () => {
-    expect(isValidColumn('backlog')).toBe(false);
+  it('is false for anything else, whatever the case', () => {
+    expect(isValidColumn('NOT_A_COLUMN', pipelines)).toBe(false);
+    expect(isValidColumn('', pipelines)).toBe(false);
+    expect(isValidColumn('backlog', pipelines)).toBe(false);
   });
 });

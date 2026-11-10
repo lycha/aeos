@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { registerCostsCommand } from './costs.command.js';
-import { Column } from '../../domain/model/column.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { CostsPort, CostReport } from '../../domain/ports/driving/costs.port.js';
+import { displayOrder } from '../../domain/model/column.js';
+import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// Every column of the shipped pipelines.
+const COLUMNS = displayOrder(templatePipelines());
 
 describe('aeos costs', () => {
   let program: Command;
@@ -33,7 +37,8 @@ describe('aeos costs', () => {
       // Labels are per project: only `aeos` labels its tech spec column.
       (projectId) =>
         columnLabels(
-          projectId === 'aeos' ? { [Column.TECH_SPEC]: { label: 'Shaping' } } : {},
+          COLUMNS,
+          projectId === 'aeos' ? { TECH_SPEC: { label: 'Shaping' } } : {},
           null,
         ),
     );

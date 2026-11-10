@@ -13,6 +13,10 @@ import type { PullRequestGateway } from '../domain/ports/driven/pull-request-gat
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
+import { templatePipelines } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// The shipped pipelines, whatever the project path.
+const pipelineLoader = { load: () => templatePipelines() };
 
 function createMockTicketRepo(): TicketRepository {
   return {
@@ -168,6 +172,7 @@ describe('TicketApproveUseCase', () => {
       pr.columnSpecLoader,
       pr.projectRepo,
       recorder,
+      pipelineLoader,
     );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket());
   });
@@ -535,6 +540,7 @@ describe('TicketApproveUseCase — per-task commit', () => {
       pr.columnSpecLoader,
       pr.projectRepo,
       recorder,
+      pipelineLoader,
     );
   });
 
@@ -631,6 +637,7 @@ describe('TicketApproveUseCase — pull requests', () => {
       pr.columnSpecLoader,
       pr.projectRepo,
       recorder,
+      pipelineLoader,
     );
   });
 

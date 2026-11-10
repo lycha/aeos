@@ -39,7 +39,7 @@ describe('YamlColumnSpecLoader', () => {
     const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
     fs.writeFileSync(specPath, validColumnSpecYaml(), 'utf-8');
 
-    const result = loader.load(Column.SPEC_REVIEW, tmpDir);
+    const result = loader.load('SPEC_REVIEW', tmpDir);
     expect(result.column).toBe('SPEC_REVIEW');
     expect(result.workerAgentFile).toBe('agents/pm-agent.yaml');
     expect(result.reviewerAgentFile).toBe('agents/reviewer-agent.yaml');
@@ -50,7 +50,7 @@ describe('YamlColumnSpecLoader', () => {
     const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
     fs.writeFileSync(specPath, validColumnSpecYaml(), 'utf-8');
 
-    const result = loader.load(Column.SPEC_REVIEW, tmpDir);
+    const result = loader.load('SPEC_REVIEW', tmpDir);
     expect(result.minWordCount).toBe(50);
     // Unset in YAML so it inherits the global reviewLoop cap.
     expect(result.maxIterations).toBeUndefined();
@@ -65,7 +65,7 @@ describe('YamlColumnSpecLoader', () => {
     const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
     fs.writeFileSync(specPath, validColumnSpecYaml({ executorMode: 'agentic' }), 'utf-8');
 
-    const result = loader.load(Column.SPEC_REVIEW, tmpDir);
+    const result = loader.load('SPEC_REVIEW', tmpDir);
     expect(result.executorMode).toBe('agentic');
   });
 
@@ -73,7 +73,7 @@ describe('YamlColumnSpecLoader', () => {
     const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'task-breakdown.yaml');
     fs.writeFileSync(specPath, validColumnSpecYaml({ column: 'TASK_BREAKDOWN' }), 'utf-8');
 
-    const result = loader.load(Column.TASK_BREAKDOWN, tmpDir);
+    const result = loader.load('TASK_BREAKDOWN', tmpDir);
     expect(result.column).toBe('TASK_BREAKDOWN');
   });
 
@@ -85,7 +85,7 @@ describe('YamlColumnSpecLoader', () => {
     );
     fs.writeFileSync(path.join(dir, 'notes.txt'), 'not a spec');
 
-    expect(loader.load(Column.TASK_BREAKDOWN, tmpDir).column).toBe('TASK_BREAKDOWN');
+    expect(loader.load('TASK_BREAKDOWN', tmpDir).column).toBe('TASK_BREAKDOWN');
   });
 
   it('refuses two files that claim one column, naming both', () => {
@@ -93,7 +93,7 @@ describe('YamlColumnSpecLoader', () => {
     fs.writeFileSync(path.join(dir, 'spec-review.yaml'), validColumnSpecYaml());
     fs.writeFileSync(path.join(dir, 'product-scoping.yaml'), validColumnSpecYaml());
 
-    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(
+    expect(() => loader.load('SPEC_REVIEW', tmpDir)).toThrow(
       /SPEC_REVIEW.*column-specs\/product-scoping\.yaml.*column-specs\/spec-review\.yaml/,
     );
     // No column loads while the specs disagree about which is which.
@@ -104,9 +104,7 @@ describe('YamlColumnSpecLoader', () => {
     const dir = path.join(tmpDir, '.aeos', 'column-specs');
     fs.writeFileSync(path.join(dir, 'spec-review.yaml'), 'column: [unclosed');
 
-    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(
-      /column-specs\/spec-review\.yaml/,
-    );
+    expect(() => loader.load('SPEC_REVIEW', tmpDir)).toThrow(/column-specs\/spec-review\.yaml/);
   });
 
   it('defaults a column to the standard role with no diff, and loads what a spec declares', () => {
@@ -121,11 +119,11 @@ describe('YamlColumnSpecLoader', () => {
       }),
     );
 
-    expect(loader.load(Column.SPEC_REVIEW, tmpDir)).toMatchObject({
+    expect(loader.load('SPEC_REVIEW', tmpDir)).toMatchObject({
       role: 'standard',
       diffContext: 'none',
     });
-    expect(loader.load(Column.INTEGRATION_REVIEW, tmpDir)).toMatchObject({
+    expect(loader.load('INTEGRATION_REVIEW', tmpDir)).toMatchObject({
       role: 'integration',
       diffContext: 'epic',
     });
@@ -135,7 +133,7 @@ describe('YamlColumnSpecLoader', () => {
     const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
     fs.writeFileSync(specPath, validColumnSpecYaml({ role: 'release' }), 'utf-8');
 
-    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(ZodError);
+    expect(() => loader.load('SPEC_REVIEW', tmpDir)).toThrow(ZodError);
   });
 
   it('throws ColumnSpecNotFoundError for BACKLOG column', () => {
@@ -144,7 +142,7 @@ describe('YamlColumnSpecLoader', () => {
   });
 
   it('throws ColumnSpecNotFoundError for DOD_GATE column', () => {
-    expect(() => loader.load(Column.DOD_GATE, tmpDir)).toThrow(ColumnSpecNotFoundError);
+    expect(() => loader.load('DOD_GATE', tmpDir)).toThrow(ColumnSpecNotFoundError);
   });
 
   it('throws ColumnSpecNotFoundError for DONE column', () => {
@@ -153,15 +151,15 @@ describe('YamlColumnSpecLoader', () => {
 
   it('throws ColumnSpecNotFoundError when file does not exist for a mapped column', () => {
     // Don't create the file — it should throw
-    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(ColumnSpecNotFoundError);
-    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow('Column spec file not found');
+    expect(() => loader.load('SPEC_REVIEW', tmpDir)).toThrow(ColumnSpecNotFoundError);
+    expect(() => loader.load('SPEC_REVIEW', tmpDir)).toThrow('Column spec file not found');
   });
 
   it('throws ZodError when YAML is missing required fields', () => {
     const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
     fs.writeFileSync(specPath, 'column: "SPEC_REVIEW"\n', 'utf-8');
 
-    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(ZodError);
+    expect(() => loader.load('SPEC_REVIEW', tmpDir)).toThrow(ZodError);
   });
 
   it('throws ZodError when YAML has invalid field types', () => {
@@ -175,18 +173,18 @@ describe('YamlColumnSpecLoader', () => {
     ].join('\n');
     fs.writeFileSync(specPath, yaml, 'utf-8');
 
-    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(ZodError);
+    expect(() => loader.load('SPEC_REVIEW', tmpDir)).toThrow(ZodError);
   });
 
   it('maps all expected columns to correct filenames', () => {
     const mappings: Array<[Column, string]> = [
-      [Column.SPEC_REVIEW, 'spec-review'],
-      [Column.TECH_SPEC, 'tech-spec'],
-      [Column.TASK_BREAKDOWN, 'task-breakdown'],
-      [Column.IMPLEMENTATION, 'implementation'],
-      [Column.CODE_REVIEW, 'code-review'],
-      [Column.QA, 'qa'],
-      [Column.DOD_GATE, 'dod-gate'],
+      ['SPEC_REVIEW', 'spec-review'],
+      ['TECH_SPEC', 'tech-spec'],
+      ['TASK_BREAKDOWN', 'task-breakdown'],
+      ['IMPLEMENTATION', 'implementation'],
+      ['CODE_REVIEW', 'code-review'],
+      ['QA', 'qa'],
+      ['DOD_GATE', 'dod-gate'],
     ];
 
     for (const [column, filename] of mappings) {
@@ -209,7 +207,7 @@ describe('YamlColumnSpecLoader', () => {
     it("returns the spec's label with the spec", () => {
       write('tech-spec', { column: 'TECH_SPEC', label: 'Shaping' });
 
-      expect(loader.load(Column.TECH_SPEC, tmpDir).label).toBe('Shaping');
+      expect(loader.load('TECH_SPEC', tmpDir).label).toBe('Shaping');
     });
 
     it('gives every column a label: from its spec, from project.json, or the default', () => {
@@ -234,10 +232,7 @@ describe('YamlColumnSpecLoader', () => {
       write('tech-spec', { column: 'TECH_SPEC', label: 'Shaping' });
       write('qa', { column: 'QA', label: 'shaping' });
 
-      for (const failing of [
-        () => loader.labels(tmpDir),
-        () => loader.load(Column.TECH_SPEC, tmpDir),
-      ]) {
+      for (const failing of [() => loader.labels(tmpDir), () => loader.load('TECH_SPEC', tmpDir)]) {
         expect(failing).toThrow(/column-specs\/tech-spec\.yaml/);
         expect(failing).toThrow(/column-specs\/qa\.yaml/);
       }

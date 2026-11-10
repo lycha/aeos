@@ -6,7 +6,6 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 
-import { Column } from '../../domain/model/column.js';
 import type { ExecutorInvocation } from '../../domain/model/executor-invocation.js';
 import { OllamaCliExecutor } from './ollama-cli-executor.adapter.js';
 
@@ -64,7 +63,7 @@ describe('OllamaCliExecutor', () => {
       prompt: 'Test prompt',
       outputPath: path.join(tmpDir, 'output.md'),
       ticketId: 'T-55',
-      column: Column.SPEC_REVIEW,
+      column: 'SPEC_REVIEW',
       ...overrides,
     };
   }

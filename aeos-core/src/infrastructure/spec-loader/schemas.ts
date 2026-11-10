@@ -74,3 +74,10 @@ export const ProjectCriteriaSchema = z.looseObject({
 
 /** The `pullRequests` object of `.aeos/project.json`. */
 export const ProjectPullRequestsSchema = z.object({ enabled: z.boolean().optional() });
+
+const PipelineSchema = z.array(z.string().min(1));
+
+export const PipelinesSchema = z.strictObject({
+  pipelines_version: z.literal(0),
+  pipelines: z.strictObject({ EPIC: PipelineSchema, TASK: PipelineSchema }),
+});

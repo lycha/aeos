@@ -7,12 +7,7 @@
 // Every loop exit is a HaltReason, including the happy ones. "Why did this
 // stop?" is always answerable without reading logs.
 
-import {
-  Column,
-  EPIC_COLUMN_ORDER,
-  isValidColumn,
-  TASK_COLUMN_ORDER,
-} from '../domain/model/column.js';
+import type { Column } from '../domain/model/column.js';
 import { OrchestratorStatus, type OrchestratorState } from '../domain/model/orchestrator-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import type { Ticket } from '../domain/model/ticket.js';
@@ -25,6 +20,7 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
+import type { PipelineLoader } from '../domain/ports/driven/pipeline-loader.port.js';
 import type { AgentSpecLoader } from '../domain/ports/driven/agent-spec-loader.port.js';
 import { reportsCost } from '../domain/services/executor-capabilities.js';
 import type { ExecutorConfigResolver } from './services/executor-config-resolver.js';
@@ -77,6 +73,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
     private readonly gitGateway: GitGateway,
     private readonly agentSpecLoader: AgentSpecLoader,
     private readonly executorConfigResolver: ExecutorConfigResolver,
+    private readonly pipelineLoader: PipelineLoader,
   ) {}
 
   /**
@@ -390,15 +387,15 @@ export class OrchestratorUseCase implements OrchestratorPort {
    */
   private assertExecutorsReportCost(projectId: string, projectPath: string, epic: Ticket): void {
     const epicId = epic.id;
-    const epicAt = EPIC_COLUMN_ORDER.indexOf(epic.column as (typeof EPIC_COLUMN_ORDER)[number]);
+    const { EPIC: epicOrder, TASK: taskOrder } = this.pipelineLoader.load(projectPath);
+    const epicAt = epicOrder.indexOf(epic.column);
     const role = roleOf(this.columnSpecLoader, projectPath);
     const canDecompose =
-      epicAt <= EPIC_COLUMN_ORDER.findIndex((column) => role(column) === 'decomposition');
+      epicAt <= epicOrder.findIndex((column) => role(column) === 'decomposition');
     const children = this.ticketRepo.findChildren(projectId, epicId);
-    const taskOrder: readonly Column[] = TASK_COLUMN_ORDER;
     const ahead = [
-      ...EPIC_COLUMN_ORDER.slice(Math.max(epicAt, 0)),
-      ...TASK_COLUMN_ORDER.filter(
+      ...epicOrder.slice(Math.max(epicAt, 0)),
+      ...taskOrder.filter(
         (column, at) =>
           canDecompose || children.some((child) => taskOrder.indexOf(child.column) <= at),
       ),
@@ -450,8 +447,6 @@ export class OrchestratorUseCase implements OrchestratorPort {
   private autoAdvance(projectPath: string, column: Column): boolean {
     const globalMode =
       (this.configStore.readConfig() ?? DEFAULT_GLOBAL_CONFIG).advanceMode === 'auto';
-
-    if (!isValidColumn(column)) return globalMode;
 
     try {
       const spec = columnSpecOf(this.columnSpecLoader, projectPath, column);

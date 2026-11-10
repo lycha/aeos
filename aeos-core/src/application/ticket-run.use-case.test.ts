@@ -1925,23 +1925,6 @@ describe('TicketRunUseCase', () => {
     ).toBe(false);
   });
 
-  // --- Invalid column value in column spec ---
-
-  it('should return failed for invalid column value in columnSpec', async () => {
-    (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue({
-      ...defaultColumnSpec(),
-      column: 'NOT_A_COLUMN',
-    });
-
-    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
-
-    expect(result).toEqual({
-      status: 'failed',
-      ticketId: TICKET_ID,
-      error: 'Invalid column value: NOT_A_COLUMN',
-    });
-  });
-
   // --- Rubric loading through port ---
 
   it('should load rubrics through RubricLoader port', async () => {

@@ -1,18 +1,14 @@
 import { describe, it, expect } from 'vitest';
 
-import {
-  Column,
-  EPIC_COLUMN_ORDER,
-  TASK_COLUMN_ORDER,
-  columnOrderFor,
-  isColumnInPipeline,
-  nextColumnFor,
-} from './column.js';
+import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+import { columnOrderFor, isColumnInPipeline, nextColumnFor } from './column.js';
 import { TicketKind } from './ticket-kind.js';
 
-describe('column pipelines', () => {
-  it('routes an epic through scoping, spec, and decomposition — never implementation', () => {
-    expect([...EPIC_COLUMN_ORDER]).toEqual([
+const pipelines = templatePipelines();
+
+describe('the template pipelines', () => {
+  it('route an epic through spec review, tech spec and decomposition — never implementation', () => {
+    expect(columnOrderFor(pipelines, TicketKind.EPIC)).toEqual([
       'BACKLOG',
       'SPEC_REVIEW',
       'TECH_SPEC',
@@ -21,65 +17,44 @@ describe('column pipelines', () => {
       'DOD_GATE',
       'DONE',
     ]);
-    // The epic reviews the assembled feature (INTEGRATION_REVIEW) but never does
-    // the per-task build columns itself.
-    expect(isColumnInPipeline(TicketKind.EPIC, Column.IMPLEMENTATION)).toBe(false);
-    expect(isColumnInPipeline(TicketKind.EPIC, Column.CODE_REVIEW)).toBe(false);
-    expect(isColumnInPipeline(TicketKind.EPIC, Column.INTEGRATION_REVIEW)).toBe(true);
+    expect(isColumnInPipeline(pipelines, TicketKind.EPIC, 'IMPLEMENTATION')).toBe(false);
+    expect(isColumnInPipeline(pipelines, TicketKind.EPIC, 'INTEGRATION_REVIEW')).toBe(true);
   });
 
-  it('routes a task straight to building — it is already specified', () => {
-    expect([...TASK_COLUMN_ORDER]).toEqual([
+  it('route a task straight to building — it is already specified', () => {
+    expect(columnOrderFor(pipelines, TicketKind.TASK)).toEqual([
       'BACKLOG',
       'IMPLEMENTATION',
       'CODE_REVIEW',
       'QA',
       'DONE',
     ]);
-    expect(isColumnInPipeline(TicketKind.TASK, Column.SPEC_REVIEW)).toBe(false);
-    expect(isColumnInPipeline(TicketKind.TASK, Column.TECH_SPEC)).toBe(false);
-    expect(isColumnInPipeline(TicketKind.TASK, Column.TASK_BREAKDOWN)).toBe(false);
-  });
-
-  it('selects the order matching the kind', () => {
-    expect(columnOrderFor(TicketKind.EPIC)).toBe(EPIC_COLUMN_ORDER);
-    expect(columnOrderFor(TicketKind.TASK)).toBe(TASK_COLUMN_ORDER);
+    expect(isColumnInPipeline(pipelines, TicketKind.TASK, 'TECH_SPEC')).toBe(false);
   });
 
   describe('nextColumnFor', () => {
-    it('advances an epic from TECH_SPEC to TASK_BREAKDOWN', () => {
-      expect(nextColumnFor(TicketKind.EPIC, Column.TECH_SPEC)).toBe(Column.TASK_BREAKDOWN);
-    });
-
     it('advances an epic from TASK_BREAKDOWN to INTEGRATION_REVIEW, then DOD_GATE', () => {
-      // The build columns belong to its children; the epic reviews the whole
-      // assembled feature before the human DoD gate.
-      expect(nextColumnFor(TicketKind.EPIC, Column.TASK_BREAKDOWN)).toBe(Column.INTEGRATION_REVIEW);
-      expect(nextColumnFor(TicketKind.EPIC, Column.INTEGRATION_REVIEW)).toBe(Column.DOD_GATE);
+      expect(nextColumnFor(pipelines, TicketKind.EPIC, 'TASK_BREAKDOWN')).toBe(
+        'INTEGRATION_REVIEW',
+      );
+      expect(nextColumnFor(pipelines, TicketKind.EPIC, 'INTEGRATION_REVIEW')).toBe('DOD_GATE');
     });
 
-    it('advances a task from BACKLOG straight to IMPLEMENTATION', () => {
-      expect(nextColumnFor(TicketKind.TASK, Column.BACKLOG)).toBe(Column.IMPLEMENTATION);
-    });
-
-    it('advances a task from QA to DONE', () => {
-      expect(nextColumnFor(TicketKind.TASK, Column.QA)).toBe(Column.DONE);
+    it('advances a task from BACKLOG to IMPLEMENTATION and from QA to DONE', () => {
+      expect(nextColumnFor(pipelines, TicketKind.TASK, 'BACKLOG')).toBe('IMPLEMENTATION');
+      expect(nextColumnFor(pipelines, TicketKind.TASK, 'QA')).toBe('DONE');
     });
 
     it('returns null at the end of either pipeline', () => {
-      expect(nextColumnFor(TicketKind.EPIC, Column.DONE)).toBeNull();
-      expect(nextColumnFor(TicketKind.TASK, Column.DONE)).toBeNull();
+      expect(nextColumnFor(pipelines, TicketKind.EPIC, 'DONE')).toBeNull();
+      expect(nextColumnFor(pipelines, TicketKind.TASK, 'DONE')).toBeNull();
     });
 
     it('returns null when the column is not in that kind pipeline', () => {
-      // An epic parked in IMPLEMENTATION (e.g. moved there by hand) has no
-      // next column — the caller must surface that rather than guessing.
-      expect(nextColumnFor(TicketKind.EPIC, Column.IMPLEMENTATION)).toBeNull();
-      expect(nextColumnFor(TicketKind.TASK, Column.TECH_SPEC)).toBeNull();
+      // An epic parked in IMPLEMENTATION has no next column — the caller must
+      // surface that rather than guessing.
+      expect(nextColumnFor(pipelines, TicketKind.EPIC, 'IMPLEMENTATION')).toBeNull();
+      expect(nextColumnFor(pipelines, TicketKind.TASK, 'TECH_SPEC')).toBeNull();
     });
-  });
-
-  it('no longer knows about ARCH_SPIKE', () => {
-    expect(Object.values(Column)).not.toContain('ARCH_SPIKE');
   });
 });

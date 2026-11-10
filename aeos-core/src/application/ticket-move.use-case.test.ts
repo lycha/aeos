@@ -8,6 +8,10 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import { templatePipelines } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// The shipped pipelines, whatever the project path.
+const pipelineLoader = { load: () => templatePipelines() };
 
 function createMockTicketRepo(): TicketRepository {
   return {
@@ -113,8 +117,34 @@ describe('TicketMoveUseCase', () => {
     artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
-    useCase = new TicketMoveUseCase(ticketRepo, artifactStore, stateMachine, gitGateway, recorder);
+    useCase = new TicketMoveUseCase(
+      ticketRepo,
+      artifactStore,
+      stateMachine,
+      gitGateway,
+      recorder,
+      pipelineLoader,
+    );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
+  });
+
+  it("refuses a column outside the ticket's pipeline, listing that pipeline, and records nothing", () => {
+    const result = useCase.execute({
+      projectId: PROJECT_ID,
+      projectPath: PROJECT_PATH,
+      ticketId: TICKET_ID,
+      targetColumn: 'IMPLEMENTATION',
+      reason: 'A reason that is long enough.',
+    });
+
+    expect(result).toEqual({
+      status: 'error',
+      ticketId: TICKET_ID,
+      error:
+        "Unknown status 'IMPLEMENTATION' for EPIC AEOS-1. Valid statuses: BACKLOG, SPEC_REVIEW, TECH_SPEC, TASK_BREAKDOWN, INTEGRATION_REVIEW, DOD_GATE, DONE",
+    });
+    expect(gateRecorder.record).not.toHaveBeenCalled();
+    expect(stateMachine.transition).not.toHaveBeenCalled();
   });
 
   describe('gate record', () => {
@@ -122,7 +152,7 @@ describe('TicketMoveUseCase', () => {
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
-      targetColumn: 'QA' as const,
+      targetColumn: 'TECH_SPEC' as const,
       reason: 'Skipping ahead: built by hand.',
     };
 
@@ -133,7 +163,7 @@ describe('TicketMoveUseCase', () => {
         gate: 'move-override',
         verdict: 'overridden',
         fromColumn: 'SPEC_REVIEW',
-        toColumn: 'QA',
+        toColumn: 'TECH_SPEC',
         reason: 'Skipping ahead: built by hand.',
       });
       expect(callOrder(gateRecorder.record)).toBeLessThan(callOrder(stateMachine.transition));
@@ -162,16 +192,16 @@ describe('TicketMoveUseCase', () => {
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
-      targetColumn: 'QA',
+      targetColumn: 'TECH_SPEC',
       reason: 'A reason that is long enough.',
     });
     expect(result).toEqual({
       status: 'moved',
       ticketId: TICKET_ID,
       fromColumn: 'SPEC_REVIEW',
-      toColumn: 'QA',
+      toColumn: 'TECH_SPEC',
     });
-    expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'QA');
+    expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'TECH_SPEC');
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'READY');
   });
 
@@ -192,14 +222,14 @@ describe('TicketMoveUseCase', () => {
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
-      targetColumn: 'QA',
+      targetColumn: 'TECH_SPEC',
       reason: 'A reason that is long enough.',
     });
     expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
       PROJECT_PATH,
       TICKET_ID,
       `${TICKET_ID}-ticket.md`,
-      expect.stringContaining('- Column: QA'),
+      expect.stringContaining('- Column: TECH_SPEC'),
     );
     expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
       PROJECT_PATH,
@@ -229,7 +259,7 @@ describe('TicketMoveUseCase', () => {
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
-      targetColumn: 'QA',
+      targetColumn: 'TECH_SPEC',
       reason: 'A reason that is long enough.',
     });
     expect(result).toEqual({
@@ -267,7 +297,7 @@ describe('TicketMoveUseCase', () => {
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
-      targetColumn: 'QA',
+      targetColumn: 'TECH_SPEC',
       reason: 'A reason that is long enough.',
     });
     expect(result).toEqual({
@@ -286,7 +316,7 @@ describe('TicketMoveUseCase', () => {
         projectId: PROJECT_ID,
         projectPath: PROJECT_PATH,
         ticketId: TICKET_ID,
-        targetColumn: 'QA',
+        targetColumn: 'TECH_SPEC',
         reason: 'A reason that is long enough.',
       }),
     ).toThrow('git commit failed');

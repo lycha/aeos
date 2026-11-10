@@ -8,12 +8,8 @@ import { FsProjectRepository } from './fs-project.repository.js';
 import { YamlColumnSpecLoader } from '../spec-loader/yaml-column-spec-loader.adapter.js';
 import { YamlAgentSpecLoader } from '../spec-loader/yaml-agent-spec-loader.adapter.js';
 import yaml from 'js-yaml';
-import {
-  Column,
-  COLUMN_ORDER,
-  EPIC_COLUMN_ORDER,
-  TASK_COLUMN_ORDER,
-} from '../../domain/model/column.js';
+import { Column, displayOrder } from '../../domain/model/column.js';
+import { YamlPipelineLoader } from '../spec-loader/yaml-pipeline-loader.adapter.js';
 import { COLUMN_ROLES } from '../../domain/model/column-spec.js';
 import { ProjectSyncUseCase } from '../../application/project-sync.use-case.js';
 import { FsTemplateCatalog } from './fs-template-catalog.js';
@@ -35,7 +31,7 @@ describe('readTemplates', () => {
     );
   });
 
-  it('ships the approved pipelines file, whose role vocabulary and order are what the code has', () => {
+  it('ships the approved pipelines file, whose role vocabulary is what the code has', () => {
     const pipelines = readTemplates().find((t) => t.relativePath === 'pipelines.yaml')!.content;
 
     expect(pipelines.split('\n')[0]).toBe(
@@ -45,10 +41,6 @@ describe('readTemplates', () => {
     expect([...new Set([...pipelines.matchAll(/^#\s+role: (\S+)/gm)].map((m) => m[1]))]).toEqual([
       ...COLUMN_ROLES,
     ]);
-    // Nothing reads the order from it yet (I1-M4-005b); until then it must say what the constants say.
-    expect(yaml.load(pipelines)).toMatchObject({
-      pipelines: { EPIC: [...EPIC_COLUMN_ORDER], TASK: [...TASK_COLUMN_ORDER] },
-    });
   });
 
   it('declares the role and the diff of every column, as the engine used to infer them from names', () => {
@@ -124,7 +116,8 @@ describe('scaffolded project integrity', () => {
     const columnLoader = new YamlColumnSpecLoader();
     const agentLoader = new YamlAgentSpecLoader();
 
-    for (const column of COLUMN_ORDER) {
+    // Loading the scaffolded pipelines also holds them to the loader's rules.
+    for (const column of displayOrder(new YamlPipelineLoader(columnLoader).load(tmpDir))) {
       if (SPECLESS.includes(column)) continue;
 
       // Every column an epic or task can reach must have a loadable spec...
@@ -151,7 +144,7 @@ describe('scaffolded project integrity', () => {
   it('has the code reviewer of a single task check fidelity to the spec', () => {
     repo.scaffoldDefaults(tmpDir);
 
-    const rubrics = new YamlColumnSpecLoader().load(Column.CODE_REVIEW, tmpDir).reviewerRubrics;
+    const rubrics = new YamlColumnSpecLoader().load('CODE_REVIEW', tmpDir).reviewerRubrics;
 
     expect(rubrics).toContain('rubrics/drift/spec-fidelity.md');
     const rubric = fs.readFileSync(path.join(tmpDir, '.aeos', 'rubrics/drift/spec-fidelity.md'));
@@ -164,7 +157,7 @@ describe('scaffolded project integrity', () => {
       fs.readFileSync(path.join(tmpDir, '.aeos', file), 'utf-8');
 
     expect(inAeos('column-specs/dod-gate.yaml')).not.toMatch(/TODO|placeholder/i);
-    const spec = new YamlColumnSpecLoader().load(Column.DOD_GATE, tmpDir);
+    const spec = new YamlColumnSpecLoader().load('DOD_GATE', tmpDir);
     expect(spec.workerAgentFile).toBe('agents/conformance-agent.yaml');
     // The worker judges criteria and says so in the block the engine parses...
     const agent = new YamlAgentSpecLoader().load(spec.workerAgentFile, tmpDir);

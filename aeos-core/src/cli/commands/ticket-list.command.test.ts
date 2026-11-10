@@ -1,14 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { registerTicketListCommand } from './ticket-list.command.js';
-import { Column } from '../../domain/model/column.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketListPort } from '../../domain/ports/driving/ticket-list.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import type { Ticket } from '../../domain/model/ticket.js';
+import { displayOrder } from '../../domain/model/column.js';
+import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// Every column of the shipped pipelines.
+const COLUMNS = displayOrder(templatePipelines());
 
 // The tech spec column is labelled; every other column shows its default.
-const labelsOf = () => columnLabels({ [Column.TECH_SPEC]: { label: 'Shaping' } }, null);
+const labelsOf = () => columnLabels(COLUMNS, { TECH_SPEC: { label: 'Shaping' } }, null);
 
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {

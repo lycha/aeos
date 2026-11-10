@@ -3,9 +3,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { Column, COLUMN_ORDER } from '../../domain/model/column.js';
+import { Column, displayOrder } from '../../domain/model/column.js';
 import type { ColumnSpec } from '../../domain/model/column-spec.js';
 import { ColumnSpecSchema } from './schemas.js';
+import { readPipelines } from './yaml-pipeline-loader.adapter.js';
 import type { ColumnSpecLoader } from '../../domain/ports/driven/column-spec-loader.port.js';
 import { ColumnSpecNotFoundError } from '../../shared/errors.js';
 import { aeosDir } from '../filesystem/fs-project.repository.js';
@@ -101,7 +102,8 @@ export class YamlColumnSpecLoader implements ColumnSpecLoader {
     const { byColumn } = specFiles(root);
     const specs: Partial<Record<Column, { label?: string }>> = {};
     const sourceOf = (column: Column): string => byColumn.get(column)?.file ?? 'project.json';
-    for (const column of COLUMN_ORDER) {
+    const columns = displayOrder(readPipelines(root));
+    for (const column of columns) {
       const label = (byColumn.get(column)?.parsed as { label?: unknown } | null)?.label;
       if (typeof label === 'string') specs[column] = { label };
     }
@@ -111,9 +113,9 @@ export class YamlColumnSpecLoader implements ColumnSpecLoader {
       throw new Error('Invalid "labels" in .aeos/project.json: every label must be text.');
     }
 
-    const labels = columnLabels(specs, project);
+    const labels = columnLabels(columns, specs, project);
     const errors = labelErrors(
-      COLUMN_ORDER.map((column) => ({ column, label: labels[column], source: sourceOf(column) })),
+      columns.map((column) => ({ column, label: labels[column], source: sourceOf(column) })),
     );
     if (errors.length > 0) throw new Error(errors.join('\n'));
     return labels;

@@ -5,6 +5,11 @@ import { registerTicketRunCommand } from './ticket-run.command.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketRunPort } from '../../domain/ports/driving/ticket-run.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { displayOrder } from '../../domain/model/column.js';
+import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// Every column of the shipped pipelines.
+const COLUMNS = displayOrder(templatePipelines());
 
 function createMockTicketRunUseCase(): TicketRunPort {
   return {
@@ -55,7 +60,7 @@ describe('registerTicketRunCommand', () => {
       program,
       () => useCase,
       projectRepo,
-      () => columnLabels({}, null),
+      () => columnLabels(COLUMNS, {}, null),
     );
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 import { registerTicketMoveCommand } from './ticket-move.command.js';
-import { Column } from '../../domain/model/column.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketMovePort } from '../../domain/ports/driving/ticket-move.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { displayOrder } from '../../domain/model/column.js';
+import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// Every column of the shipped pipelines.
+const COLUMNS = displayOrder(templatePipelines());
 
 // The tech spec column is labelled; every other column shows its default.
-const labelsOf = () => columnLabels({ [Column.TECH_SPEC]: { label: 'Shaping' } }, null);
+const labelsOf = () => columnLabels(COLUMNS, { TECH_SPEC: { label: 'Shaping' } }, null);
 
 function createMockTicketMoveUseCase(): TicketMovePort {
   return {
@@ -84,13 +88,11 @@ describe('registerTicketMoveCommand', () => {
     expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 moved: Spec review → Qa');
   });
 
-  it('rejects an invalid status', () => {
+  it("hands an unknown status on as typed: the use case knows the ticket's pipeline", () => {
     program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'not-real', '--reason', REASON]);
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Unknown status 'not-real'"),
+    expect(useCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ targetColumn: 'not-real' }),
     );
-    expect(process.exitCode).toBe(1);
-    expect(useCase.execute).not.toHaveBeenCalled();
   });
 
   it('shows use case errors and sets exit code 1', () => {

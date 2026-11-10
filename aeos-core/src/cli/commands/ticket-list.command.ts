@@ -3,10 +3,8 @@
 import type { Command } from 'commander';
 import type { TicketListPort } from '../../domain/ports/driving/ticket-list.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
-import { Column } from '../../domain/model/column.js';
+import type { Column } from '../../domain/model/column.js';
 import { resolveColumn, type ColumnLabels } from '../../domain/services/column-labels.js';
-
-const VALID_COLUMNS = Object.values(Column).join(', ');
 
 export function registerTicketListCommand(
   program: Command,
@@ -43,7 +41,7 @@ export function registerTicketListCommand(
           if (!resolved) {
             // eslint-disable-next-line no-console
             console.error(
-              `Error: Unknown column '${opts.column}'. Valid columns: ${VALID_COLUMNS}`,
+              `Error: Unknown column '${opts.column}'. Valid columns: ${Object.keys(labels).join(', ')}`,
             );
             process.exitCode = 1;
             return;

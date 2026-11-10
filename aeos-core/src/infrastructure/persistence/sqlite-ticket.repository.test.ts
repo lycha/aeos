@@ -4,7 +4,6 @@ import type BetterSqlite3 from 'better-sqlite3';
 
 import { initSchema, resetDb } from './database.js';
 import { SqliteTicketRepository } from './sqlite-ticket.repository.js';
-import { Column } from '../../domain/model/column.js';
 import { SubState } from '../../domain/model/sub-state.js';
 import { TicketKind } from '../../domain/model/ticket-kind.js';
 import { EscalationReason } from '../../domain/model/escalation.js';
@@ -21,7 +20,7 @@ function ticket(overrides: Partial<Ticket> = {}): Ticket {
     title: 'Epic',
     kind: TicketKind.EPIC,
     parentId: null,
-    column: Column.TECH_SPEC,
+    column: 'TECH_SPEC',
     subState: SubState.WORKING,
     createdAt: now,
     updatedAt: now,

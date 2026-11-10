@@ -4,7 +4,6 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { spawnSync } from 'node:child_process';
 
-import { Column } from '../../domain/model/column.js';
 import type { ExecutorInvocation } from '../../domain/model/executor-invocation.js';
 import { parseConformanceVerdicts } from '../../domain/services/conformance-verdict-parser.js';
 import { parseRepro } from '../../domain/services/repro-parser.js';
@@ -28,7 +27,7 @@ describe('StubExecutor', () => {
       prompt: 'Test prompt',
       outputPath: path.join(tmpDir, 'output.md'),
       ticketId: 'T-42',
-      column: Column.SPEC_REVIEW,
+      column: 'SPEC_REVIEW',
       ...overrides,
     };
   }
@@ -44,7 +43,7 @@ describe('StubExecutor', () => {
   it('written file contains ticket ID and column', async () => {
     const invocation = makeInvocation({
       ticketId: 'PROJ-99',
-      column: Column.TECH_SPEC,
+      column: 'TECH_SPEC',
     });
     await executor.run(invocation);
 
@@ -56,7 +55,7 @@ describe('StubExecutor', () => {
   it('emits a parseable verdict trailer when standing in for a reviewer', async () => {
     // Without this, every AEOS_EXECUTOR=stub run escalates as
     // UNPARSEABLE_VERDICT and the pipeline cannot be exercised offline.
-    const invocation = makeInvocation({ ticketId: 'PROJ-99', column: Column.TECH_SPEC });
+    const invocation = makeInvocation({ ticketId: 'PROJ-99', column: 'TECH_SPEC' });
     const reviewInvocation = {
       ...invocation,
       outputPath: invocation.outputPath.replace(/\.md$/, '-review.md'),
@@ -84,7 +83,7 @@ describe('StubExecutor', () => {
   });
 
   it('does not emit a verdict trailer for worker output', async () => {
-    const result = await executor.run(makeInvocation({ column: Column.TECH_SPEC }));
+    const result = await executor.run(makeInvocation({ column: 'TECH_SPEC' }));
 
     expect(result.ok && result.content).not.toContain('AEOS-VERDICT');
   });
@@ -203,7 +202,7 @@ describe('StubExecutor', () => {
 
   it('judges every criterion it is asked about, as the final gate expects', async () => {
     const invocation = makeInvocation({
-      column: Column.DOD_GATE,
+      column: 'DOD_GATE',
       outputPath: path.join(tmpDir, 'EE-1-dod-verification.md'),
       prompt: 'The report.\n\nJudge exactly these criteria: AC-1, AC-12a\n',
     });

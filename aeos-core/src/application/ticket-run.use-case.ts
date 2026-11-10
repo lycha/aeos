@@ -65,7 +65,6 @@ import { Column } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import { validateOutput } from '../domain/services/output-validation.js';
-import { isValidColumn } from '../domain/model/column.js';
 import { parseVerdict } from '../domain/services/verdict-parser.js';
 import { findViolations, protectedGlobs } from '../domain/services/path-guard.js';
 import {
@@ -236,10 +235,7 @@ export class TicketRunUseCase implements TicketRunPort {
         executorOverrides,
       );
 
-      const column = this.resolveColumn(columnSpec.column);
-      if (!column) {
-        return { status: 'failed', ticketId, error: `Invalid column value: ${columnSpec.column}` };
-      }
+      const column = columnSpec.column;
 
       // The gate's column builds a conformance report, which takes a spec.
       const finalGate = columnSpec.role === 'final-gate';
@@ -1851,10 +1847,6 @@ export class TicketRunUseCase implements TicketRunPort {
         `- Unknown claims: ${list(trace.unknownClaims.map((claim) => `${claim.taskId} claims ${claim.id}`))}`,
       ].join('\n'),
     );
-  }
-
-  private resolveColumn(columnString: string): Column | null {
-    return isValidColumn(columnString) ? columnString : null;
   }
 
   private supportsAgenticExecution(executorType: AgentSpec['executor']['type']): boolean {

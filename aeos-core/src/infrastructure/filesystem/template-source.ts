@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
  * Package root is three levels up from this module, and that holds for both
  * `src/infrastructure/filesystem/` and the compiled `dist/infrastructure/filesystem/`.
  */
-function templatesRoot(): string {
+export function templatesRoot(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(here, '..', '..', '..', 'templates');
 }

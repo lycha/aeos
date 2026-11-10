@@ -1,6 +1,6 @@
 // Use case — TicketApprove (advance column)
 
-import { Column, nextColumnFor } from '../domain/model/column.js';
+import { Column, columnOrderFor, nextColumnFor } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
@@ -9,6 +9,7 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { PullRequestGateway } from '../domain/ports/driven/pull-request-gateway.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
+import type { PipelineLoader } from '../domain/ports/driven/pipeline-loader.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import type { Ticket } from '../domain/model/ticket.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
@@ -35,6 +36,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
     private readonly columnSpecLoader: ColumnSpecLoader,
     private readonly projectRepo: ProjectRepository,
     private readonly gateRecorder: GateRecorder,
+    private readonly pipelineLoader: PipelineLoader,
   ) {}
 
   execute(
@@ -89,7 +91,11 @@ export class TicketApproveUseCase implements TicketApprovePort {
       }
     }
 
-    const nextColumn = nextColumnFor(ticket.kind, currentColumn);
+    const nextColumn = nextColumnFor(
+      this.pipelineLoader.load(projectPath),
+      ticket.kind,
+      currentColumn,
+    );
     if (!nextColumn) {
       return {
         status: 'error',
@@ -225,7 +231,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
       : findColumnSpec(
           this.columnSpecLoader,
           projectPath,
-          ticket.kind,
+          columnOrderFor(this.pipelineLoader.load(projectPath), ticket.kind),
           (spec) => spec.diffContext === 'task',
         );
     const reviewArtifact = reviewSpec ? `${ticket.id}-${reviewSpec.outputArtifact}` : null;
