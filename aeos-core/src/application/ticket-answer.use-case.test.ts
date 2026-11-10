@@ -8,6 +8,7 @@ import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.j
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { SpecAmendmentService } from './services/spec-amendment.service.js';
 import type { DecisionPromotionService } from './services/decision-promotion.service.js';
 
 function createMockTicketRepo(): TicketRepository {
@@ -23,6 +24,7 @@ function createMockTicketRepo(): TicketRepository {
     updateSubState: vi.fn(),
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
+    setSpecCommit: vi.fn(),
   };
 }
 
@@ -89,11 +91,15 @@ function createMockDecisionPromotionService() {
 // Shared by every describe below: the recorder is a mock, reset per test.
 const gateRecorder = { decidedBy: vi.fn(), record: vi.fn() };
 const recorder = gateRecorder as unknown as GateRecorder;
+const specAmendment = { amend: vi.fn() };
 const callOrder = (mock: unknown): number =>
   (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
 beforeEach(() => {
   gateRecorder.decidedBy.mockReset();
   gateRecorder.record.mockReset();
+  specAmendment.amend
+    .mockReset()
+    .mockReturnValue({ ok: true, decisions: [{ absence: 'NEW-1', becomes: 'AC-2' }] });
 });
 
 const PROJECT_ID = 'startup-a';
@@ -137,8 +143,89 @@ describe('TicketAnswerUseCase', () => {
       gitGateway,
       decisionPromotionService,
       recorder,
+      specAmendment as unknown as SpecAmendmentService,
     );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(blockedTicket());
+  });
+
+  describe('spec-backed ticket', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    const pinned = { ...blockedTicket(), specPin: PIN };
+    const answered = [{ id: 'Q-001', question: 'Night greeting?', answer: 'The same.' }];
+    let promotion: { answered: ReturnType<typeof vi.fn> };
+
+    beforeEach(() => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(pinned);
+      promotion = decisionPromotionService as unknown as typeof promotion;
+      promotion.answered = vi.fn().mockReturnValue(answered);
+    });
+
+    it('amends the spec, records an amendment gate, and stays BLOCKED with the repin instruction', () => {
+      const result = useCase.execute(defaultInput);
+
+      expect(specAmendment.amend).toHaveBeenCalledWith(PROJECT_PATH, pinned, PIN, answered);
+      expect(result).toEqual({
+        ok: true,
+        ticketId: TICKET_ID,
+        warnings: undefined,
+        amendedDecisions: ['NEW-1'],
+      });
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, pinned, {
+        gate: 'amendment',
+        verdict: 'approved',
+        reason: 'Amended decisions.yaml of checkout: NEW-1 (AC-2).',
+      });
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
+      expect(gitGateway.commitFiles).toHaveBeenCalledOnce();
+    });
+
+    it('writes nothing and stays BLOCKED when the amendment is refused', () => {
+      specAmendment.amend.mockReturnValue({ ok: false, error: 'lint_decisions.py failed: bad' });
+
+      expect(useCase.execute(defaultInput)).toEqual({
+        ok: false,
+        error: 'lint_decisions.py failed: bad',
+      });
+      expect(decisionPromotionService.promote).not.toHaveBeenCalled();
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
+      expect(gitGateway.commitFiles).not.toHaveBeenCalled();
+    });
+
+    it('checks who is deciding before it amends', () => {
+      gateRecorder.decidedBy.mockImplementation(() => {
+        throw new Error('no git identity');
+      });
+
+      expect(() => useCase.execute(defaultInput)).toThrow('no git identity');
+      expect(specAmendment.amend).not.toHaveBeenCalled();
+    });
+
+    it('reports a missing required answer without amending', () => {
+      promotion.answered.mockImplementation(() => {
+        throw new Error('Missing required answers for: Q-001');
+      });
+
+      expect(useCase.execute(defaultInput)).toEqual({
+        ok: false,
+        error: 'Missing required answers for: Q-001',
+      });
+      expect(specAmendment.amend).not.toHaveBeenCalled();
+    });
+
+    it('unblocks as before when the questions file is a legacy one', () => {
+      promotion.answered.mockReturnValue(null);
+
+      expect(useCase.execute(defaultInput)).toMatchObject({ ok: true });
+      expect(specAmendment.amend).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'READY');
+    });
+  });
+
+  it('never amends for a ticket with no spec', () => {
+    useCase.execute(defaultInput);
+
+    expect(specAmendment.amend).not.toHaveBeenCalled();
   });
 
   describe('gate record', () => {

@@ -207,4 +207,10 @@ export class SqliteTicketRepository implements TicketRepository {
       .prepare(`UPDATE tickets SET pr_url = ?, updated_at = ? WHERE project_id = ? AND id = ?`)
       .run(prUrl, new Date().toISOString(), projectId, ticketId);
   }
+
+  setSpecCommit(projectId: string, ticketId: string, commit: string): void {
+    this.db
+      .prepare(`UPDATE tickets SET spec_commit = ?, updated_at = ? WHERE project_id = ? AND id = ?`)
+      .run(commit, new Date().toISOString(), projectId, ticketId);
+  }
 }

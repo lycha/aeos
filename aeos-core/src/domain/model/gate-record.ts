@@ -12,7 +12,9 @@ export type GateKind =
   | 'sign-off-override'
   | 'move-override'
   | 'answer'
-  | 'escalation-resolution';
+  | 'escalation-resolution'
+  | 'amendment'
+  | 'repin';
 
 export type GateVerdict = 'approved' | 'rejected' | 'overridden';
 

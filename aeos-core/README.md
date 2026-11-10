@@ -265,8 +265,11 @@ Every human decision at a gate is appended, as a structured record, to a YAML fi
 | `ticket sign-off` | `sign-off-override` | `overridden` |
 | `ticket move` | `move-override` | `overridden` |
 | `ticket answer` | `answer` | `approved` |
+| `ticket answer` on a spec-backed ticket | `amendment` | `approved` |
+| `ticket repin` | `repin` | `approved` |
 | `ticket resolve` | `escalation-resolution` | `approved` |
 
+- **Late answers amend the spec.** On a spec-backed ticket, `ticket answer` writes each answered question into `.aeos/features/<feature>/decisions.yaml` as a `DECIDED` entry (`NEW-<n>`, becoming the next `AC-<n>`, citing the ticket and its questions file), runs the decisions lint, and commits `decide(<feature>): amendment from <ticket>`. If the lint fails, nothing is written and the ticket stays `BLOCKED`. Otherwise the ticket also stays `BLOCKED`: add the criterion to `spec.md` (the `spec-writer` skill), commit, then run `aeos ticket repin <ticket>`. That re-checks the feature as `--spec` does, moves the epic's pin to the `.aeos` `HEAD` (its tasks follow), and sets the ticket `READY`. Until then `ticket run` refuses every ticket pinned to that spec, and a second amendment is refused. The `amendment` record carries the column the ticket was in; the `repin` record's reason names both commits. A ticket with no spec is unblocked as before.
 - **Where.** A spec-backed ticket (its own pin or its epic's): `.aeos/features/<feature>/gates.yaml`. Any other ticket: `.aeos/tickets/<id>/<id>-gates.yaml`. Ids are `GATE-1`, `GATE-2`, … within a file; records are appended and never rewritten. The format is `schemas/gates.schema.json`.
 - **Who.** `decided_by` is `user.name <user.email>` of the project repository. With neither configured, the command is refused and tells you to set them.
 - **Why.** `ticket move` and `ticket sign-off` require `--reason <text>`, at least ten characters. `ticket dod-approve` asks for one when the answer is no. Existing scripts that call `move` or `sign-off` without `--reason` now fail.
@@ -382,6 +385,7 @@ Notes:
 | `aeos ticket sign-off <id> --reason <text>`                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
 | `aeos ticket move <id> <status> --reason <text>`             | Human override — move a ticket directly to any workflow status             |
 | `aeos ticket answer <id>`                                    | Unblock a `BLOCKED` ticket after answering pre-flight questions            |
+| `aeos ticket repin <id>`                                     | Move a spec-backed ticket's pin to the current spec after an amendment     |
 | `aeos ticket resolve <id>`                                   | Resume an `ESCALATED` ticket after writing a decision in its `escalation.md` |
 | `aeos ticket dod-approve <id>`                               | Final human gate — mark ticket as DONE _(not yet implemented)_             |
 | `aeos dashboard`                                             | Cross-project Kanban summary _(not yet implemented)_                       |

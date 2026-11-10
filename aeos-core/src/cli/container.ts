@@ -7,6 +7,7 @@ import type { TicketCreatePort } from '../domain/ports/driving/ticket-create.por
 import type { TicketListPort } from '../domain/ports/driving/ticket-list.port.js';
 import type { TicketShowPort } from '../domain/ports/driving/ticket-show.port.js';
 import type { TicketAnswerPort } from '../domain/ports/driving/ticket-answer.port.js';
+import type { TicketRepinPort } from '../domain/ports/driving/ticket-repin.port.js';
 import type { TicketResolvePort } from '../domain/ports/driving/ticket-resolve.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
@@ -41,6 +42,9 @@ import { TicketCreateUseCase } from '../application/ticket-create.use-case.js';
 import { TicketListUseCase } from '../application/ticket-list.use-case.js';
 import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
 import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
+import { TicketRepinUseCase } from '../application/ticket-repin.use-case.js';
+import { SpecAmendmentService } from '../application/services/spec-amendment.service.js';
+import { YamlDecisionsFile } from '../infrastructure/spec/decisions-file.adapter.js';
 import { TicketResolveUseCase } from '../application/ticket-resolve.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
 import { CheckRegistry } from '../application/checks/check-registry.js';
@@ -79,6 +83,7 @@ export interface Container {
   ticketList: TicketListPort;
   ticketShow: TicketShowPort;
   ticketAnswer: TicketAnswerPort;
+  ticketRepin: TicketRepinPort;
   ticketResolve: TicketResolvePort;
   ticketRun: TicketRunPort;
   ticketApprove: TicketApprovePort;
@@ -122,13 +127,9 @@ export function createContainer(): Container {
   const getOrchestratorStateRepo = (): SqliteOrchestratorStateRepository =>
     (orchestratorStateRepo ??= new SqliteOrchestratorStateRepository(getDb()));
 
+  const gateRecordStore = new FsGateRecordStore(artefactTree, gitGateway);
   const getGateRecorder = (): GateRecorder =>
-    new GateRecorder(
-      new FsGateRecordStore(artefactTree, gitGateway),
-      gitGateway,
-      getTicketRepo(),
-      runRecordStore,
-    );
+    new GateRecorder(gateRecordStore, gitGateway, getTicketRepo(), runRecordStore);
 
   let stateMachine: StateMachineService | null = null;
   const getStateMachine = (): StateMachineService =>
@@ -204,6 +205,24 @@ export function createContainer(): Container {
         gitGateway,
         new DecisionPromotionService(artifactStore),
         getGateRecorder(),
+        new SpecAmendmentService(
+          artefactTree,
+          new YamlDecisionsFile(),
+          new PythonDecisionsLint(),
+          gitGateway,
+          gateRecordStore,
+        ),
+      );
+    },
+    get ticketRepin() {
+      return new TicketRepinUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getStateMachine(),
+        gitGateway,
+        artefactTree,
+        new PythonDecisionsLint(),
+        getGateRecorder(),
       );
     },
     get ticketResolve() {
@@ -245,6 +264,7 @@ export function createContainer(): Container {
         runRecordStore,
         new CheckRegistry(projectRepo, new ShellChecksRunner()),
         projectRepo,
+        gateRecordStore,
       );
     },
     get ticketApprove() {

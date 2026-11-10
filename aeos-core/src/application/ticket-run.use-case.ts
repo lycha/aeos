@@ -47,7 +47,8 @@ import type { AssembledContext } from '../domain/model/assembled-context.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { Ticket } from '../domain/model/ticket.js';
 import type { SpecPin } from '../domain/model/spec-pin.js';
-import { resolveSpecPin } from './services/spec-pin.js';
+import { pendingAmendment, resolveSpecPin } from './services/spec-pin.js';
+import type { GateRecordStore } from '../domain/ports/driven/gate-record-store.port.js';
 import type {
   TicketRunPort,
   TicketRunResult,
@@ -166,6 +167,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly runRecordStore: RunRecordStore,
     private readonly checkRegistry: CheckRegistry,
     private readonly projectRepo: ProjectRepository,
+    private readonly gateRecordStore: GateRecordStore,
   ) {}
 
   async execute(
@@ -183,6 +185,18 @@ export class TicketRunUseCase implements TicketRunPort {
       const eligibility = this.checkEligibility(projectId, ticketId);
       if (!eligibility.ok) return eligibility.result;
       let mirroredTicket = eligibility.ticket;
+
+      // Drift guard: an amendment means the pinned spec no longer says what was
+      // decided. Nothing runs against it until someone comes forward.
+      const specPin = resolveSpecPin(this.ticketRepo, mirroredTicket);
+      const amendment = specPin && pendingAmendment(this.gateRecordStore, projectPath, specPin);
+      if (amendment) {
+        return {
+          status: 'failed',
+          ticketId,
+          error: `The spec ${ticketId} is pinned to was amended from ${amendment.ticket} (${amendment.id}) and has not been repinned. Update spec.md, commit, then run \`aeos ticket repin ${amendment.ticket}\`.`,
+        };
+      }
 
       const branchError = this.isolateTask(projectPath, mirroredTicket);
       if (branchError) return { status: 'failed', ticketId, error: branchError };
@@ -253,7 +267,6 @@ export class TicketRunUseCase implements TicketRunPort {
       const aeosDir = path.join(projectPath, '.aeos');
 
       this.emitStageEvent(emitter, 'stage.started', 'context', 'Assembling ticket context');
-      const specPin = resolveSpecPin(this.ticketRepo, mirroredTicket);
       let baseContext: AssembledContext;
       try {
         baseContext = await this.contextAssembler.assemble(

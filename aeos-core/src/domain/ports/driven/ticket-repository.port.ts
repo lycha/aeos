@@ -37,4 +37,6 @@ export interface TicketRepository {
   setEscalation(projectId: string, ticketId: string, escalation: TicketEscalation | null): void;
   /** Records the URL of the pull request opened for the ticket. */
   setPrUrl(projectId: string, ticketId: string, prUrl: string): void;
+  /** Moves the commit of an epic's spec pin (`ticket repin`). The feature stays. */
+  setSpecCommit(projectId: string, ticketId: string, commit: string): void;
 }

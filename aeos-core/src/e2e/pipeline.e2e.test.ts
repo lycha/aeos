@@ -561,6 +561,160 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     },
   );
 
+  it('sends a late answer back to the spec: block, answer, amend, repin, run', async () => {
+    // Preflight of the task's implementation raises one blocking question, once.
+    const stubRun = vi.mocked(StubExecutor.prototype.run).getMockImplementation()!;
+    let asked = false;
+    vi.mocked(StubExecutor.prototype.run).mockImplementation(async function (
+      this: StubExecutor,
+      invocation,
+    ) {
+      const preflight = path.basename(invocation.outputPath).startsWith('preflight-');
+      if (asked || !preflight || invocation.column !== 'IMPLEMENTATION') {
+        return stubRun.call(this, invocation);
+      }
+      asked = true;
+      const content = [
+        '# AEOS Questions',
+        'Format-Version: 2',
+        `Ticket: ${invocation.ticketId}`,
+        '',
+        '## Q-001',
+        'Status: OPEN',
+        'Topic: night-greeting',
+        'Required: yes',
+        '',
+        '### Question',
+        '```text',
+        'What greets a visitor at night?',
+        '```',
+        '',
+        '### Answer',
+        '```text',
+        '```',
+      ].join('\n');
+      return { ok: true, artifactPath: invocation.outputPath, content };
+    });
+
+    await runCli('install');
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const featureDir = path.join(aeosDir, 'features', 'feature-sample');
+    const aeosGit = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: aeosDir, encoding: 'utf-8' });
+    const git = (...args: string[]): void => {
+      execFileSync('git', args, { cwd: project.projectPath, stdio: 'ignore' });
+    };
+    git('add', '-A');
+    git('commit', '-m', 'aeos project init');
+
+    const pinned = addFixtureFeature();
+    const epic = await createEpic('An epic');
+    const task = await createTicket('Say hello', '--parent', epic, '--key', 'T-001');
+    const sibling = await createTicket('Say goodbye', '--parent', epic, '--key', 'T-002');
+    git('checkout', '-b', `aeos/${epic}`);
+    await runCli('ticket', 'approve', task);
+    await runCli('ticket', 'approve', sibling);
+
+    // Block.
+    await runCli('ticket', 'run', task);
+    expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'BLOCKED' });
+
+    // Answer: the decision goes to the feature's decision log, and is committed.
+    const questions = path.join(aeosDir, 'tickets', task, `${task}-questions.md`);
+    fs.writeFileSync(
+      questions,
+      fs
+        .readFileSync(questions, 'utf-8')
+        .replace(/### Answer\n```text\n/, '### Answer\n```text\nThe same greeting as by day.\n'),
+    );
+    // Later than the ticket's last update, so the command does not ask to confirm.
+    fs.utimesSync(questions, new Date(Date.now() + 5_000), new Date(Date.now() + 5_000));
+    const answer = await runCli('ticket', 'answer', task);
+
+    expect(answer.exitCode).toBe(0);
+    expect(answer.output).toContain(
+      `Decision recorded as NEW-1. Update spec.md (spec-writer), commit, then run \`aeos ticket repin ${task}\`.`,
+    );
+    expect(ticketState(task).subState).toBe('BLOCKED');
+    const decisions = yaml.load(
+      fs.readFileSync(path.join(featureDir, 'decisions.yaml'), 'utf-8'),
+    ) as { decisions: Array<Record<string, string>> };
+    expect(decisions.decisions.at(-1)).toEqual({
+      absence: 'NEW-1',
+      outcome: 'DECIDED',
+      resolution: 'The same greeting as by day.',
+      becomes: 'AC-2',
+      decided_by: 'human',
+      question: 'What greets a visitor at night?',
+      evidence: `${task}: tickets/${task}/${task}-questions.md#Q-001`,
+    });
+    expect(aeosGit('log', '--format=%s')).toContain(
+      `decide(feature-sample): amendment from ${task}`,
+    );
+    expect(aeosGit('status', '--porcelain', '--', 'features')).toBe('');
+
+    // No repin yet: nothing pinned to that spec runs, whatever its sub-state.
+    const drifted = await runCli('ticket', 'run', sibling);
+    expect(drifted.output).toContain(`aeos ticket repin ${task}`);
+    expect(ticketState(sibling)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'READY' });
+
+    // A dirty feature cannot be repinned; a committed one can.
+    const specFile = path.join(featureDir, 'spec.md');
+    fs.writeFileSync(
+      specFile,
+      fs
+        .readFileSync(specFile, 'utf-8')
+        .replace(
+          '\n## Non-goals',
+          '- **AC-2** — When it is night, the system shall greet the visitor the same way.\n\n## Non-goals',
+        ),
+    );
+    const dirty = await runCli('ticket', 'repin', task);
+    expect(dirty.exitCode).toBe(1);
+    expect(dirty.output).toContain('uncommitted changes');
+    aeosGit('commit', '-am', 'spec(feature-sample): AC-2');
+    const amended = aeosGit('rev-parse', 'HEAD').trim();
+
+    const repin = await runCli('ticket', 'repin', task);
+
+    expect(repin.exitCode).toBe(0);
+    expect(repin.output).toContain(
+      `${epic} repinned: ${pinned.slice(0, 7)} → ${amended.slice(0, 7)}`,
+    );
+    expect(ticketState(task).subState).toBe('READY');
+    expect((await runCli('ticket', 'show', epic)).output).toContain(`EE-aeos@${amended}`);
+    const gates = gatesIn(project, 'features/feature-sample/gates.yaml');
+    expect(gates.slice(-2)).toMatchObject([
+      {
+        gate: 'amendment',
+        ticket: task,
+        column: 'IMPLEMENTATION',
+        spec_pin: { commit: pinned },
+      },
+      {
+        gate: 'repin',
+        ticket: task,
+        reason: `Spec pin moved from ${pinned} to ${amended}.`,
+        spec_pin: { commit: pinned },
+      },
+    ]);
+
+    // Run: the child task is briefed with the amended spec.
+    await runCli('ticket', 'run', task);
+    expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
+    const runsDir = path.join(aeosDir, 'tickets', task, 'runs');
+    const worker = fs
+      .readdirSync(runsDir)
+      .filter((file) => file.endsWith('.json'))
+      .map((file) => JSON.parse(fs.readFileSync(path.join(runsDir, file), 'utf-8')) as RunRecord)
+      .find((record) => record.role === 'worker')!;
+    expect(worker.spec_pin).toMatchObject({ commit: amended });
+    const brief = fs.readFileSync(path.join(aeosDir, worker.brief!.path), 'utf-8');
+    expect(brief).toContain('When it is night, the system shall greet the visitor the same way.');
+    expect(brief).toContain('The same greeting as by day.');
+  });
+
   it('shows column labels, accepts them as input, and stores identifiers only', async () => {
     await runCli('install');
     await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');

@@ -73,6 +73,7 @@ function mockRepo(ticket: Ticket | null): TicketRepository {
     updateSubState: vi.fn(),
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
+    setSpecCommit: vi.fn(),
   };
 }
 

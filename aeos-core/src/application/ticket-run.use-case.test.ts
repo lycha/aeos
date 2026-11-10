@@ -22,6 +22,7 @@ import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
 import type { ExecutorInvocation } from '../domain/model/executor-invocation.js';
 import type { TicketRunEvent } from '../domain/model/ticket-run-event.js';
+import type { GateRecord } from '../domain/model/gate-record.js';
 import type { RunRecord } from '../domain/model/run-record.js';
 import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
 import type { ChecksRunner } from '../domain/ports/driven/checks-runner.port.js';
@@ -45,6 +46,7 @@ function createMockTicketRepo(): TicketRepository {
     updateSubState: vi.fn(),
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
+    setSpecCommit: vi.fn(),
   };
 }
 
@@ -291,6 +293,7 @@ describe('TicketRunUseCase', () => {
   let projectRepo: ProjectRepository;
   let checksRunner: { run: ReturnType<typeof vi.fn> };
   let checkRegistry: CheckRegistry;
+  let gateRecords: GateRecord[];
   let useCase: TicketRunUseCase;
 
   beforeEach(() => {
@@ -311,6 +314,7 @@ describe('TicketRunUseCase', () => {
     configStore = createMockConfigStore();
     runRecordStore = createMockRunRecordStore();
     projectChecks = undefined;
+    gateRecords = [];
     protectedPaths = undefined;
     projectRepo = {
       readExecutorConfig: () => ({ checks: projectChecks, protectedPaths }),
@@ -352,6 +356,7 @@ describe('TicketRunUseCase', () => {
       runRecordStore,
       checkRegistry,
       projectRepo,
+      { append: vi.fn(), list: () => gateRecords },
     );
   }
 
@@ -365,6 +370,34 @@ describe('TicketRunUseCase', () => {
       files: call[2] as { brief: string; transcript: string },
     }));
   }
+
+  describe('drift guard', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+
+    it('refuses to start while an amendment written under the pin is not repinned', async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ specPin: PIN }),
+      );
+      gateRecords = [{ gate: 'amendment', ticket: 'AEOS-7', spec_pin: PIN } as GateRecord];
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect(result.status === 'failed' && result.error).toMatch(/AEOS-7.*aeos ticket repin/s);
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(preflight.run).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
+    });
+
+    it('runs once the pin has moved past the amendment', async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ specPin: { ...PIN, commit: 'deadbee' } }),
+      );
+      gateRecords = [{ gate: 'amendment', ticket: 'AEOS-7', spec_pin: PIN } as GateRecord];
+
+      expect((await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID)).status).toBe('success');
+    });
+  });
 
   // --- Happy path ---
 

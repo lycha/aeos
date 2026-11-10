@@ -14,6 +14,9 @@ import { SubState } from '../domain/model/sub-state.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import type { GateRecorder } from './services/gate-recorder.js';
 import type { DecisionPromotionService } from './services/decision-promotion.service.js';
+import type { SpecAmendmentService } from './services/spec-amendment.service.js';
+import type { AmendedDecision } from '../domain/ports/driven/decisions-file.port.js';
+import { featureOf, resolveSpecPin } from './services/spec-pin.js';
 
 export class TicketAnswerUseCase implements TicketAnswerPort {
   constructor(
@@ -23,6 +26,7 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
     private readonly gitGateway: GitGateway,
     private readonly decisionPromotionService: DecisionPromotionService,
     private readonly gateRecorder: GateRecorder,
+    private readonly specAmendment: SpecAmendmentService,
   ) {}
 
   execute(input: TicketAnswerInput): TicketAnswerResult {
@@ -62,7 +66,28 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
       }
     }
 
-    // 5. Promote structured questions into decisions when possible
+    // 5. A spec-backed ticket: each answer is a decision the spec did not
+    // have, so it goes to the feature's decision log first. Nothing else is
+    // written if that is refused.
+    const pin = resolveSpecPin(this.ticketRepo, ticket);
+    let amended: AmendedDecision[] = [];
+    if (pin) {
+      let answered;
+      try {
+        answered = this.decisionPromotionService.answered(projectPath, ticketId);
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+      // A legacy questions file has no answers to read; it unblocks as before.
+      if (answered) {
+        this.gateRecorder.decidedBy(projectPath);
+        const amendment = this.specAmendment.amend(projectPath, ticket, pin, answered);
+        if (!amendment.ok) return { ok: false, error: amendment.error };
+        amended = amendment.decisions;
+      }
+    }
+
+    // 6. Promote structured questions into decisions when possible
     const promotion = this.decisionPromotionService.promote({
       projectPath,
       ticketId,
@@ -74,21 +99,32 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
       return { ok: false, error: promotion.error ?? 'Decision promotion failed' };
     }
 
-    this.gateRecorder.record(projectPath, ticket, { gate: 'answer', verdict: 'approved' });
-
-    // 6. Transition sub-state to READY so ticket run can resume execution
-    const result = this.stateMachine.setSubState(projectId, ticketId, SubState.READY);
-    if (!result.ok) {
-      return { ok: false, error: `Failed to set sub-state: ${result.reason}` };
+    if (pin && amended.length > 0) {
+      this.gateRecorder.record(projectPath, ticket, {
+        gate: 'amendment',
+        verdict: 'approved',
+        reason: `Amended decisions.yaml of ${featureOf(pin)}: ${amended
+          .map((decision) => `${decision.absence} (${decision.becomes})`)
+          .join(', ')}.`,
+      });
+    } else {
+      this.gateRecorder.record(projectPath, ticket, { gate: 'answer', verdict: 'approved' });
     }
 
-    // 7. Commit the answered questions file (and decisions file when promoted)
+    // 7. READY, so ticket run can resume. After an amendment the ticket stays
+    // BLOCKED instead: spec.md has to catch up and be repinned first.
+    const nextSubState = amended.length > 0 ? ticket.subState : SubState.READY;
+    if (nextSubState !== ticket.subState) {
+      const result = this.stateMachine.setSubState(projectId, ticketId, SubState.READY);
+      if (!result.ok) {
+        return { ok: false, error: `Failed to set sub-state: ${result.reason}` };
+      }
+    }
+
+    // 8. Commit the answered questions file (and decisions file when promoted)
     const aeosDir = path.join(projectPath, '.aeos');
     const questionsFilePath = path.join(aeosDir, 'tickets', ticketId, questionsFilename);
-    syncTicketDocument(this.artifactStore, projectPath, {
-      ...ticket,
-      subState: SubState.READY,
-    });
+    syncTicketDocument(this.artifactStore, projectPath, { ...ticket, subState: nextSubState });
     // The answered questions (and any promoted decisions) are artifacts and
     // stay in git. The ticket file is state — mirrored to disk, not committed.
     const filesToCommit = [questionsFilePath];
@@ -103,16 +139,20 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
       );
     } catch (err) {
       // Compensate: revert sub-state back to BLOCKED
-      this.stateMachine.setSubState(projectId, ticketId, 'BLOCKED');
+      if (nextSubState !== ticket.subState) {
+        this.stateMachine.setSubState(projectId, ticketId, 'BLOCKED');
+      }
       syncTicketDocument(this.artifactStore, projectPath, ticket);
       throw err;
     }
 
-    // 8. Return success
     return {
       ok: true,
       ticketId,
       warnings: promotion.status === 'legacy-skipped' ? promotion.warnings : undefined,
+      ...(amended.length > 0
+        ? { amendedDecisions: amended.map((decision) => decision.absence) }
+        : {}),
     };
   }
 }

@@ -6,7 +6,6 @@ import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.j
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { ArtefactTree } from '../domain/ports/driven/artefact-tree.port.js';
 import type { DecisionsLint } from '../domain/ports/driven/decisions-lint.port.js';
-import type { SpecPin } from '../domain/model/spec-pin.js';
 import type {
   TicketCreatePort,
   TicketCreateInput,
@@ -14,6 +13,7 @@ import type {
 } from '../domain/ports/driving/ticket-create.port.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import { buildInitialTicketDocument } from './services/ticket-document.js';
+import { pinSpec } from './services/spec-pin.js';
 export class TicketCreateUseCase implements TicketCreatePort {
   constructor(
     private readonly ticketRepo: TicketRepository,
@@ -39,7 +39,18 @@ export class TicketCreateUseCase implements TicketCreatePort {
       );
     }
     const specPin =
-      input.spec === undefined ? null : this.pinSpec(projectKey, projectPath, input.spec);
+      input.spec === undefined
+        ? null
+        : pinSpec(
+            {
+              artefactTree: this.artefactTree,
+              decisionsLint: this.decisionsLint,
+              gitGateway: this.gitGateway,
+            },
+            `${projectKey}-aeos`,
+            projectPath,
+            input.spec,
+          );
 
     // A parent makes this a task; without one it is an epic.
     const kind = parentId ? TicketKind.TASK : TicketKind.EPIC;
@@ -142,59 +153,6 @@ export class TicketCreateUseCase implements TicketCreatePort {
       taskKey: resolvedTaskKey,
       alreadyExisted: false,
       ...(specPin ? { specPin } : {}),
-    };
-  }
-
-  /** Checks the feature is fit to build from, in the order the errors are useful, and pins it. */
-  private pinSpec(projectKey: string, projectPath: string, feature: string): SpecPin {
-    // The name becomes a path and a git pathspec.
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(feature)) {
-      throw new Error(
-        `"${feature}" is not a feature name: use the directory name under features/.`,
-      );
-    }
-    const treeRoot = this.artefactTree.root(projectPath);
-    const featureDir = this.artefactTree.featureDir(projectPath, feature);
-    const featurePath = `features/${feature}`;
-
-    if (!this.artefactTree.exists(projectPath, feature)) {
-      throw new Error(`Feature "${feature}" not found: ${featureDir} does not exist.`);
-    }
-    const missing = this.decisionsLint.missingFiles(featureDir);
-    if (missing.length > 0) {
-      throw new Error(`Feature "${feature}" is missing ${missing.join(' and ')}.`);
-    }
-
-    const lint = this.decisionsLint.lint(treeRoot, feature);
-    if (lint.schemaErrors.length > 0) {
-      throw new Error(
-        `decisions.yaml of feature "${feature}" does not match its schema: ${lint.schemaErrors.join('; ')}`,
-      );
-    }
-    if (lint.lintErrors.length > 0) {
-      throw new Error(
-        `lint_decisions.py failed for feature "${feature}":\n${lint.lintErrors.map((error) => `  - ${error}`).join('\n')}`,
-      );
-    }
-    if (lint.escalated.length > 0) {
-      throw new Error(
-        `Feature "${feature}" has escalated decisions: ${lint.escalated.join(', ')}. An epic cannot be built on a decision nobody has made; resolve them in decisions.yaml first.`,
-      );
-    }
-
-    const uncommitted = this.gitGateway
-      .changedFiles(treeRoot)
-      .filter((file) => file.startsWith(`${featurePath}/`));
-    if (uncommitted.length > 0) {
-      throw new Error(
-        `Feature "${feature}" has uncommitted changes in ${treeRoot}: ${uncommitted.join(', ')}. Commit them first, so the epic is pinned to what you see.`,
-      );
-    }
-
-    return {
-      repo: `${projectKey}-aeos`,
-      commit: this.gitGateway.headCommit(treeRoot),
-      path: featurePath,
     };
   }
 }

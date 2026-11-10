@@ -85,6 +85,8 @@ class StubTicketRepository implements TicketRepository {
     if (ticket) ticket.prUrl = prUrl;
   }
 
+  setSpecCommit(): void {}
+
   setEscalation(projectId: string, ticketId: string, escalation: Ticket['escalation']): void {
     const ticket = this.findById(projectId, ticketId);
     if (ticket) {
