@@ -49,3 +49,6 @@ export const ProjectChecksSchema = z.array(
     timeoutSeconds: z.number().positive(),
   }),
 );
+
+/** The `protectedPaths` list of `.aeos/project.json`. */
+export const ProjectProtectedPathsSchema = z.array(z.string().min(1));

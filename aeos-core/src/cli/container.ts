@@ -204,6 +204,7 @@ export function createContainer(): Container {
         configStore,
         runRecordStore,
         new CheckRegistry(projectRepo, new ShellChecksRunner()),
+        projectRepo,
       );
     },
     get ticketApprove() {

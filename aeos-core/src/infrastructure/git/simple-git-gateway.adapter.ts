@@ -117,4 +117,47 @@ export class SimpleGitGateway implements GitGateway {
       return false;
     }
   }
+
+  changedFiles(dir: string): string[] {
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: dir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    // Status paths are relative to the repository root, not to `dir`.
+    let prefix: string;
+    try {
+      prefix = git('rev-parse', '--show-prefix').trim();
+    } catch {
+      return []; // not a repository
+    }
+    const fields = git('status', '--porcelain', '-z', '--untracked-files=all', '--', '.').split(
+      '\0',
+    );
+    const files: string[] = [];
+    for (let i = 0; i < fields.length; i += 1) {
+      const field = fields[i];
+      if (field.length < 4) continue;
+      files.push(field.slice(3));
+      // A rename or copy is followed by its source path as a field of its own.
+      if (/[RC]/.test(field.slice(0, 2))) files.push(fields[++i]);
+    }
+    return files.filter((file) => file.startsWith(prefix)).map((file) => file.slice(prefix.length));
+  }
+
+  restoreFiles(dir: string, paths: string[]): void {
+    for (const file of paths) {
+      try {
+        execFileSync('git', ['checkout', 'HEAD', '--', file], { cwd: dir, stdio: 'ignore' });
+      } catch {
+        // Not in HEAD: the path is new, so restoring it means removing it.
+        execFileSync('git', ['rm', '--cached', '--quiet', '--ignore-unmatch', '--', file], {
+          cwd: dir,
+          stdio: 'ignore',
+        });
+        fs.rmSync(path.join(dir, file), { force: true });
+      }
+    }
+  }
 }

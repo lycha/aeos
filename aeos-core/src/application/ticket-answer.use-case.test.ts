@@ -47,6 +47,8 @@ function createMockGitGateway(): GitGateway {
     tagHere: vi.fn(),
     diffRange: vi.fn().mockReturnValue(''),
     refExists: vi.fn().mockReturnValue(false),
+    changedFiles: vi.fn().mockReturnValue([]),
+    restoreFiles: vi.fn(),
     diff: vi.fn().mockReturnValue(''),
   };
 }

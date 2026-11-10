@@ -58,4 +58,17 @@ export interface GitGateway {
 
   /** True when `ref` resolves in the repo (branch, tag, or commit). */
   refExists(dir: string, ref: string): boolean;
+
+  /**
+   * Every file that differs from HEAD in `dir`: tracked modifications, staged
+   * changes and untracked files, as paths relative to `dir`. Empty when `dir`
+   * is not in a repository.
+   */
+  changedFiles(dir: string): string[];
+
+  /**
+   * Puts `paths` (relative to `dir`) back as they are at HEAD: tracked paths
+   * are checked out, paths HEAD does not have are deleted.
+   */
+  restoreFiles(dir: string, paths: string[]): void;
 }

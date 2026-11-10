@@ -12,6 +12,8 @@ export interface CheckConfig {
 export interface ProjectExecutorConfig extends Project {
   /** Run in this order before the reviewer, on columns with `runChecks`. */
   readonly checks?: readonly CheckConfig[];
+  /** Globs no agent may touch, added to the built-in protected paths. */
+  readonly protectedPaths?: readonly string[];
   readonly executor?: {
     readonly type?: 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli';
     readonly model?: string;

@@ -127,6 +127,8 @@ describe('OrchestratorUseCase', () => {
       tagHere: vi.fn(),
       diffRange: vi.fn().mockReturnValue(''),
       refExists: vi.fn().mockReturnValue(false),
+      changedFiles: vi.fn().mockReturnValue([]),
+      restoreFiles: vi.fn(),
     };
 
     useCase = new OrchestratorUseCase(

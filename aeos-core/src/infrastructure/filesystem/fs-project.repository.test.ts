@@ -184,6 +184,25 @@ describe('FsProjectRepository.readExecutorConfig()', () => {
     expect(repo.readExecutorConfig(tmpDir)?.checks).toEqual(checks);
   });
 
+  it('returns protectedPaths, and throws when the list is not a list of globs', () => {
+    const write = (protectedPaths: unknown): void => {
+      fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.aeos', 'project.json'),
+        JSON.stringify({ id: 'my-project', protectedPaths }),
+        'utf-8',
+      );
+    };
+
+    write(['src/cli/generated/**']);
+    expect(repo.readExecutorConfig(tmpDir)?.protectedPaths).toEqual(['src/cli/generated/**']);
+
+    write('src/**');
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "protectedPaths" in .aeos\/project.json/,
+    );
+  });
+
   it('throws on an invalid checks list rather than reading it as no checks', () => {
     writeChecks([{ name: 'test' }]);
 

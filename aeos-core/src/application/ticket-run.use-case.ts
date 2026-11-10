@@ -35,6 +35,7 @@ import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js'
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
 import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
+import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import { runRecordPaths, type RunRecord } from '../domain/model/run-record.js';
 import type { ExecutorResult } from '../domain/model/executor-result.js';
 import type { CostRole } from '../domain/model/cost-record.js';
@@ -62,6 +63,7 @@ import { SubState } from '../domain/model/sub-state.js';
 import { validateOutput } from '../domain/services/output-validation.js';
 import { isValidColumn } from '../domain/model/column.js';
 import { parseVerdict } from '../domain/services/verdict-parser.js';
+import { findViolations, protectedGlobs } from '../domain/services/path-guard.js';
 import {
   checkBlockerTopic,
   decideNextAttempt,
@@ -96,6 +98,8 @@ interface RunContext {
   readonly artifactAbsPath: string;
   readonly reviewFilename: string;
   readonly reviewAbsPath: string;
+  /** Globs no executor invocation of this run may touch. */
+  readonly protectedGlobs: readonly string[];
 }
 
 /** One executor invocation, as much as the call site knows about it. */
@@ -156,6 +160,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly configStore: ConfigStore,
     private readonly runRecordStore: RunRecordStore,
     private readonly checkRegistry: CheckRegistry,
+    private readonly projectRepo: ProjectRepository,
   ) {}
 
   async execute(
@@ -273,6 +278,9 @@ export class TicketRunUseCase implements TicketRunPort {
         artifactAbsPath: path.join(aeosDir, 'tickets', ticketId, artifactFilename),
         reviewFilename,
         reviewAbsPath: path.join(aeosDir, 'tickets', ticketId, reviewFilename),
+        protectedGlobs: protectedGlobs(
+          this.projectRepo.readExecutorConfig(projectPath)?.protectedPaths,
+        ),
       };
 
       // ── Preflight ────────────────────────────────────────────────
@@ -588,6 +596,8 @@ export class TicketRunUseCase implements TicketRunPort {
       startedAt: new Date(),
     } as const;
 
+    // Taken after the baseline commit, or baselined files would look untouched.
+    const beforeWorker = this.changedPaths(ctx);
     let executorResult: ExecutorResult;
     try {
       this.currentExecutor = ctx.workerExecutor;
@@ -602,7 +612,12 @@ export class TicketRunUseCase implements TicketRunPort {
         onChunk: this.createChunkObserver(emitter, 'worker'),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = [
+        err instanceof Error ? err.message : String(err),
+        this.restoreProtected(ctx, beforeWorker),
+      ]
+        .filter(Boolean)
+        .join('\n');
       this.emitStageEvent(emitter, 'stage.failed', 'worker', message, {
         role: 'worker',
         executor: ctx.workerExecutorType,
@@ -622,6 +637,7 @@ export class TicketRunUseCase implements TicketRunPort {
       this.currentExecutor = null;
       this.interruptStage = undefined;
     }
+    const violation = this.restoreProtected(ctx, beforeWorker);
     const run: InvokedRun = { ...workerRun, result: executorResult, endedAt: new Date() };
 
     this.recordCost(
@@ -635,6 +651,19 @@ export class TicketRunUseCase implements TicketRunPort {
       'worker',
     );
     this.emitCostEvent(emitter, 'worker', executorResult);
+
+    // FAILED, not ESCALATED: the agent broke a rule.
+    if (violation) {
+      this.emitStageEvent(emitter, 'stage.failed', 'worker', violation, {
+        role: 'worker',
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: workerMode,
+      });
+      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+      this.recordRunAlone(ctx, { ...run, error: violation });
+      return { kind: 'failed', error: violation };
+    }
 
     if (!executorResult.ok) {
       this.emitStageEvent(emitter, 'stage.failed', 'worker', executorResult.reason, {
@@ -910,6 +939,8 @@ export class TicketRunUseCase implements TicketRunPort {
       startedAt: new Date(),
     } as const;
 
+    const beforeReviewer = this.changedPaths(ctx);
+    let violation: string | undefined;
     let reviewResult: ExecutorResult;
     try {
       this.currentExecutor = reviewerExecutor;
@@ -938,6 +969,7 @@ export class TicketRunUseCase implements TicketRunPort {
     } finally {
       this.currentExecutor = null;
       this.interruptStage = undefined;
+      violation = this.restoreProtected(ctx, beforeReviewer);
     }
     const run: InvokedRun = { ...reviewerRun, result: reviewResult, endedAt: new Date() };
 
@@ -952,6 +984,19 @@ export class TicketRunUseCase implements TicketRunPort {
       'reviewer',
     );
     this.emitCostEvent(emitter, 'reviewer', reviewResult);
+
+    // A failure, not a missing verdict: nothing this reviewer wrote is kept.
+    if (violation) {
+      this.emitStageEvent(emitter, 'stage.failed', 'reviewer', violation, {
+        role: 'reviewer',
+        executor: ctx.reviewerExecutorType,
+        model: ctx.reviewerModel,
+        mode: 'artifact',
+      });
+      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.reviewFilename);
+      this.recordRunAlone(ctx, { ...run, error: violation });
+      return { kind: 'failed', error: violation };
+    }
 
     if (!reviewResult.ok) {
       this.emitStageEvent(emitter, 'stage.failed', 'reviewer', reviewResult.reason, {
@@ -1052,7 +1097,9 @@ export class TicketRunUseCase implements TicketRunPort {
 
     // PreflightService owns the invocation, so the executor is wrapped to see
     // the prompt and the result it would otherwise keep to itself.
-    let invoked: Pick<InvokedRun, 'prompt' | 'result' | 'startedAt' | 'endedAt'> | undefined;
+    let invoked:
+      | Pick<InvokedRun, 'prompt' | 'result' | 'startedAt' | 'endedAt' | 'error'>
+      | undefined;
     const recordingExecutor: Executor = {
       run: async (invocation) => {
         const startedAt = new Date();
@@ -1070,12 +1117,21 @@ export class TicketRunUseCase implements TicketRunPort {
           );
           return result;
         };
+        const before = this.changedPaths(ctx);
+        let result: ExecutorResult;
         try {
-          return settle(await ctx.workerExecutor.run(invocation));
+          result = settle(await ctx.workerExecutor.run(invocation));
         } catch (err) {
+          this.restoreProtected(ctx, before);
           settle({ ok: false, reason: err instanceof Error ? err.message : String(err) });
           throw err;
         }
+        const violation = this.restoreProtected(ctx, before);
+        if (violation) {
+          invoked = invoked && { ...invoked, error: violation };
+          throw new Error(violation);
+        }
+        return result;
       },
       interrupt: () => ctx.workerExecutor.interrupt(),
     };
@@ -1339,6 +1395,41 @@ export class TicketRunUseCase implements TicketRunPort {
       executorType === 'opencode-cli' ||
       executorType === 'stub'
     );
+  }
+
+  /** What differs from HEAD in the project and in `.aeos`, relative to the project root. */
+  private changedPaths(ctx: RunContext): Set<string> {
+    return new Set([
+      // `.aeos` is its own repository; the project's must not speak for it.
+      ...this.gitGateway.changedFiles(ctx.projectPath).filter((file) => !file.startsWith('.aeos/')),
+      ...this.gitGateway.changedFiles(ctx.aeosDir).map((file) => `.aeos/${file}`),
+    ]);
+  }
+
+  /**
+   * Restores every protected path that changed since `before` and says which,
+   * or returns undefined when none did. Called straight after an executor
+   * returns, so the engine's own later writes under `.aeos/` never count.
+   *
+   * shortcut: a set difference, so a further edit to a protected file that
+   * was already uncommitted before the run goes unseen; compare content
+   * hashes if operators keep such files dirty.
+   */
+  private restoreProtected(ctx: RunContext, before: ReadonlySet<string>): string | undefined {
+    const touched = [...this.changedPaths(ctx)].filter((file) => !before.has(file));
+    const violations = findViolations(touched, ctx.protectedGlobs);
+    if (violations.length === 0) return undefined;
+
+    const inAeos = violations.filter((file) => file.startsWith('.aeos/'));
+    const inProject = violations.filter((file) => !file.startsWith('.aeos/'));
+    if (inAeos.length > 0) {
+      this.gitGateway.restoreFiles(
+        ctx.aeosDir,
+        inAeos.map((file) => file.slice('.aeos/'.length)),
+      );
+    }
+    if (inProject.length > 0) this.gitGateway.restoreFiles(ctx.projectPath, inProject);
+    return `The run changed protected paths, which have been restored: ${violations.join(', ')}`;
   }
 
   private newRunId(startedAt: Date): string {

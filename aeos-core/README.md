@@ -247,6 +247,27 @@ A column runs them when its spec says `runChecks: true`. They run in the project
 
 Each checks stage leaves a run record with `role: checks`. With no `checks` list, or on a column without `runChecks`, nothing changes. An invalid `checks` list is an error, never silently "no checks".
 
+### Protected paths
+
+An agent must not be able to weaken what it is judged against. Around every executor invocation (preflight, worker and reviewer, artifact and agentic) AEOS compares the changed files of the project repository and of `.aeos/` (its own repository) before and after. If the run changed a protected path, the path is restored (a tracked file is checked out, a new file is deleted), the run record carries the violation in `error`, and the attempt ends `FAILED`, not `ESCALATED`: the agent broke a rule.
+
+Always protected, whatever the configuration says:
+
+```
+.aeos/project.json        .aeos/rubrics/**         .aeos/schemas/**
+.aeos/pipelines.yaml      .aeos/column-specs/**    .aeos/features/**
+.aeos/CONSTRAINTS.md      .aeos/agents/**          .aeos/contexts/**
+.aeos/tickets/*/runs/**
+```
+
+Add project paths with `protectedPaths` in `.aeos/project.json`; the list can only add to the defaults:
+
+```json
+{ "protectedPaths": ["src/cli/generated/**"] }
+```
+
+Globs are relative to the project root: `*` matches within one path segment, `**` any number of segments. Detection is a diff after the run, so it works for every executor; it does not stop the write or any read. Two limits: a protected file that already had uncommitted changes before the run is not checked (commit `.aeos/` edits before running), and two runs in the same project at the same time can be blamed for each other's writes.
+
 ### Project-level executor defaults
 
 You can set a project-level default executor and model in `.aeos/project.json`:

@@ -53,7 +53,8 @@ async function driveTaskToDone(taskId: string): Promise<void> {
   for (let i = 0; i < 3; i++) await driveColumn(taskId);
 }
 
-describe('stub end-to-end pipeline', () => {
+// Each case spawns git and runs whole pipelines; the 5s default is too tight.
+describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
   let project: TempProject;
   let registryBefore: string | null;
 
@@ -276,5 +277,57 @@ describe('stub end-to-end pipeline', () => {
       execFileSync('git', args, { cwd: aeosDir, encoding: 'utf-8' });
     expect(aeosGit('status', '--porcelain', '--', 'tickets/*/runs')).toBe('');
     expect(aeosGit('ls-files', `tickets/${green}/${green}-checks.md`)).not.toBe('');
+  });
+
+  it('fails a run that touches a protected path, in either repository, and restores it', async () => {
+    await runCli('install');
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const configFile = path.join(aeosDir, 'project.json');
+    const config = JSON.parse(fs.readFileSync(configFile, 'utf-8')) as object;
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({ ...config, protectedPaths: ['src/cli/generated/**'] }),
+      'utf-8',
+    );
+    const failedRun = (ticketId: string): RunRecord => {
+      const dir = path.join(aeosDir, 'tickets', ticketId, 'runs');
+      return fs
+        .readdirSync(dir)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8')) as RunRecord)
+        .find((record) => record.exit === 'failed')!;
+    };
+
+    // `.aeos` repository: a rubric the reviewer will judge the work against.
+    // Creating the epic commits the scaffold, so the rubric is tracked.
+    const epic = await createTicket('An epic');
+    await runCli('ticket', 'approve', epic);
+    const rubric = '.aeos/rubrics/structure/code-structure.md';
+    const rubricFile = path.join(project.projectPath, rubric);
+    const original = fs.readFileSync(rubricFile, 'utf-8');
+
+    vi.stubEnv('AEOS_STUB_TOUCH', rubric);
+    const epicRun = await runCli('ticket', 'run', epic);
+
+    expect(ticketState(epic)).toMatchObject({ column: 'PRODUCT_SCOPING', subState: 'FAILED' });
+    expect(epicRun.output).toContain(rubric);
+    expect(fs.readFileSync(rubricFile, 'utf-8')).toBe(original);
+    expect(failedRun(epic)).toMatchObject({ role: 'worker' });
+    expect(failedRun(epic).error).toContain(rubric);
+    expect(validateRunRecord(failedRun(epic)), JSON.stringify(validateRunRecord.errors)).toBe(true);
+
+    // Project repository: a new file under a configured glob.
+    const task = createStandaloneTask('A task that writes generated code');
+    await runCli('ticket', 'approve', task);
+    const generated = 'src/cli/generated/commands.ts';
+
+    vi.stubEnv('AEOS_STUB_TOUCH', generated);
+    const taskRun = await runCli('ticket', 'run', task);
+
+    expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'FAILED' });
+    expect(taskRun.output).toContain(generated);
+    expect(fs.existsSync(path.join(project.projectPath, generated))).toBe(false);
+    expect(failedRun(task).error).toContain(generated);
   });
 });

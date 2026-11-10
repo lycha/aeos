@@ -12,7 +12,7 @@ import {
 } from '../../shared/errors.js';
 import { CONSTRAINTS_PLACEHOLDER } from './defaults/constraints-placeholder.js';
 import { readTemplates } from './template-source.js';
-import { ProjectChecksSchema } from '../spec-loader/schemas.js';
+import { ProjectChecksSchema, ProjectProtectedPathsSchema } from '../spec-loader/schemas.js';
 import { scaffoldSkill } from './skill-source.js';
 
 const AEOS_DIR = '.aeos';
@@ -151,8 +151,14 @@ export class FsProjectRepository implements ProjectRepository {
     } catch {
       return null;
     }
+    // Thrown, not swallowed: an unreadable list must not read as an empty one.
+    const protectedPaths = ProjectProtectedPathsSchema.optional().safeParse(config.protectedPaths);
+    if (!protectedPaths.success) {
+      throw new Error(
+        `Invalid "protectedPaths" in .aeos/project.json: ${protectedPaths.error.message}`,
+      );
+    }
     if (config.checks === undefined) return config;
-    // Thrown, not swallowed: an unreadable list must not read as "no checks".
     const checks = ProjectChecksSchema.safeParse(config.checks);
     if (!checks.success) {
       throw new Error(`Invalid "checks" in .aeos/project.json: ${checks.error.message}`);

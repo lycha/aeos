@@ -70,6 +70,8 @@ function createMockGitGateway(): GitGateway {
     tagHere: vi.fn(),
     diffRange: vi.fn().mockReturnValue(''),
     refExists: vi.fn().mockReturnValue(false),
+    changedFiles: vi.fn().mockReturnValue([]),
+    restoreFiles: vi.fn(),
     diff: vi.fn().mockReturnValue('diff --git a/src/file.ts b/src/file.ts'),
   };
 }
@@ -273,6 +275,8 @@ describe('TicketRunUseCase', () => {
   let runRecordStore: ReturnType<typeof createMockRunRecordStore>;
   let buildPromptFn: (context: AssembledContext, agentSpec: AgentSpec) => string;
   let projectChecks: CheckConfig[] | undefined;
+  let protectedPaths: string[] | undefined;
+  let projectRepo: ProjectRepository;
   let checksRunner: { run: ReturnType<typeof vi.fn> };
   let checkRegistry: CheckRegistry;
   let useCase: TicketRunUseCase;
@@ -295,15 +299,16 @@ describe('TicketRunUseCase', () => {
     configStore = createMockConfigStore();
     runRecordStore = createMockRunRecordStore();
     projectChecks = undefined;
+    protectedPaths = undefined;
+    projectRepo = {
+      readExecutorConfig: () => ({ checks: projectChecks, protectedPaths }),
+    } as unknown as ProjectRepository;
     checksRunner = {
       run: vi
         .fn()
         .mockResolvedValue({ exitCode: 0, durationMs: 1200, timedOut: false, outputTail: 'fine' }),
     };
-    checkRegistry = new CheckRegistry(
-      { readExecutorConfig: () => ({ checks: projectChecks }) } as unknown as ProjectRepository,
-      checksRunner as ChecksRunner,
-    );
+    checkRegistry = new CheckRegistry(projectRepo, checksRunner as ChecksRunner);
     buildPromptFn = vi.fn().mockReturnValue('assembled prompt') as unknown as (
       context: AssembledContext,
       agentSpec: AgentSpec,
@@ -334,6 +339,7 @@ describe('TicketRunUseCase', () => {
       configStore,
       runRecordStore,
       checkRegistry,
+      projectRepo,
     );
   }
 
@@ -1729,6 +1735,177 @@ describe('TicketRunUseCase', () => {
       expect(events.filter((event) => event.phase === 'checks').map((event) => event.type)).toEqual(
         ['stage.started', 'stage.failed', 'stage.started', 'stage.completed'],
       );
+    });
+  });
+
+  describe('protected paths', () => {
+    const AEOS_DIR = path.join(PROJECT_PATH, '.aeos');
+    const RUBRIC = 'rubrics/structure/code-structure.md';
+    // What `git status` would list in each repository; an executor "touches" a
+    // file by adding it here.
+    let dirty: { project: string[]; aeos: string[] };
+    const approved = {
+      ok: true,
+      artifactPath: '/tmp/artifact',
+      content: `${'A '.repeat(60)}\n\n${reviewWith('APPROVED')}`,
+      usage: { inputTokens: 1, outputTokens: 2, costUsd: 0.25 },
+    };
+    /** Makes the invocation of one role touch a file as it runs. */
+    const touching = (
+      role: 'worker' | 'reviewer',
+      repo: 'project' | 'aeos',
+      file: string,
+    ): void => {
+      (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (invocation: ExecutorInvocation) => {
+          const isReview = invocation.outputPath.endsWith('-review.md');
+          if (isReview === (role === 'reviewer')) dirty[repo].push(file);
+          return approved;
+        },
+      );
+    };
+    const restored = (): unknown[][] =>
+      (gitGateway.restoreFiles as ReturnType<typeof vi.fn>).mock.calls;
+
+    beforeEach(() => {
+      dirty = { project: [], aeos: [] };
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockImplementation((dir: string) => [
+        ...(dir === AEOS_DIR ? dirty.aeos : dirty.project),
+      ]);
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue(approved);
+    });
+
+    it('fails the attempt, names the file and restores it when the worker edits a rubric', async () => {
+      touching('worker', 'aeos', RUBRIC);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect((result as { error: string }).error).toContain(`.aeos/${RUBRIC}`);
+      expect(restored()).toEqual([[AEOS_DIR, [RUBRIC]]]);
+      expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'FAILED');
+      // The reviewer is never asked, and nothing of the attempt is kept.
+      expect(executor.run).toHaveBeenCalledTimes(1);
+      expect(artifactStore.removeArtifact).toHaveBeenCalledWith(
+        PROJECT_PATH,
+        TICKET_ID,
+        'AEOS-1-impl.md',
+      );
+    });
+
+    it('writes the violation into the run record and still records what the run cost', async () => {
+      touching('worker', 'aeos', RUBRIC);
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const [worker] = writtenRuns();
+      expect(worker!.record).toMatchObject({ role: 'worker', exit: 'failed', cost_usd: 0.25 });
+      expect(worker!.record.error).toContain(`.aeos/${RUBRIC}`);
+      expect(costRepo.record).toHaveBeenCalledWith(
+        expect.objectContaining({ role: 'worker', costUsd: 0.25 }),
+      );
+    });
+
+    it('fails when the worker creates a file under column-specs', async () => {
+      touching('worker', 'aeos', 'column-specs/extra.yaml');
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect(restored()).toEqual([[AEOS_DIR, ['column-specs/extra.yaml']]]);
+    });
+
+    it('reports nothing when the worker edits src/ only', async () => {
+      touching('worker', 'project', 'src/index.ts');
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(restored()).toEqual([]);
+    });
+
+    it('does not report a protected file that was already modified before the run', async () => {
+      dirty.aeos.push(RUBRIC);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(restored()).toEqual([]);
+    });
+
+    it('treats a configured glob as protected, in the project repository', async () => {
+      protectedPaths = ['src/cli/generated/**'];
+      touching('worker', 'project', 'src/cli/generated/commands.ts');
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect((result as { error: string }).error).toContain('src/cli/generated/commands.ts');
+      expect(restored()).toEqual([[PROJECT_PATH, ['src/cli/generated/commands.ts']]]);
+    });
+
+    it('fails, rather than escalates, when the reviewer touches a protected path', async () => {
+      touching('reviewer', 'aeos', RUBRIC);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect((result as { error: string }).error).toContain(`.aeos/${RUBRIC}`);
+      expect(restored()).toEqual([[AEOS_DIR, [RUBRIC]]]);
+      const reviewer = writtenRuns().find((run) => run.record.role === 'reviewer')!;
+      expect(reviewer.record.error).toContain(`.aeos/${RUBRIC}`);
+    });
+
+    it('fails the run when the preflight invocation touches a protected path', async () => {
+      (preflight.run as ReturnType<typeof vi.fn>).mockImplementation(async (...args: unknown[]) => {
+        dirty.aeos.push('agents/worker.yaml');
+        // Only the wrapped executor's own window counts, so touch inside it.
+        (executor.run as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+          dirty.aeos.push(RUBRIC);
+          return { ok: true, artifactPath: '/tmp/p', content: 'NO_BLOCKERS' };
+        });
+        await (args[6] as Executor).run({
+          prompt: 'preflight prompt',
+          outputPath: '/tmp/preflight-AEOS-1.md',
+          ticketId: TICKET_ID,
+          column: 'IMPLEMENTATION',
+        });
+        return { blocked: false };
+      });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect((result as { error: string }).error).toContain(`.aeos/${RUBRIC}`);
+      // agents/worker.yaml changed outside the executor's window: not the run's doing.
+      expect(restored()).toEqual([[AEOS_DIR, [RUBRIC]]]);
+      expect(writtenRuns()[0]!.record).toMatchObject({ role: 'preflight', exit: 'failed' });
+    });
+
+    it('restores a protected path even when the executor throws', async () => {
+      (executor.run as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        dirty.aeos.push(RUBRIC);
+        throw new Error('boom');
+      });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect(restored()).toEqual([[AEOS_DIR, [RUBRIC]]]);
+    });
+
+    it("does not count the engine's own run records, written after the executor returns", async () => {
+      (runRecordStore.write as ReturnType<typeof vi.fn>).mockImplementation(
+        (_projectPath: string, record: RunRecord) => {
+          dirty.aeos.push(`tickets/${TICKET_ID}/runs/${record.run_id}.json`);
+          return [`/runs/${record.run_id}.json`];
+        },
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(restored()).toEqual([]);
     });
   });
 });

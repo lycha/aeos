@@ -86,6 +86,29 @@ describe('StubExecutor', () => {
     expect(result.ok && result.content).not.toContain('AEOS-VERDICT');
   });
 
+  it('touches the file named by AEOS_STUB_TOUCH on a worker run only', async () => {
+    const touched = path.join(tmpDir, 'deep', 'touched.md');
+    vi.stubEnv('AEOS_STUB_TOUCH', touched);
+    try {
+      const run = (name: string): Promise<unknown> =>
+        new StubExecutor().run({
+          prompt: 'p',
+          outputPath: path.join(tmpDir, name),
+          ticketId: 'AEOS-1',
+          column: 'IMPLEMENTATION',
+        });
+
+      await run('preflight-AEOS-1.md');
+      await run('AEOS-1-impl-review.md');
+      await expect(fs.access(touched)).rejects.toThrow();
+
+      await run('AEOS-1-impl.md');
+      await expect(fs.readFile(touched, 'utf8')).resolves.toContain('stub');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('written file contains stub header and description', async () => {
     const invocation = makeInvocation();
     await executor.run(invocation);
