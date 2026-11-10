@@ -23,19 +23,14 @@ function program(move: (command: Command) => void = () => {}): Command {
 const verify = (cli: Command, env = ['AEOS_HOME']) => verifyContract(contract, cli, env);
 
 describe('verifyContract', () => {
-  it('finds the approved contract and the built CLI in agreement, but for one known mismatch', () => {
+  it('finds the approved contract and the built CLI in agreement', () => {
     const report = verifyContract(
       loadContract(),
       buildProgram(),
       envVariablesRead(path.resolve(import.meta.dirname, '../..')),
     );
 
-    // One known mismatch, raised with the owner and not settled here: the stub's
-    // test hook (I1-M2-002) reads a variable the approved contract does not
-    // declare. Either the contract declares it or the hook leaves shipped code.
-    expect(report.mismatches).toEqual([
-      'environment: AEOS_STUB_TOUCH is read in src/ and not declared in the contract',
-    ]);
+    expect(report.mismatches).toEqual([]);
     // What Iteration 1 has not built yet is pending, not wrong.
     expect(report.pending).toContain('dashboard: command (I1-M5-001)');
     expect(report.pending).toContain('ticket run --json: flag (I1-M4-004c)');

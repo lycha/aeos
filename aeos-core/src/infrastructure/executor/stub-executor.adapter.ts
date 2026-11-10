@@ -115,16 +115,6 @@ export class StubExecutor implements Executor {
       }
     }
 
-    // Test hook, off unless set: a worker run also edits the named file, as an
-    // agent straying outside its task would. Relative paths resolve against
-    // the run's working directory.
-    const touch = process.env.AEOS_STUB_TOUCH;
-    if (touch && !isReviewInvocation(invocation.outputPath)) {
-      const target = path.resolve(invocation.workingDirectory ?? process.cwd(), touch);
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.appendFile(target, '\nedited by the stub\n', 'utf8');
-    }
-
     const content = lines.join('\n');
 
     invocation.onChunk?.('stdout', content);

@@ -24,6 +24,17 @@ const pythonUserSite = spawnSync('python3', ['-m', 'site', '--user-site'], {
   encoding: 'utf-8',
 }).stdout?.trim();
 
+let workerTouch: string | null = null;
+
+/**
+ * From now until the project is cleaned up, every stub worker run also edits
+ * this file, as an agent straying outside its task would. A relative path
+ * resolves against the run's working directory.
+ */
+export function stubWorkerTouches(file: string): void {
+  workerTouch = file;
+}
+
 export interface TempProject {
   /** A git repository with one commit; `process.cwd()` reports this path. */
   readonly projectPath: string;
@@ -84,7 +95,7 @@ export function createTempProject(): TempProject {
   }
 
   const stubRun = StubExecutor.prototype.run;
-  vi.spyOn(StubExecutor.prototype, 'run').mockImplementation(function (
+  vi.spyOn(StubExecutor.prototype, 'run').mockImplementation(async function (
     this: StubExecutor,
     invocation,
   ) {
@@ -100,7 +111,16 @@ export function createTempProject(): TempProject {
         'utf-8',
       );
     }
-    return stubRun.call(this, invocation);
+    const result = await stubRun.call(this, invocation);
+    // The stub's own output says which role it played: preflight answers
+    // NO_BLOCKERS and a review carries a verdict; anything else was a worker.
+    const content = result.ok ? (result.content ?? '') : '';
+    if (workerTouch && content !== 'NO_BLOCKERS' && !content.includes('AEOS-VERDICT')) {
+      const target = path.resolve(invocation.workingDirectory ?? process.cwd(), workerTouch);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.appendFileSync(target, '\nedited by the stub\n', 'utf-8');
+    }
+    return result;
   });
 
   fs.writeFileSync(path.join(projectPath, 'README.md'), '# e2e\n', 'utf-8');
@@ -118,6 +138,7 @@ export function createTempProject(): TempProject {
     projectPath,
     aeosHome,
     cleanup() {
+      workerTouch = null;
       resetDb();
       vi.unstubAllEnvs();
       vi.restoreAllMocks();

@@ -101,7 +101,7 @@ On a column whose spec has `runChecks: true`, the `checks` list of `.aeos/projec
 
 ### Protected paths
 
-`TicketRunUseCase` snapshots `gitGateway.changedFiles` of both repositories (the project and `.aeos/`) immediately before each executor invocation and again immediately after (`changedPaths` / `restoreProtected`); the worker's snapshot is taken after the `[BASELINE]` commit. New entries matching `protectedGlobs` (`domain/services/path-guard.ts`: built-in defaults plus `protectedPaths` from `project.json`, which can only add) are restored with `restoreFiles` and the attempt returns `failed` with the files named, also in the run record's `error`. Keep the window tight around the executor call: the engine writes under `.aeos/tickets/` itself straight afterwards. `AEOS_STUB_TOUCH=<path>` makes a stub worker run edit that file, for tests.
+`TicketRunUseCase` snapshots `gitGateway.changedFiles` of both repositories (the project and `.aeos/`) immediately before each executor invocation and again immediately after (`changedPaths` / `restoreProtected`); the worker's snapshot is taken after the `[BASELINE]` commit. New entries matching `protectedGlobs` (`domain/services/path-guard.ts`: built-in defaults plus `protectedPaths` from `project.json`, which can only add) are restored with `restoreFiles` and the attempt returns `failed` with the files named, also in the run record's `error`. Keep the window tight around the executor call: the engine writes under `.aeos/tickets/` itself straight afterwards. The end-to-end harness's `stubWorkerTouches(<path>)` makes every stub worker run edit that file; shipped code has no such hook.
 
 ### Branches, commits and pull requests
 
@@ -129,7 +129,7 @@ On a spec-backed ticket `TicketAnswerUseCase` hands the answered questions (`Dec
 - `load-contract.ts`: `parseContract` resolves every `{ $ref: "#/components/…" }` over the raw YAML first (a reference that points nowhere, has sibling keys or loops throws naming it), validates, then appends `globals.parameters` and merges `globals.responses` into every command. `loadContract()` reads the approved file.
 - `lint-contract.ts`: `lintContract`, the hand-edit checks of the task (declared resources and exit codes, a `"0"` response with data, `"4"` when resources are required, a task on everything proposed, unique `operationId`s, argument positions, option/flag shape, the parameter-schema keyword subset).
 - `verify-contract.ts`: `verifyContract(contract, program, envRead)` walks Commander's leaf commands and returns `{ mismatches, pending, landed }`. An item with `status: proposed` that is absent is `pending`; present, it is `landed` and must match. Text may be the current or the `pending` wording (then `landed`), never a third. `envVariablesRead(srcDir)` greps `process.env.AEOS_*` in non-test code (`*.test.*`, `*.smoke-test.*`, `*.fixture.*` and `e2e/` are test code). `requires`, `responses`, `prompt` and schema constraints are not compared yet (I1-M4-004b/c).
-- `main.ts` is `npm run verify:contract` (via `tsx`); `verify-contract.test.ts` runs the same comparison in `npm test` and pins the known mismatches exactly, so a new one fails the suite.
+- `main.ts` is `npm run verify:contract` (via `tsx`); `verify-contract.test.ts` runs the same comparison in `npm test` and asserts there is no mismatch.
 
 ### Column roles
 

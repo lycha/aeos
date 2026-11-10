@@ -21,6 +21,7 @@ import {
   driveColumn,
   pythonReady,
   runCli,
+  stubWorkerTouches,
   ticketState,
   type TempProject,
 } from './harness.js';
@@ -1014,7 +1015,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     const rubricFile = path.join(project.projectPath, rubric);
     const original = fs.readFileSync(rubricFile, 'utf-8');
 
-    vi.stubEnv('AEOS_STUB_TOUCH', rubric);
+    stubWorkerTouches(rubric);
     const epicRun = await runCli('ticket', 'run', epic);
 
     expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'FAILED' });
@@ -1029,7 +1030,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     await runCli('ticket', 'approve', task);
     const generated = 'src/cli/generated/commands.ts';
 
-    vi.stubEnv('AEOS_STUB_TOUCH', generated);
+    stubWorkerTouches(generated);
     const taskRun = await runCli('ticket', 'run', task);
 
     expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'FAILED' });
