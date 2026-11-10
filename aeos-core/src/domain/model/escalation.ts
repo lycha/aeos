@@ -25,6 +25,11 @@ export const EscalationReason = {
    * once the orchestrator owns budget accounting.
    */
   BUDGET_EXCEEDED: 'BUDGET_EXCEEDED',
+  /**
+   * A check that runs before the worker failed (criterion tracing). No agent
+   * ran and no attempt was used: what is missing is a person's decision.
+   */
+  PRE_WORKER_CHECK_FAILED: 'PRE_WORKER_CHECK_FAILED',
   /** An epic from before spec pins: it has no spec to be reviewed against. */
   SPEC_REQUIRED: 'SPEC_REQUIRED',
 } as const;

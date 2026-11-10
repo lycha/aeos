@@ -14,6 +14,7 @@ import type {
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import { buildInitialTicketDocument } from './services/ticket-document.js';
 import { pinSpec } from './services/spec-pin.js';
+import { CRITERION_ID } from '../domain/services/criteria-trace.js';
 export class TicketCreateUseCase implements TicketCreatePort {
   constructor(
     private readonly ticketRepo: TicketRepository,
@@ -36,6 +37,17 @@ export class TicketCreateUseCase implements TicketCreatePort {
         'An epic needs a spec: pass --spec <feature>. A person writes the spec; AEOS reviews it and builds from it. ' +
           'The skills that produce one, in order: prototype-harvest (what exists), gap-interrogation-solo or ' +
           'gap-interrogation-capture (the decisions), spec-writer (spec.md under .aeos/features/<feature>/).',
+      );
+    }
+    if (input.implements?.length && !parentId) {
+      throw new Error(
+        '--implements names the criteria a task claims; it needs --parent. An epic is backed by its whole spec.',
+      );
+    }
+    const invalidClaim = input.implements?.find((id) => !CRITERION_ID.test(id));
+    if (invalidClaim !== undefined) {
+      throw new Error(
+        `"${invalidClaim}" is not a criterion id: use the ids of spec.md, e.g. AC-12 or AC-12a.`,
       );
     }
     const specPin =
@@ -113,6 +125,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
         parentId: parentId ?? null,
         taskKey: resolvedTaskKey,
         specPin,
+        implements: input.implements?.length ? input.implements : null,
         column: 'BACKLOG' as const,
         subState: null,
         createdAt: now,

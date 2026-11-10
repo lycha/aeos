@@ -139,6 +139,19 @@ describe('database', () => {
       expect(version).toBe(_testing.MIGRATIONS.length);
     });
 
+    it('adds the nullable implements column (v11), and can run twice', () => {
+      const db = getDb();
+      _testing.MIGRATIONS.find((migration) => migration.version === 11)!.apply(db);
+
+      const column = (
+        db.prepare('PRAGMA table_info(tickets)').all() as Array<{
+          name: string;
+          notnull: number;
+        }>
+      ).find((info) => info.name === 'implements');
+      expect(column).toMatchObject({ notnull: 0 });
+    });
+
     it('should record each migration with description and timestamp', () => {
       const db = getDb();
       const rows = db

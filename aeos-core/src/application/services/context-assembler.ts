@@ -7,6 +7,7 @@ import type { ArtefactTree } from '../../domain/ports/driven/artefact-tree.port.
 import type { AssembledContext, PriorArtifact } from '../../domain/model/assembled-context.js';
 import type { SpecPin } from '../../domain/model/spec-pin.js';
 import { Column } from '../../domain/model/column.js';
+import { scenariosFor } from '../../domain/services/criteria-trace.js';
 
 /** Maximum characters before a diff is truncated. */
 export const MAX_DIFF_CHARS = 50_000;
@@ -23,6 +24,12 @@ function parentEpicId(ticketContent: string): string | null {
   // ticket-document.ts). Absent for an epic.
   const match = ticketContent.match(/^-\s*Parent:\s*(\S+)\s*$/m);
   return match ? match[1] : null;
+}
+
+/** The criteria a task claims: "- Implements: AC-1, AC-2" of the metadata block. */
+function claimedCriteria(ticketContent: string): string[] {
+  const match = ticketContent.match(/^-\s*Implements:\s*(.+)$/m);
+  return match ? match[1]!.split(',').map((id) => id.trim()) : [];
 }
 
 /**
@@ -79,6 +86,8 @@ export class ContextAssembler {
           filename !== ticketFilename &&
           filename !== decisionsFilename &&
           filename !== gatesFilename &&
+          // The markdown report says the same, for a reader.
+          filename !== `${ticketId}-criteria-trace.json` &&
           !(hasDecisions && filename === questionsFilename),
       )
       .map((filename) => ({
@@ -92,7 +101,9 @@ export class ContextAssembler {
     const epicContext = this.gatherEpicContext(ticketContent, projectRoot);
 
     // 3b. The pinned spec, for a spec-backed ticket.
-    const pinned = specPin ? this.readPinnedSpec(projectRoot, specPin) : null;
+    const pinned = specPin
+      ? this.readPinnedSpec(projectRoot, specPin, claimedCriteria(ticketContent))
+      : null;
 
     // 4. Read constraints: the project's first, then those of the spec's context.
     const constraints =
@@ -136,6 +147,7 @@ export class ContextAssembler {
   private readPinnedSpec(
     projectRoot: string,
     pin: SpecPin,
+    claims: string[],
   ): { spec: PriorArtifact[]; constraints: string | null } {
     const treeRoot = this.artefactTree.root(projectRoot);
     const read = (file: string): string => {
@@ -153,11 +165,14 @@ export class ContextAssembler {
     });
 
     const spec = [inFeature('spec.md'), inFeature('decisions.yaml')];
-    // shortcut: every scenario goes to every agent; give a task worker only the
-    // scenarios of the criteria it claims once I1-M4-001 adds claims.
+    // A task that claims criteria is given the scenarios tagged with them and
+    // no others; anything else gets every scenario.
     const scenariosDir = `${pin.path}/features`;
     for (const file of this.gitGateway.listFiles(treeRoot, pin.commit, scenariosDir)) {
-      if (file.endsWith('.feature')) spec.push(inFeature(file.slice(pin.path.length + 1)));
+      if (!file.endsWith('.feature')) continue;
+      const feature = inFeature(file.slice(pin.path.length + 1));
+      const content = claims.length > 0 ? scenariosFor(feature.content, claims) : feature.content;
+      if (content !== null) spec.push({ ...feature, content });
     }
 
     const context = specContext(spec[0]!.content, spec[1]!.content);

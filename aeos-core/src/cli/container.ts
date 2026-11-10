@@ -48,6 +48,7 @@ import { YamlDecisionsFile } from '../infrastructure/spec/decisions-file.adapter
 import { TicketResolveUseCase } from '../application/ticket-resolve.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
 import { CheckRegistry } from '../application/checks/check-registry.js';
+import { CriteriaCollector } from '../application/services/criteria-collector.js';
 import { ShellChecksRunner } from '../infrastructure/checks/shell-checks-runner.adapter.js';
 import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
 import { TicketSignOffUseCase } from '../application/ticket-sign-off.use-case.js';
@@ -246,6 +247,12 @@ export function createContainer(): Container {
       const rubricLoader = new FsRubricLoader();
       const preflight = new PreflightService(artifactStore, getStateMachine());
       const executorConfigResolver = newExecutorConfigResolver();
+      const criteriaCollector = new CriteriaCollector(
+        getTicketRepo(),
+        gitGateway,
+        artefactTree,
+        projectRepo,
+      );
       return new TicketRunUseCase(
         getTicketRepo(),
         getStateMachine(),
@@ -262,9 +269,10 @@ export function createContainer(): Container {
         executorConfigResolver,
         configStore,
         runRecordStore,
-        new CheckRegistry(projectRepo, new ShellChecksRunner()),
+        new CheckRegistry(projectRepo, new ShellChecksRunner(), criteriaCollector, artifactStore),
         projectRepo,
         gateRecordStore,
+        criteriaCollector,
       );
     },
     get ticketApprove() {

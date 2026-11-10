@@ -75,6 +75,7 @@ import {
 } from '../domain/services/review-loop-policy.js';
 import type { Check, CheckResult } from '../domain/model/check.js';
 import type { CheckRegistry } from './checks/check-registry.js';
+import type { CriteriaCollector } from './services/criteria-collector.js';
 import { DEFAULT_GLOBAL_CONFIG } from '../shared/config.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import { TicketRunEventEmitter } from './services/ticket-run-event-emitter.js';
@@ -168,6 +169,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly checkRegistry: CheckRegistry,
     private readonly projectRepo: ProjectRepository,
     private readonly gateRecordStore: GateRecordStore,
+    private readonly criteriaCollector: CriteriaCollector,
   ) {}
 
   async execute(
@@ -315,6 +317,15 @@ export class TicketRunUseCase implements TicketRunPort {
         ),
         specPin,
       };
+
+      // ── Pre-worker checks ────────────────────────────────────────
+      // Before preflight: a failure here is a person's to resolve, so no model
+      // is asked anything and no attempt is used.
+      const preWorkerChecks = this.checkRegistry.preWorkerChecksFor(mirroredTicket, specPin);
+      if (preWorkerChecks.length > 0) {
+        const escalation = await this.runPreWorkerChecks(ctx, preWorkerChecks);
+        if (escalation) return this.finishEscalatedRun(ctx, mirroredTicket, escalation, 0);
+      }
 
       // ── Preflight ────────────────────────────────────────────────
       const preflightOutcome = await this.runPreflight(ctx);
@@ -821,67 +832,14 @@ export class TicketRunUseCase implements TicketRunPort {
   ): Promise<{ passed: true; files: string[] } | { passed: false; check: string; output: string }> {
     const { emitter, ticketId, projectPath } = ctx;
     const checksFilename = `${ticketId}-checks.md`;
-    this.emitStageEvent(emitter, 'stage.started', 'checks', `Running ${checks.length} check(s)`);
-
-    const startedAt = new Date();
-    const results: CheckResult[] = [];
-    for (const check of checks) {
-      const checkStartedAt = Date.now();
-      let result: CheckResult;
-      try {
-        result = await check.run({ projectPath });
-      } catch (err) {
-        result = {
-          name: check.name,
-          passed: false,
-          durationMs: Date.now() - checkStartedAt,
-          timedOut: false,
-          outputTail: err instanceof Error ? err.message : String(err),
-        };
-      }
-      results.push(result);
-      if (!result.passed) break;
-    }
-    const endedAt = new Date();
-    const failed = results.find((result) => !result.passed);
-    const describe = (result: CheckResult): string =>
-      result.passed ? 'passed' : result.timedOut ? 'timed out' : 'failed';
-
-    const runId = this.newRunId(startedAt);
-    const record: RunRecord = {
-      schema_version: 0,
-      run_id: runId,
-      project: ctx.projectId,
-      ticket: ticketId,
-      column: ctx.column,
-      role: 'checks',
-      agent: null,
+    const { results, failed, describe, runId, record, files } = await this.performChecks(
+      ctx,
       attempt,
-      executor: 'shell',
-      model: null,
-      mode: null,
-      brief: null,
-      output: failed ? null : `tickets/${ticketId}/${checksFilename}`,
-      transcript: runRecordPaths(ticketId, runId).transcript,
-      verdict: failed ? 'CHECKS_FAILED' : 'CHECKS_PASSED',
-      started_at: startedAt.toISOString(),
-      ended_at: endedAt.toISOString(),
-      duration_ms: endedAt.getTime() - startedAt.getTime(),
-      exit: !failed ? 'ok' : failed.timedOut ? 'timeout' : 'failed',
-      usage: null,
-      cost_usd: 0,
-      cost_basis: 'none',
-      spec_pin: ctx.specPin,
-      error: failed ? `Check '${failed.name}' ${describe(failed)}` : null,
-    };
-    const files = this.runRecordStore.write(projectPath, record, {
-      transcript: results
-        .map(
-          (result) =>
-            `## ${result.name}: ${describe(result)} (${result.durationMs}ms)\n\n${result.outputTail}\n`,
-        )
-        .join('\n'),
-    });
+      checks,
+      'shell',
+      // A failed stage writes no table.
+      (failed) => (failed ? null : checksFilename),
+    );
 
     if (failed) {
       const message = `Check '${failed.name}' ${describe(failed)}`;
@@ -925,6 +883,131 @@ export class TicketRunUseCase implements TicketRunPort {
     };
   }
 
+  /**
+   * The checks that run before any agent. They pass, or the run escalates: a
+   * worker that has not run has nothing to fix. Either way the files a check
+   * wrote are committed with the stage's run record.
+   */
+  private async runPreWorkerChecks(
+    ctx: RunContext,
+    checks: readonly Check[],
+  ): Promise<Escalation | null> {
+    const { emitter, ticketId } = ctx;
+    const inTicketDir = (filename: string): string =>
+      path.join(ctx.aeosDir, 'tickets', ticketId, filename);
+    const { results, failed, describe, runId, record, files } = await this.performChecks(
+      ctx,
+      1,
+      checks,
+      'in-process',
+      (_failed, last) => last.artifacts?.[0] ?? null,
+    );
+    this.gitGateway.commitFiles(
+      ctx.aeosDir,
+      [...results.flatMap((result) => result.artifacts ?? []).map(inTicketDir), ...files],
+      `[${ticketId}][RUN][${runId}][checks][${record.exit}]`,
+    );
+    if (!failed) {
+      this.emitStageEvent(emitter, 'stage.completed', 'checks', 'Checks passed');
+      return null;
+    }
+    const report = failed.artifacts?.[0];
+    const message = `Check '${failed.name}' ${describe(failed)} before any agent ran. A worker cannot fix this; it needs your decision.${report ? ` Read ${report}.` : ''}`;
+    this.emitStageEvent(emitter, 'stage.failed', 'checks', message);
+    return {
+      reason: EscalationReason.PRE_WORKER_CHECK_FAILED,
+      message,
+      artifactPath: report ? inTicketDir(report) : undefined,
+    };
+  }
+
+  /**
+   * Runs the checks in order, stopping at the first failure, and writes the
+   * stage's run record. `outputOf` names the file in the ticket directory the
+   * record points at.
+   */
+  private async performChecks(
+    ctx: RunContext,
+    attempt: number,
+    checks: readonly Check[],
+    executor: 'shell' | 'in-process',
+    outputOf: (failed: CheckResult | undefined, last: CheckResult) => string | null,
+  ): Promise<{
+    results: CheckResult[];
+    failed: CheckResult | undefined;
+    describe: (result: CheckResult) => string;
+    runId: string;
+    record: RunRecord;
+    files: string[];
+  }> {
+    const { emitter, ticketId, projectPath } = ctx;
+    this.emitStageEvent(emitter, 'stage.started', 'checks', `Running ${checks.length} check(s)`);
+
+    const startedAt = new Date();
+    const results: CheckResult[] = [];
+    for (const check of checks) {
+      const checkStartedAt = Date.now();
+      let result: CheckResult;
+      try {
+        result = await check.run({ projectPath });
+      } catch (err) {
+        result = {
+          name: check.name,
+          passed: false,
+          durationMs: Date.now() - checkStartedAt,
+          timedOut: false,
+          outputTail: err instanceof Error ? err.message : String(err),
+        };
+      }
+      results.push(result);
+      if (!result.passed) break;
+    }
+    const endedAt = new Date();
+    const failed = results.find((result) => !result.passed);
+    const describe = (result: CheckResult): string =>
+      result.passed ? 'passed' : result.timedOut ? 'timed out' : 'failed';
+
+    const outputFile = outputOf(failed, results.at(-1)!);
+    const output = outputFile ? `tickets/${ticketId}/${outputFile}` : null;
+    const runId = this.newRunId(startedAt);
+    const record: RunRecord = {
+      schema_version: 0,
+      run_id: runId,
+      project: ctx.projectId,
+      ticket: ticketId,
+      column: ctx.column,
+      role: 'checks',
+      agent: null,
+      attempt,
+      executor,
+      model: null,
+      mode: null,
+      brief: null,
+      output,
+      transcript: runRecordPaths(ticketId, runId).transcript,
+      verdict: failed ? 'CHECKS_FAILED' : 'CHECKS_PASSED',
+      started_at: startedAt.toISOString(),
+      ended_at: endedAt.toISOString(),
+      duration_ms: endedAt.getTime() - startedAt.getTime(),
+      exit: !failed ? 'ok' : failed.timedOut ? 'timeout' : 'failed',
+      usage: null,
+      cost_usd: 0,
+      cost_basis: 'none',
+      spec_pin: ctx.specPin,
+      error: failed ? `Check '${failed.name}' ${describe(failed)}` : null,
+    };
+    const files = this.runRecordStore.write(projectPath, record, {
+      transcript: results
+        .map(
+          (result) =>
+            `## ${result.name}: ${describe(result)} (${result.durationMs}ms)\n\n${result.outputTail}\n`,
+        )
+        .join('\n'),
+    });
+
+    return { results, failed, describe, runId, record, files };
+  }
+
   private async runReview(
     ctx: RunContext,
     attempt: number,
@@ -956,7 +1039,10 @@ export class TicketRunUseCase implements TicketRunPort {
           )
         : reviewContext;
 
-    const reviewerPrompt = this.buildPromptFn(enrichedContext, ctx.reviewerAgentSpec);
+    const reviewerPrompt = this.buildPromptFn(
+      this.withCriteriaClaims(ctx, enrichedContext),
+      ctx.reviewerAgentSpec,
+    );
     const reviewerExecutor = this.createExecutor(ctx.reviewerAgentSpecResolved);
 
     this.emitStageEvent(emitter, 'stage.started', 'reviewer', 'Running reviewer executor', {
@@ -1435,6 +1521,32 @@ export class TicketRunUseCase implements TicketRunPort {
       attempts: attempt,
       artifactPath: escalation.artifactPath,
     };
+  }
+
+  /**
+   * For the reviewer of a spec-backed epic's task breakdown: which criteria no
+   * task claims, so an unowned criterion is rejected here and not at integration.
+   */
+  private withCriteriaClaims(ctx: RunContext, context: AssembledContext): AssembledContext {
+    if (ctx.column !== Column.TASK_BREAKDOWN || !ctx.specPin) return context;
+    const trace = this.criteriaCollector.collect(
+      ctx.projectPath,
+      { id: ctx.ticketId, projectId: ctx.projectId },
+      ctx.specPin,
+    );
+    const list = (items: string[]): string => (items.length > 0 ? items.join(', ') : 'none');
+    return this.withExtraArtifact(
+      context,
+      'criteria-claims.md',
+      [
+        '# Criteria claims',
+        '',
+        'Every acceptance criterion of the spec must be claimed by a task (`aeos ticket create --implements`). Reject the breakdown while a criterion is unclaimed or a task claims an id the spec does not contain.',
+        '',
+        `- Unclaimed: ${list(trace.unclaimed)}`,
+        `- Unknown claims: ${list(trace.unknownClaims.map((claim) => `${claim.taskId} claims ${claim.id}`))}`,
+      ].join('\n'),
+    );
   }
 
   private resolveColumn(columnString: string): Column | null {

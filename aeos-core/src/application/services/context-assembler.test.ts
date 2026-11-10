@@ -112,6 +112,27 @@ describe('ContextAssembler', () => {
       ]);
     });
 
+    it('gives a task that claims criteria only the scenarios tagged with them', async () => {
+      atPin({
+        ...tree,
+        'features/checkout/features/pay.feature':
+          'Feature: Pay\n\n  @AC-1\n  Scenario: By card\n    Given a card\n\n  @AC-2\n  Scenario: By voucher\n    Given a voucher\n',
+        'features/checkout/features/refund.feature':
+          'Feature: Refund\n\n  @AC-3\n  Scenario: Full refund\n    Given a payment\n',
+      });
+      (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
+        '# Ticket\n- Parent: AEOS-9\n- Implements: AC-1\n',
+      );
+
+      const context = await assembler.assemble('AEOS-1', '/projects/test', 'IMPLEMENTATION', pin);
+
+      const features = context.spec.filter((file) => file.name.endsWith('.feature'));
+      expect(features.map((file) => file.name)).toEqual(['features/pay.feature']);
+      expect(features[0]!.content).toContain('Feature: Pay');
+      expect(features[0]!.content).toContain('Scenario: By card');
+      expect(features[0]!.content).not.toContain('By voucher');
+    });
+
     it('reads spec.md, decisions.yaml, every .feature and the glossary at the pinned commit', async () => {
       atPin(tree);
 

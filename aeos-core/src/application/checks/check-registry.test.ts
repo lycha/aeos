@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Ticket } from '../../domain/model/ticket.js';
+import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
+import { traceCriteria, type CriteriaTrace } from '../../domain/services/criteria-trace.js';
+import type { CriteriaCollector } from '../services/criteria-collector.js';
 import type { Check } from '../../domain/model/check.js';
 import type { ChecksRunner } from '../../domain/ports/driven/checks-runner.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
@@ -8,8 +12,77 @@ function registryWith(checks: unknown, runner: ChecksRunner): CheckRegistry {
   return new CheckRegistry(
     { readExecutorConfig: () => (checks ? { checks } : null) } as unknown as ProjectRepository,
     runner,
+    collector as unknown as CriteriaCollector,
+    artifactStore as unknown as ArtifactStore,
   );
 }
+
+const PIN = { repo: 'EE-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+const epic = { id: 'EE-1', projectId: 'p', kind: 'EPIC', column: 'INTEGRATION_REVIEW' } as Ticket;
+const collector = { collect: vi.fn() };
+const artifactStore = { writeArtifact: vi.fn() };
+const anyRunner: ChecksRunner = { run: vi.fn() };
+const traceOf = (claims: string[]): CriteriaTrace =>
+  traceCriteria({
+    criteria: ['AC-1', 'AC-2'],
+    nonGoals: [],
+    claims: new Map([['EE-2', claims]]),
+    instruments: new Map([
+      ['AC-1', ['a.test.ts']],
+      ['AC-2', ['b.test.ts']],
+    ]),
+  });
+
+describe('CheckRegistry — pre-worker checks', () => {
+  beforeEach(() => {
+    collector.collect.mockReset();
+    artifactStore.writeArtifact.mockReset();
+  });
+
+  it('adds criterion tracing for a spec-backed epic at integration review, whatever is configured', () => {
+    const checks = registryWith(null, anyRunner).preWorkerChecksFor(epic, PIN);
+
+    expect(checks.map((check) => [check.name, check.phase])).toEqual([
+      ['criteria-trace', 'pre-worker'],
+    ]);
+  });
+
+  it('has none for an epic with no spec, another column, or a task', () => {
+    const registry = registryWith(null, anyRunner);
+
+    expect(registry.preWorkerChecksFor(epic, null)).toEqual([]);
+    expect(registry.preWorkerChecksFor({ ...epic, column: 'TECH_SPEC' }, PIN)).toEqual([]);
+    expect(registry.preWorkerChecksFor({ ...epic, kind: 'TASK' }, PIN)).toEqual([]);
+  });
+
+  it('fails in process when a criterion is unclaimed, and writes the report both ways', async () => {
+    collector.collect.mockReturnValue(traceOf(['AC-1']));
+    const [check] = registryWith(null, anyRunner).preWorkerChecksFor(epic, PIN);
+
+    const result = await check!.run({ projectPath: '/project' });
+
+    expect(result).toMatchObject({
+      name: 'criteria-trace',
+      passed: false,
+      artifacts: ['EE-1-criteria-trace.md', 'EE-1-criteria-trace.json'],
+    });
+    expect(result.outputTail).toContain('Unclaimed: AC-2');
+    expect(collector.collect).toHaveBeenCalledWith('/project', epic, PIN);
+    expect(anyRunner.run).not.toHaveBeenCalled();
+    const written = Object.fromEntries(
+      artifactStore.writeArtifact.mock.calls.map((call) => [call[2], call[3]]),
+    ) as Record<string, string>;
+    expect(written['EE-1-criteria-trace.md']).toContain('| AC-2 | — | b.test.ts |');
+    expect(JSON.parse(written['EE-1-criteria-trace.json']!)).toMatchObject({ unclaimed: ['AC-2'] });
+  });
+
+  it('passes when every criterion is claimed and tagged', async () => {
+    collector.collect.mockReturnValue(traceOf(['AC-1', 'AC-2']));
+    const [check] = registryWith(null, anyRunner).preWorkerChecksFor(epic, PIN);
+
+    expect((await check!.run({ projectPath: '/project' })).passed).toBe(true);
+  });
+});
 
 const runnerReturning = (result: Awaited<ReturnType<ChecksRunner['run']>>): ChecksRunner => ({
   run: vi.fn().mockResolvedValue(result),

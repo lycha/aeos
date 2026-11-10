@@ -318,6 +318,20 @@ A column runs them when its spec says `runChecks: true`. They run in the project
 
 Each checks stage leaves a run record with `role: checks`. With no `checks` list, or on a column without `runChecks`, nothing changes. An invalid `checks` list is an error, never silently "no checks".
 
+### Criterion tracing
+
+Every acceptance criterion of a spec (`**AC-12**`, or `**AC-12a**` / `**AC-12b**` where one decision made two) has to be claimed by a task and named by a test or a scenario. A task claims criteria when it is created: `aeos ticket create "<title>" --parent <epic> --implements AC-1,AC-2`. The claim is stored on the ticket, shown in its document, and written as an `Implements: AC-1, AC-2` trailer on the task's commit. A task that claims criteria is briefed with the scenarios tagged with them and no others.
+
+When a spec-backed epic runs `INTEGRATION_REVIEW`, a built-in check traces the pinned spec **before any agent runs**. It needs no model and no configuration. It fails when a criterion is claimed by no task, when a criterion is named by no instrument, or when a task claims an id the spec does not contain. Instruments are `@AC-n` tags above a scenario in the pinned `.feature` files, and `AC-n` in a test title (`it`, `test`, `describe`) or an `@AC-n` comment in the committed test files. Which files count as tests is `criteria.testGlobs` in `.aeos/project.json`:
+
+```json
+{ "criteria": { "testGlobs": ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*"] } }
+```
+
+(that list is the default). The report is committed to the epic's ticket directory as `<epic>-criteria-trace.md` and `.json`, with a run record (`role: checks`, `executor: in-process`). Numbered non-goals are listed in it and never block.
+
+A failure sets the epic `ESCALATED` (`PRE_WORKER_CHECK_FAILED`) with the report as the artifact to read. No worker or reviewer is invoked and no attempt is used: an unclaimed criterion needs a new task or a spec amendment, which is a person's call. Fix it, then `aeos ticket resolve <epic>` and run again. The reviewer of `TASK_BREAKDOWN` is given the unclaimed list too, so a breakdown that leaves a criterion unowned is rejected early. Whether a tagged test passes is not checked here. An epic with no spec is not traced.
+
 ### Protected paths
 
 An agent must not be able to weaken what it is judged against. Around every executor invocation (preflight, worker and reviewer, artifact and agentic) AEOS compares the changed files of the project repository and of `.aeos/` (its own repository) before and after. If the run changed a protected path, the path is restored (a tracked file is checked out, a new file is deleted), the run record carries the violation in `error`, and the attempt ends `FAILED`, not `ESCALATED`: the agent broke a rule.
@@ -377,7 +391,7 @@ Notes:
 | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | `aeos install`                                               | One-time global setup (`~/.aeos/`, global gitignore)                       |
 | `aeos project init [--name] [--key]`                         | Initialise `.aeos/` in the current directory                               |
-| `aeos ticket create <title> [--parent <epicId>] [--spec <feature>]` | Create a ticket in BACKLOG — an epic with `--spec` (required for an epic), a task with `--parent` |
+| `aeos ticket create <title> [--parent <epicId>] [--spec <feature>] [--implements <ids>]` | Create a ticket in BACKLOG — an epic with `--spec` (required for an epic), a task with `--parent`, claiming criteria with `--implements` |
 | `aeos ticket list [--column]`                                | List tickets, optionally filtered by column                                |
 | `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, recorded executions, and run ids |
 | `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |

@@ -18,6 +18,8 @@ export interface ProjectExecutorConfig extends Project {
   readonly pullRequests?: { readonly enabled?: boolean };
   /** Column labels by identifier, for `BACKLOG` and `DONE`, which have no column spec. */
   readonly labels?: Readonly<Record<string, string>>;
+  /** Criterion tracing: the files scanned for `AC-n` tags. Default `DEFAULT_TEST_GLOBS`. */
+  readonly criteria?: { readonly testGlobs?: readonly string[] };
   /** Root of the artefact tree, relative to the project root. Default `.aeos`. */
   readonly artefactTree?: string;
   readonly executor?: {

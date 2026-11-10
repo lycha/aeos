@@ -108,7 +108,12 @@ export class TicketApproveUseCase implements TicketApprovePort {
       const specPin = resolveSpecPin(this.ticketRepo, ticket);
       this.gitGateway.commitAll(
         projectPath,
-        buildTaskCommitMessage(ticket, specPin ? [['Spec', formatSpecPin(specPin)]] : []),
+        buildTaskCommitMessage(ticket, [
+          ...(specPin ? ([['Spec', formatSpecPin(specPin)]] as const) : []),
+          ...(ticket.implements?.length
+            ? ([['Implements', ticket.implements.join(', ')]] as const)
+            : []),
+        ]),
       );
     }
 

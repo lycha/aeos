@@ -38,6 +38,10 @@ export function registerTicketCreateCommand(
       '--spec <feature>',
       'Back this epic with the spec at .aeos/features/<feature>. Refused unless the decisions lint is clean',
     )
+    .option(
+      '--implements <ids>',
+      'Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2)',
+    )
     .action(
       (
         title: string,
@@ -47,6 +51,7 @@ export function registerTicketCreateCommand(
           body?: string;
           bodyFile?: string;
           spec?: string;
+          implements?: string;
         },
       ) => {
         try {
@@ -90,6 +95,10 @@ export function registerTicketCreateCommand(
             taskKey: options.key,
             body,
             spec: options.spec,
+            implements: options.implements
+              ?.split(',')
+              .map((id) => id.trim())
+              .filter(Boolean),
           });
 
           const lineage = result.parentId ? ` (task of ${result.parentId})` : '';

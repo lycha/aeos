@@ -43,7 +43,7 @@ cat > /tmp/<EPIC_ID>-T-001.md <<'BODY'
 **Acceptance criteria**
 - [ ] ...
 BODY
-aeos ticket create "Add password hashing" --parent <EPIC_ID> --key T-001 --body-file /tmp/<EPIC_ID>-T-001.md
+aeos ticket create "Add password hashing" --parent <EPIC_ID> --key T-001 --implements AC-1,AC-2 --body-file /tmp/<EPIC_ID>-T-001.md
 ```
 
 Small bodies may be passed inline with `--body "<markdown>"`, but prefer
@@ -65,6 +65,12 @@ Rules:
   title means a retry still matches, so re-running after a rejected review never
   duplicates tasks. Always create the full set with stable keys; do not try to
   detect what already exists.
+- **Claim criteria with `--implements` on every task of a spec-backed epic**
+  (your context has a Specification section): the comma-separated `AC-n` ids of
+  `spec.md` the task implements, e.g. `--implements AC-1,AC-12a`. Every
+  criterion must be claimed by at least one task, and only ids the spec contains
+  may be claimed. An unclaimed criterion is rejected at review and escalates the
+  epic at integration review before any agent runs.
 - **Do not create tasks under a task.** Nesting is one level deep; `--parent`
   must always be an epic.
 - Keep titles short and imperative — they become ticket titles.

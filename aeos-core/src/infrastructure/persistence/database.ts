@@ -220,6 +220,15 @@ UPDATE cost_records SET "column" = 'SPEC_REVIEW' WHERE "column" = 'PRODUCT_SCOPI
       `);
     },
   },
+  {
+    version: 11,
+    description: 'The acceptance criteria a task claims',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'implements')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN implements TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

@@ -59,4 +59,9 @@ export interface Ticket {
    * none of its own: resolve it through `parentId`.
    */
   specPin?: SpecPin | null;
+  /**
+   * Acceptance criteria of the epic's spec a TASK claims (`--implements`),
+   * e.g. `['AC-1', 'AC-12a']`. Null when it claims none.
+   */
+  implements?: string[] | null;
 }

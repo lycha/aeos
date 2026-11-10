@@ -455,6 +455,20 @@ describe('TicketApproveUseCase — per-task commit', () => {
     );
   });
 
+  it('adds an Implements trailer with the criteria the task claims', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...task('QA'),
+      implements: ['AC-1', 'AC-2'],
+    });
+
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(gitGateway.commitAll).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      '[AEOS-1] Test ticket\n\nTicket: AEOS-1\nEpic: AEOS-9\nImplements: AC-1, AC-2',
+    );
+  });
+
   it("adds a Spec trailer from the parent epic's pin", () => {
     const epic = {
       ...signedOffTicket('TASK_BREAKDOWN'),

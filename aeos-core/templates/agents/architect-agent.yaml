@@ -76,8 +76,15 @@ taskInstruction: |
      **Out of scope**
      ...
      BODY
-     aeos ticket create "First task title" --parent <EPIC_ID> --key T-001 --body-file /tmp/<EPIC_ID>-T-001.md
+     aeos ticket create "First task title" --parent <EPIC_ID> --key T-001 --implements AC-1,AC-2 --body-file /tmp/<EPIC_ID>-T-001.md
      ```
+
+     **`--implements` is required for every task when your context has a
+     Specification section** (the epic is spec-backed): list the acceptance
+     criteria (`AC-n`) from `spec.md` that this task implements, comma-separated.
+     Every criterion of the spec must be claimed by at least one task, and a task
+     may only claim ids the spec contains. A criterion nobody claims is rejected
+     at review and stops the epic at integration.
 
      (Small bodies may instead be passed inline with `--body "<markdown>"`, but
      prefer `--body-file` — it avoids shell-quoting mistakes on multi-line text.)

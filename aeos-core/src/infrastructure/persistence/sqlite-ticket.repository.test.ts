@@ -127,6 +127,15 @@ describe('SqliteTicketRepository — spec pin', () => {
     expect(repo.findByProject('p')[0]?.specPin).toEqual(specPin);
   });
 
+  it('round-trips the criteria a task claims; none is null', () => {
+    repo.save(ticket({ implements: ['AC-1', 'AC-12a'] }));
+    repo.save(ticket({ id: 'AEOS-2' }));
+
+    expect(repo.findById('p', 'AEOS-1')?.implements).toEqual(['AC-1', 'AC-12a']);
+    expect(repo.findChildren('p', 'none')).toEqual([]);
+    expect(repo.findById('p', 'AEOS-2')?.implements).toBeNull();
+  });
+
   it('moves the commit of a pin and leaves the feature alone', () => {
     repo.save(
       ticket({ specPin: { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' } }),

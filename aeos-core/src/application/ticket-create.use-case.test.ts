@@ -405,6 +405,42 @@ describe('TicketCreateUseCase', () => {
       });
     });
 
+    it('stores the criteria the task claims, and writes them into its document', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+
+      useCase.execute({
+        ...defaultInput,
+        title: 'Hash passwords',
+        parentId: 'AEOS-1',
+        implements: ['AC-1', 'AC-12a'],
+      });
+
+      const saved = (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mock.results[0]!
+        .value as Ticket;
+      expect(saved.implements).toEqual(['AC-1', 'AC-12a']);
+      expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.stringContaining('- Implements: AC-1, AC-12a'),
+      );
+    });
+
+    it('refuses a claim that is not a criterion id', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(epic);
+
+      expect(() =>
+        useCase.execute({ ...defaultInput, parentId: 'AEOS-1', implements: ['AC-1', 'ac2'] }),
+      ).toThrow(/"ac2" is not a criterion id/);
+      expect(ticketRepo.createAtomic).not.toHaveBeenCalled();
+    });
+
+    it('refuses --implements on an epic: a task claims criteria, an epic has a spec', () => {
+      expect(() => useCase.execute({ ...epicInput, implements: ['AC-1'] })).toThrow(
+        /--implements.*--parent/,
+      );
+    });
+
     it('rejects a task whose parent is another task (one level of nesting)', () => {
       (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
         ...epic,

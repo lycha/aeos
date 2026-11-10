@@ -113,7 +113,8 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     await runCli('ticket', 'run', epic);
     expect(ticketState(epic).subState).toBe('SIGNED_OFF');
     const tasks = [
-      await createTicket('First task', '--parent', epic, '--key', 'T-001'),
+      // ...and claims the spec's one criterion for the first task.
+      await createTicket('First task', '--parent', epic, '--key', 'T-001', '--implements', 'AC-1'),
       await createTicket('Second task', '--parent', epic, '--key', 'T-002'),
     ];
     // A child task is refused on the default branch. `orchestrator run` would
@@ -196,6 +197,11 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     const aeosDir = path.join(project.projectPath, '.aeos');
     const read = (relative: string): string =>
       fs.readFileSync(path.join(aeosDir, relative), 'utf-8');
+    const aeosGitStatus = (pathspec: string): string =>
+      execFileSync('git', ['status', '--porcelain', '--', pathspec], {
+        cwd: aeosDir,
+        encoding: 'utf-8',
+      });
     const records: RunRecord[] = [];
     for (const id of [epic, ...tasks, standalone]) {
       const runsDir = path.join('tickets', id, 'runs');
@@ -203,11 +209,29 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
         if (file.endsWith('.json')) records.push(JSON.parse(read(path.join(runsDir, file))));
       }
     }
-    expect(records).toHaveLength(vi.mocked(StubExecutor.prototype.run).mock.calls.length);
-    expect(new Set(records.map((record) => record.role))).toEqual(
+    // Criterion tracing ran in process before the epic's integration worker,
+    // passed (AC-1 is claimed, and tagged on a scenario), and left its report.
+    const [trace, ...otherChecks] = records.filter((record) => record.role === 'checks');
+    expect(otherChecks).toEqual([]);
+    expect(trace).toMatchObject({
+      ticket: epic,
+      column: 'INTEGRATION_REVIEW',
+      executor: 'in-process',
+      verdict: 'CHECKS_PASSED',
+      output: `tickets/${epic}/${epic}-criteria-trace.md`,
+    });
+    expect(validateRunRecord(trace), JSON.stringify(validateRunRecord.errors)).toBe(true);
+    expect(read(trace!.output!)).toContain(
+      `| AC-1 | ${tasks[0]} | features/greeting.feature: A visitor with no saved name |`,
+    );
+    expect(read(trace!.output!)).toContain('NON-GOAL-1');
+    expect(aeosGitStatus(`tickets/${epic}`)).not.toContain('criteria-trace');
+    const executorRecords = records.filter((record) => record.role !== 'checks');
+    expect(executorRecords).toHaveLength(vi.mocked(StubExecutor.prototype.run).mock.calls.length);
+    expect(new Set(executorRecords.map((record) => record.role))).toEqual(
       new Set(['preflight', 'worker', 'reviewer']),
     );
-    for (const record of records) {
+    for (const record of executorRecords) {
       expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
       // AEOS_EXECUTOR=stub is what ran, so it is what the record names.
       expect(record).toMatchObject({ executor: 'stub', cost_basis: 'none' });
@@ -228,6 +252,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     )!;
     expect(read(codeReview.brief!.path)).toContain('# Spec Fidelity Rubric');
     expect(read(codeReview.brief!.path)).toContain('## Specification (pinned EE-aeos@');
+    expect(read(codeReview.brief!.path)).toContain('Scenario: A visitor with no saved name');
 
     // Later attempts overwrite an artefact, so check the link from the artefact's side too.
     for (const id of [epic, ...tasks, standalone]) {
@@ -262,6 +287,8 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       messages.map((message) => message.trim()).filter((m) => m.startsWith(`[${id}]`));
     for (const id of [...tasks, standalone]) expect(commitOf(id), id).toHaveLength(1);
     for (const id of tasks) expect(commitOf(id)[0]).toContain(`\n\nTicket: ${id}\nEpic: ${epic}`);
+    // The task's claim is in its commit.
+    expect(commitOf(tasks[0]!)[0]).toContain('\nImplements: AC-1');
     expect(commitOf(standalone)[0]).toMatch(new RegExp(`\\n\\nTicket: ${standalone}$`));
 
     // The engine committed nothing on the default branch: only the test's own two commits.
@@ -560,6 +587,73 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       }
     },
   );
+
+  it('escalates an epic at integration review, before any agent runs, when a criterion is unclaimed', async () => {
+    await runCli('install');
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const epic = await createEpic('An epic');
+    // A task that claims nothing, and one that claims what the spec does not have.
+    await createTicket('First task', '--parent', epic, '--key', 'T-001');
+    const stray = await createTicket(
+      'Second',
+      '--parent',
+      epic,
+      '--key',
+      'T-002',
+      '--implements',
+      'AC-9',
+    );
+    const badId = await runCli(
+      'ticket',
+      'create',
+      'Third',
+      '--parent',
+      epic,
+      '--implements',
+      'ac1',
+    );
+    expect(badId.exitCode).toBe(1);
+    expect(badId.output).toContain('not a criterion id');
+    await runCli(
+      'ticket',
+      'move',
+      epic,
+      'INTEGRATION_REVIEW',
+      '--reason',
+      'Straight to integration.',
+    );
+    await runCli('ticket', 'ready', epic);
+    const callsBefore = vi.mocked(StubExecutor.prototype.run).mock.calls.length;
+
+    const run = await runCli('ticket', 'run', epic);
+
+    expect(ticketState(epic)).toMatchObject({
+      column: 'INTEGRATION_REVIEW',
+      subState: 'ESCALATED',
+    });
+    expect(run.output).toContain('PRE_WORKER_CHECK_FAILED');
+    expect(vi.mocked(StubExecutor.prototype.run).mock.calls.length).toBe(callsBefore);
+    const dir = path.join(aeosDir, 'tickets', epic);
+    const report = fs.readFileSync(path.join(dir, `${epic}-criteria-trace.md`), 'utf-8');
+    expect(report).toContain('- Unclaimed: AC-1');
+    expect(report).toContain(`${stray} claims AC-9`);
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dir, `${epic}-criteria-trace.json`), 'utf-8')),
+    ).toMatchObject({ unclaimed: ['AC-1'], untested: [], nonGoals: ['NON-GOAL-1'] });
+    // The escalation points the person at the report.
+    expect((await runCli('ticket', 'show', epic)).output).toContain(`${epic}-criteria-trace.md`);
+    const records = fs
+      .readdirSync(path.join(dir, 'runs'))
+      .filter((file) => file.endsWith('.json'))
+      .map(
+        (file) => JSON.parse(fs.readFileSync(path.join(dir, 'runs', file), 'utf-8')) as RunRecord,
+      );
+    expect(records).toMatchObject([
+      { role: 'checks', executor: 'in-process', verdict: 'CHECKS_FAILED', attempt: 1 },
+    ]);
+    expect(validateRunRecord(records[0]), JSON.stringify(validateRunRecord.errors)).toBe(true);
+  });
 
   it('sends a late answer back to the spec: block, answer, amend, repin, run', async () => {
     // Preflight of the task's implementation raises one blocking question, once.

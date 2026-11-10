@@ -30,6 +30,8 @@ import type { ProjectRepository } from '../domain/ports/driven/project-repositor
 import type { Check } from '../domain/model/check.js';
 import type { CheckConfig } from '../domain/model/project-executor-config.js';
 import { CheckRegistry } from './checks/check-registry.js';
+import type { CriteriaCollector } from './services/criteria-collector.js';
+import { traceCriteria } from '../domain/services/criteria-trace.js';
 
 // --- Mock factories ---
 
@@ -294,6 +296,7 @@ describe('TicketRunUseCase', () => {
   let checksRunner: { run: ReturnType<typeof vi.fn> };
   let checkRegistry: CheckRegistry;
   let gateRecords: GateRecord[];
+  let criteriaCollector: { collect: ReturnType<typeof vi.fn> };
   let useCase: TicketRunUseCase;
 
   beforeEach(() => {
@@ -324,7 +327,13 @@ describe('TicketRunUseCase', () => {
         .fn()
         .mockResolvedValue({ exitCode: 0, durationMs: 1200, timedOut: false, outputTail: 'fine' }),
     };
-    checkRegistry = new CheckRegistry(projectRepo, checksRunner as ChecksRunner);
+    criteriaCollector = { collect: vi.fn() };
+    checkRegistry = new CheckRegistry(
+      projectRepo,
+      checksRunner as ChecksRunner,
+      criteriaCollector as unknown as CriteriaCollector,
+      artifactStore,
+    );
     buildPromptFn = vi.fn().mockReturnValue('assembled prompt') as unknown as (
       context: AssembledContext,
       agentSpec: AgentSpec,
@@ -357,6 +366,7 @@ describe('TicketRunUseCase', () => {
       checkRegistry,
       projectRepo,
       { append: vi.fn(), list: () => gateRecords },
+      criteriaCollector as unknown as CriteriaCollector,
     );
   }
 
@@ -370,6 +380,144 @@ describe('TicketRunUseCase', () => {
       files: call[2] as { brief: string; transcript: string },
     }));
   }
+
+  describe('criterion tracing before the worker', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    const trace = (claimed: string[], tagged = ['AC-1', 'AC-2', 'AC-3', 'AC-4']) =>
+      traceCriteria({
+        criteria: ['AC-1', 'AC-2', 'AC-3', 'AC-4'],
+        nonGoals: ['NON-GOAL-1'],
+        claims: new Map([['AEOS-2', claimed]]),
+        instruments: new Map(tagged.map((id) => [id, [`src/${id}.test.ts`]])),
+      });
+    const atIntegration = (specPin: typeof PIN | null = PIN): void => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'INTEGRATION_REVIEW', specPin }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ column: 'INTEGRATION_REVIEW', outputArtifact: 'integration.md' }),
+      );
+    };
+    const written = (): Record<string, string> =>
+      Object.fromEntries(
+        (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.calls.map((call) => [
+          call[2],
+          call[3],
+        ]),
+      ) as Record<string, string>;
+
+    it('escalates with the trace report when a criterion is unclaimed; no agent runs, no attempt is used', async () => {
+      atIntegration();
+      criteriaCollector.collect.mockReturnValue(trace(['AC-1', 'AC-2', 'AC-3']));
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({
+        status: 'escalated',
+        reason: 'PRE_WORKER_CHECK_FAILED',
+        attempts: 0,
+        artifactPath: path.join(
+          PROJECT_PATH,
+          '.aeos',
+          'tickets',
+          TICKET_ID,
+          'AEOS-1-criteria-trace.md',
+        ),
+      });
+      expect(written()['AEOS-1-criteria-trace.md']).toContain('Unclaimed: AC-4');
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(preflight.run).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).toHaveBeenCalledExactlyOnceWith(
+        PROJECT_ID,
+        TICKET_ID,
+        'ESCALATED',
+      );
+      // One run record, for the check; none for a worker or a reviewer.
+      expect(writtenRuns().map((run) => run.record)).toMatchObject([
+        {
+          role: 'checks',
+          executor: 'in-process',
+          verdict: 'CHECKS_FAILED',
+          brief: null,
+          output: 'tickets/AEOS-1/AEOS-1-criteria-trace.md',
+          spec_pin: PIN,
+        },
+      ]);
+    });
+
+    it('blocks on a claimed criterion that no test or scenario names', async () => {
+      atIntegration();
+      criteriaCollector.collect.mockReturnValue(
+        trace(['AC-1', 'AC-2', 'AC-3', 'AC-4'], ['AC-1', 'AC-2', 'AC-3']),
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('escalated');
+      expect(written()['AEOS-1-criteria-trace.md']).toContain('Untested: AC-4');
+    });
+
+    it('blocks on a claim of a criterion the spec does not contain', async () => {
+      atIntegration();
+      criteriaCollector.collect.mockReturnValue(trace(['AC-1', 'AC-2', 'AC-3', 'AC-4', 'AC-9']));
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('escalated');
+      expect(written()['AEOS-1-criteria-trace.md']).toContain('AEOS-2 claims AC-9');
+    });
+
+    it('passes, commits the report with its run record, and goes on to the worker', async () => {
+      atIntegration();
+      criteriaCollector.collect.mockReturnValue(trace(['AC-1', 'AC-2', 'AC-3', 'AC-4']));
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(written()['AEOS-1-criteria-trace.md']).toContain('NON-GOAL-1');
+      const dir = path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID);
+      expect(gitGateway.commitFiles).toHaveBeenCalledWith(
+        path.join(PROJECT_PATH, '.aeos'),
+        expect.arrayContaining([
+          path.join(dir, 'AEOS-1-criteria-trace.md'),
+          path.join(dir, 'AEOS-1-criteria-trace.json'),
+        ]),
+        expect.stringMatching(/\[checks\]\[ok\]$/),
+      );
+      expect(writtenRuns()[0]!.record).toMatchObject({ role: 'checks', verdict: 'CHECKS_PASSED' });
+    });
+
+    it('is skipped for an epic with no spec', async () => {
+      atIntegration(null);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(criteriaCollector.collect).not.toHaveBeenCalled();
+      expect(writtenRuns().some((run) => run.record.role === 'checks')).toBe(false);
+    });
+
+    it('tells the task-breakdown reviewer which criteria no task claims', async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'TASK_BREAKDOWN', specPin: PIN }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ column: 'TASK_BREAKDOWN', outputArtifact: 'tasks.md' }),
+      );
+      criteriaCollector.collect.mockReturnValue(trace(['AC-1', 'AC-9']));
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const contexts = (buildPromptFn as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0] as AssembledContext,
+      );
+      const claims = (context: AssembledContext) =>
+        context.priorArtifacts.find((artifact) => artifact.name === 'criteria-claims.md');
+      expect(claims(contexts[0]!)).toBeUndefined();
+      expect(claims(contexts[1]!)?.content).toContain('Unclaimed: AC-2, AC-3, AC-4');
+      expect(claims(contexts[1]!)?.content).toContain('AEOS-2 claims AC-9');
+    });
+  });
 
   describe('drift guard', () => {
     const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };

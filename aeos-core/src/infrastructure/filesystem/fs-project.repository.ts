@@ -15,6 +15,7 @@ import { readTemplates } from './template-source.js';
 import {
   ProjectChecksSchema,
   ProjectProtectedPathsSchema,
+  ProjectCriteriaSchema,
   ProjectPullRequestsSchema,
 } from '../spec-loader/schemas.js';
 import { scaffoldSkill } from './skill-source.js';
@@ -170,6 +171,10 @@ export class FsProjectRepository implements ProjectRepository {
       throw new Error(
         `Invalid "pullRequests" in .aeos/project.json: ${pullRequests.error.message}`,
       );
+    }
+    const criteria = ProjectCriteriaSchema.optional().safeParse(config.criteria);
+    if (!criteria.success) {
+      throw new Error(`Invalid "criteria" in .aeos/project.json: ${criteria.error.message}`);
     }
     if (config.checks === undefined) return config;
     const checks = ProjectChecksSchema.safeParse(config.checks);
