@@ -208,12 +208,18 @@ export async function driveColumn(ticketId: string): Promise<void> {
   }
 }
 
-/** `ticket dod-approve` prompts on stdin, so this calls its use case directly. */
-export function dodApprove(ticketId: string): void {
+/**
+ * `ticket dod-approve` prompts on stdin, so this calls its use case directly:
+ * the report is rebuilt and shown, then the answer is yes. `verified` are the
+ * criteria the person vouches for (`--verified`).
+ */
+export async function dodApprove(ticketId: string, verified: string[] = []): Promise<void> {
   const projectPath = process.cwd();
-  const container = createContainer();
-  const projectId = container.projectRepo.read(projectPath).id;
-  const result = container.ticketDodApprove.execute(projectId, projectPath, ticketId, true);
+  const useCase = createContainer().ticketDodApprove;
+  const projectId = createContainer().projectRepo.read(projectPath).id;
+  const shown = await useCase.review(projectId, projectPath, ticketId, verified);
+  if (!shown.ok) throw new Error(`dod-approve of ${ticketId} cannot be reviewed: ${shown.error}`);
+  const result = useCase.execute(projectId, projectPath, ticketId, true, undefined, shown.review);
   if (result.status !== 'approved') {
     throw new Error(`dod-approve of ${ticketId} did not approve: ${JSON.stringify(result)}`);
   }

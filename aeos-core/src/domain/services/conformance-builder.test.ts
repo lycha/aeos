@@ -6,9 +6,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { TestResult } from '../ports/driven/test-report-reader.port.js';
 import {
+  addInstruments,
   buildConformanceReport,
   conformanceYaml,
   renderConformanceMarkdown,
+  renderConformanceTable,
 } from './conformance-builder.js';
 import { traceCriteria } from './criteria-trace.js';
 
@@ -161,5 +163,48 @@ describe('buildConformanceReport', () => {
     );
     expect(markdown).toContain('| AC-3 | unverified | — | — |');
     expect(markdown).toContain('3 pass, 1 fail, 2 unverified of 6');
+  });
+});
+
+describe('addInstruments', () => {
+  const report = build([test('AC-1 greets', 'pass'), test('AC-2 greets at night', 'fail')]);
+  const agent = (result: 'pass' | 'fail') =>
+    ({ kind: 'agent', name: 'conformance-agent', result, evidence: 'runs/RUN-1.json' }) as const;
+  const human = { kind: 'human', name: 'Kris <kris@example.com>', result: 'pass' } as const;
+
+  it('gives an unverified criterion the verdict of the agent that judged it, with its justification', () => {
+    const judged = addInstruments(report, [
+      { id: 'AC-3', instrument: agent('pass'), notes: 'The diff stores the name.' },
+      { id: 'AC-4', instrument: agent('fail'), notes: 'Nothing reads it back.' },
+    ]);
+
+    expect(criterion(judged, 'AC-3')).toMatchObject({
+      verdict: 'pass',
+      instruments: [agent('pass')],
+      notes: 'The diff stores the name.',
+    });
+    expect(criterion(judged, 'AC-4').verdict).toBe('fail');
+    expect(judged.summary).toEqual({ total: 6, pass: 2, fail: 2, unverified: 2 });
+    expect(validate(judged), JSON.stringify(validate.errors)).toBe(true);
+    // The report it was given is not changed.
+    expect(criterion(report, 'AC-3').verdict).toBe('unverified');
+  });
+
+  it('does not let a person vouch a failed instrument away', () => {
+    const vouched = addInstruments(report, [{ id: 'AC-2', instrument: human }]);
+
+    expect(criterion(vouched, 'AC-2').verdict).toBe('fail');
+    expect(criterion(vouched, 'AC-2').instruments).toContainEqual(human);
+  });
+});
+
+describe('renderConformanceTable', () => {
+  it('is the summary line and the table, as the full report shows them', () => {
+    const report = build([test('AC-1 greets', 'pass')]);
+    const table = renderConformanceTable(report);
+
+    expect(table.split('\n')[0]).toBe('1 pass, 0 fail, 5 unverified of 6.');
+    expect(table).toContain('| AC-1 | pass | test: src/a.test.ts: AC-1 greets (pass) | EE-2 |');
+    expect(renderConformanceMarkdown(report)).toContain(table);
   });
 });

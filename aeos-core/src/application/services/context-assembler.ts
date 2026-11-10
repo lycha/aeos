@@ -117,10 +117,11 @@ export class ContextAssembler {
     //      commit on the epic branch, i.e. the range from the epic's base tag to
     //      HEAD. Task work is committed by then, so a plain `git diff HEAD` would
     //      be empty.
+    //    - DOD_GATE judges the criteria no test answered against that same diff.
     let codeDiff: string | null = null;
     if (column === Column.CODE_REVIEW) {
       codeDiff = this.clampDiff(this.gitGateway.diff(projectRoot));
-    } else if (column === Column.INTEGRATION_REVIEW) {
+    } else if (column === Column.INTEGRATION_REVIEW || column === Column.DOD_GATE) {
       const baseTag = `aeos-base/${ticketId}`;
       const raw = this.gitGateway.refExists(projectRoot, baseTag)
         ? this.gitGateway.diffRange(projectRoot, baseTag, 'HEAD')

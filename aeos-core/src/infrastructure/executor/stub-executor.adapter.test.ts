@@ -5,6 +5,7 @@ import * as os from 'node:os';
 
 import { Column } from '../../domain/model/column.js';
 import type { ExecutorInvocation } from '../../domain/model/executor-invocation.js';
+import { parseConformanceVerdicts } from '../../domain/services/conformance-verdict-parser.js';
 import { StubExecutor } from './stub-executor.adapter.js';
 
 describe('StubExecutor', () => {
@@ -196,5 +197,31 @@ describe('StubExecutor', () => {
 
   it('interrupt() resolves without error', async () => {
     await expect(executor.interrupt()).resolves.toBeUndefined();
+  });
+
+  it('judges every criterion it is asked about, as the final gate expects', async () => {
+    const invocation = makeInvocation({
+      column: Column.DOD_GATE,
+      outputPath: path.join(tmpDir, 'EE-1-dod-verification.md'),
+      prompt: 'The report.\n\nJudge exactly these criteria: AC-1, AC-12a\n',
+    });
+
+    const result = await executor.run(invocation);
+
+    expect(
+      result.ok && parseConformanceVerdicts(result.content ?? '', ['AC-1', 'AC-12a']),
+    ).toMatchObject({
+      ok: true,
+      verdicts: [
+        { id: 'AC-1', result: 'pass' },
+        { id: 'AC-12a', result: 'pass' },
+      ],
+    });
+    // The review of it carries a verdict trailer and no judgement of its own.
+    const review = await executor.run({
+      ...invocation,
+      outputPath: path.join(tmpDir, 'EE-1-dod-verification-review.md'),
+    });
+    expect(review.ok && review.content).not.toContain('AEOS-CONFORMANCE');
   });
 });

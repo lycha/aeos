@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildPullRequestBody, buildTaskCommitMessage } from './pull-request-text.js';
+import {
+  buildPullRequestBody,
+  buildTaskCommitMessage,
+  fillConformance,
+} from './pull-request-text.js';
 
 describe('buildTaskCommitMessage', () => {
   it('carries a Ticket trailer for a standalone task', () => {
@@ -80,5 +84,24 @@ describe('buildPullRequestBody', () => {
     expect(body).toContain('Integration review: not found');
     expect(body).toContain('No checks were recorded');
     expect(body).toContain('Total cost: unknown');
+  });
+
+  it('has its conformance placeholder filled, and filled again, without touching the rest', () => {
+    const body = buildPullRequestBody(base);
+
+    const filled = fillConformance(body, '1 pass, 0 fail, 0 unverified of 1.\n\n| AC-1 | pass |');
+    const refilled = fillConformance(filled, '0 pass, 1 fail, 0 unverified of 1.');
+
+    expect(filled).toContain(
+      '<!-- aeos:conformance -->\n1 pass, 0 fail, 0 unverified of 1.\n\n| AC-1 | pass |\n\n## Cost',
+    );
+    expect(filled).not.toContain('not recorded yet._\n\n## Cost');
+    expect(refilled).toContain(
+      '<!-- aeos:conformance -->\n0 pass, 1 fail, 0 unverified of 1.\n\n## Cost',
+    );
+    expect(refilled).not.toContain('AC-1');
+    expect(filled.split('<!-- aeos:conformance -->')[0]).toBe(
+      body.split('<!-- aeos:conformance -->')[0],
+    );
   });
 });

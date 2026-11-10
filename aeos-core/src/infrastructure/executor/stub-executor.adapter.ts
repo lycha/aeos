@@ -86,6 +86,18 @@ export class StubExecutor implements Executor {
       );
     }
 
+    // The final gate's worker is told which criteria to judge and must answer
+    // for each; a stub that does not would escalate every epic at the gate.
+    const judging = /Judge exactly these criteria: (.+)/.exec(invocation.prompt)?.[1];
+    if (judging && !isReviewInvocation(invocation.outputPath)) {
+      lines.push(
+        '<!-- AEOS-CONFORMANCE',
+        ...judging.split(',').map((id) => `${id.trim()}: pass | Judged by the stub executor.`),
+        '-->',
+        '',
+      );
+    }
+
     // Test hook, off unless set: a worker run also edits the named file, as an
     // agent straying outside its task would. Relative paths resolve against
     // the run's working directory.

@@ -1,9 +1,13 @@
-# TODO: DOD_GATE uses human-approval flow (AEOS-20), not agent execution.
-# workerAgentFile and reviewerAgentFile are placeholders required by ColumnSpecSchema.
 column: DOD_GATE
 label: DoD gate
 phase: DEPLOY
-workerAgentFile: agents/qa-agent.yaml
+# The final human gate: approving out of it (`aeos ticket dod-approve`) is the
+# recorded release decision. When the column runs, the engine first builds the
+# conformance report from the criteria trace and the project's test report.
+# Criteria no instrument answered go to the worker, which judges exactly those
+# against the spec and the epic diff; the reviewer checks its judgements. With
+# nothing left unverified, no agent runs.
+workerAgentFile: agents/conformance-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml
 outputArtifact: dod-verification.md
 minWordCount: 50
@@ -13,6 +17,7 @@ reviewerRubrics:
 maxIterations: 3
 escalation: escalate_to_human
 advanceMode: manual
+# The worker judges what is there; it has no questions to ask a person.
 preflight:
-  enabled: true
+  enabled: false
   questionsArtifact: questions.md

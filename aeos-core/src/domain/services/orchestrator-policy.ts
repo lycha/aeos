@@ -173,7 +173,7 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
     };
   }
 
-  // DoD is human-only by design; TicketRunUseCase refuses it too.
+  // DoD is human-only by design: its column runs when a person asks, never from here.
   if (epic.column === Column.DOD_GATE) {
     return {
       kind: 'halt',

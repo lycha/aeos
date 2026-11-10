@@ -56,16 +56,14 @@ export function buildConformanceReport(input: ConformanceInput): ConformanceRepo
       return [{ kind: 'scenario', name, result: failed ? 'fail' : 'pass', ...evidence }];
     });
     const instruments = [...tests, ...scenarios];
-    const verdict: ConformanceVerdict = instruments.some((i) => i.result === 'fail')
-      ? 'fail'
-      : instruments.length > 0
-        ? 'pass'
-        : 'unverified';
-    return { id: row.id, verdict, claimed_by: row.claimedBy, instruments };
+    return {
+      id: row.id,
+      verdict: verdictOf(instruments),
+      claimed_by: row.claimedBy,
+      instruments,
+    };
   });
 
-  const count = (verdict: ConformanceVerdict): number =>
-    criteria.filter((criterion) => criterion.verdict === verdict).length;
   return {
     schema_version: 0,
     meta: {
@@ -77,22 +75,62 @@ export function buildConformanceReport(input: ConformanceInput): ConformanceRepo
     },
     criteria,
     non_goals: input.trace.nonGoals,
-    summary: {
-      total: criteria.length,
-      pass: count('pass'),
-      fail: count('fail'),
-      unverified: count('unverified'),
-    },
+    summary: summarise(criteria),
   };
 }
 
-export function renderConformanceMarkdown(report: ConformanceReport): string {
-  const { summary, meta } = report;
+/** Any failed instrument fails the criterion; with none at all it is unverified. */
+function verdictOf(instruments: readonly ConformanceInstrument[]): ConformanceVerdict {
+  if (instruments.some((instrument) => instrument.result === 'fail')) return 'fail';
+  return instruments.length > 0 ? 'pass' : 'unverified';
+}
+
+function summarise(criteria: readonly ConformanceCriterion[]): ConformanceReport['summary'] {
+  const count = (verdict: ConformanceVerdict): number =>
+    criteria.filter((criterion) => criterion.verdict === verdict).length;
+  return {
+    total: criteria.length,
+    pass: count('pass'),
+    fail: count('fail'),
+    unverified: count('unverified'),
+  };
+}
+
+/** An agent's or a person's answer for one criterion. */
+export interface InstrumentAddition {
+  readonly id: string;
+  readonly instrument: ConformanceInstrument;
+  /** The justification given, kept as the criterion's notes. */
+  readonly notes?: string;
+}
+
+/**
+ * The report with more instruments on its criteria, and verdicts and summary
+ * recomputed by the same rule: a failed instrument is never outvoted.
+ */
+export function addInstruments(
+  report: ConformanceReport,
+  additions: readonly InstrumentAddition[],
+): ConformanceReport {
+  const criteria = report.criteria.map((criterion): ConformanceCriterion => {
+    const added = additions.filter((addition) => addition.id === criterion.id);
+    if (added.length === 0) return criterion;
+    const instruments = [...criterion.instruments, ...added.map((a) => a.instrument)];
+    const notes = [criterion.notes, ...added.map((a) => a.notes)].filter(Boolean).join(' ');
+    return {
+      ...criterion,
+      verdict: verdictOf(instruments),
+      instruments,
+      ...(notes ? { notes } : {}),
+    };
+  });
+  return { ...report, criteria, summary: summarise(criteria) };
+}
+
+/** The summary line and the table: what the gate, the report and the pull request show. */
+export function renderConformanceTable(report: ConformanceReport): string {
+  const { summary } = report;
   return [
-    `# Conformance report: ${meta.feature}`,
-    '',
-    `Epic ${meta.epic}. Spec ${meta.spec.repo}@${meta.spec.commit}. Code ${meta.code.repo}@${meta.code.commit}.`,
-    '',
     `${summary.pass} pass, ${summary.fail} fail, ${summary.unverified} unverified of ${summary.total}.`,
     '',
     '| Criterion | Verdict | Instruments | Claimed by |',
@@ -103,6 +141,17 @@ export function renderConformanceMarkdown(report: ConformanceReport): string {
         .join('<br>');
       return `| ${criterion.id} | ${criterion.verdict} | ${instruments || '—'} | ${criterion.claimed_by?.join(', ') || '—'} |`;
     }),
+  ].join('\n');
+}
+
+export function renderConformanceMarkdown(report: ConformanceReport): string {
+  const { meta } = report;
+  return [
+    `# Conformance report: ${meta.feature}`,
+    '',
+    `Epic ${meta.epic}. Spec ${meta.spec.repo}@${meta.spec.commit}. Code ${meta.code.repo}@${meta.code.commit}.`,
+    '',
+    renderConformanceTable(report),
     '',
     `Non-goals (not built, by decision): ${report.non_goals?.join(', ') || 'none'}`,
     '',

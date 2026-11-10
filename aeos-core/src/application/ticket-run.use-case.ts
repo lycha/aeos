@@ -76,6 +76,8 @@ import {
 import type { Check, CheckResult } from '../domain/model/check.js';
 import type { CheckRegistry } from './checks/check-registry.js';
 import type { CriteriaCollector } from './services/criteria-collector.js';
+import type { ConformanceService } from './services/conformance.service.js';
+import { parseConformanceVerdicts } from '../domain/services/conformance-verdict-parser.js';
 import { DEFAULT_GLOBAL_CONFIG } from '../shared/config.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import { TicketRunEventEmitter } from './services/ticket-run-event-emitter.js';
@@ -107,6 +109,11 @@ interface RunContext {
   readonly protectedGlobs: readonly string[];
   /** The ticket's spec pin (its own or its epic's), written into every run record. */
   readonly specPin: SpecPin | null;
+  /**
+   * At the final gate: the criteria no instrument answered, which the worker
+   * must judge. Empty means no agent is needed; null off the gate.
+   */
+  readonly judging: readonly string[] | null;
 }
 
 /** One executor invocation, as much as the call site knows about it. */
@@ -170,6 +177,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly projectRepo: ProjectRepository,
     private readonly gateRecordStore: GateRecordStore,
     private readonly criteriaCollector: CriteriaCollector,
+    private readonly conformanceService: ConformanceService,
   ) {}
 
   async execute(
@@ -268,6 +276,22 @@ export class TicketRunUseCase implements TicketRunPort {
 
       const aeosDir = path.join(projectPath, '.aeos');
 
+      // ── Final gate: the conformance report ───────────────────────
+      // Built before the context is assembled, so the worker and the reviewer
+      // are both briefed with it.
+      let judging: string[] | null = null;
+      if (column === Column.DOD_GATE) {
+        try {
+          judging = await this.writeConformance(projectPath, ticketId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          emitter.emit({ type: 'ticket-run.failed', phase: 'complete', payload: { message } });
+          return { status: 'failed', ticketId, error: message };
+        }
+      }
+      // Every criterion already has its answer: there is nothing to ask an agent.
+      const noAgent = judging?.length === 0;
+
       this.emitStageEvent(emitter, 'stage.started', 'context', 'Assembling ticket context');
       let baseContext: AssembledContext;
       try {
@@ -316,6 +340,7 @@ export class TicketRunUseCase implements TicketRunPort {
           this.projectRepo.readExecutorConfig(projectPath)?.protectedPaths,
         ),
         specPin,
+        judging,
       };
 
       // ── Pre-worker checks ────────────────────────────────────────
@@ -328,7 +353,9 @@ export class TicketRunUseCase implements TicketRunPort {
       }
 
       // ── Preflight ────────────────────────────────────────────────
-      const preflightOutcome = await this.runPreflight(ctx);
+      const preflightOutcome = noAgent
+        ? ({ kind: 'clear' } as const)
+        : await this.runPreflight(ctx);
       if (preflightOutcome.kind === 'failed') {
         emitter.emit({
           type: 'ticket-run.failed',
@@ -391,6 +418,7 @@ export class TicketRunUseCase implements TicketRunPort {
       let attempt = 1;
 
       for (;;) {
+        if (noAgent) break;
         emitter.emit({
           type: 'run.attempt.started',
           phase: 'worker',
@@ -817,8 +845,57 @@ export class TicketRunUseCase implements TicketRunPort {
       },
     });
 
+    // ── Final gate: one verdict for each criterion asked about ───
+    // Never coerced: a judgement that cannot be read is a person's to sort out.
+    if (ctx.judging) {
+      const parsed = parseConformanceVerdicts(content, ctx.judging);
+      if (!parsed.ok) {
+        this.emitStageEvent(emitter, 'stage.failed', 'validation', parsed.reason);
+        return {
+          kind: 'escalated',
+          escalation: {
+            reason: EscalationReason.UNPARSEABLE_VERDICT,
+            message: parsed.reason,
+            attempt,
+            artifactPath: ctx.artifactAbsPath,
+          },
+        };
+      }
+    }
+
     // ── Reviewer ─────────────────────────────────────────────────
     return this.runReview(ctx, attempt, revision);
+  }
+
+  /**
+   * Builds the conformance report of a spec-backed epic at its final gate and
+   * commits it to the ticket directory, from where it reaches every context.
+   * Returns the criteria no instrument answered.
+   */
+  private async writeConformance(projectPath: string, ticketId: string): Promise<string[]> {
+    const { report, markdown } = await this.conformanceService.buildConformance(
+      projectPath,
+      ticketId,
+    );
+    const judging = report.criteria
+      .filter((criterion) => criterion.verdict === 'unverified')
+      .map((criterion) => criterion.id);
+    const filename = `${ticketId}-conformance.md`;
+    this.artifactStore.writeArtifact(
+      projectPath,
+      ticketId,
+      filename,
+      judging.length > 0
+        ? `${markdown}\n## To judge\n\nJudge exactly these criteria: ${judging.join(', ')}\n`
+        : markdown,
+    );
+    const aeosDir = path.join(projectPath, '.aeos');
+    this.gitGateway.commitFiles(
+      aeosDir,
+      [path.join(aeosDir, 'tickets', ticketId, filename)],
+      `[${ticketId}][conformance.md][engine][build]`,
+    );
+    return judging;
   }
 
   /**
@@ -1373,7 +1450,8 @@ export class TicketRunUseCase implements TicketRunPort {
         result: { status: 'failed', ticketId, error: `Ticket ${ticketId} is already DONE.` },
       };
     }
-    if (ticket.column === Column.DOD_GATE) {
+    // The gate's column builds a conformance report, which takes a spec.
+    if (ticket.column === Column.DOD_GATE && !ticket.specPin) {
       return {
         ok: false,
         result: { status: 'failed', ticketId, error: 'DoD gate is human-only' },

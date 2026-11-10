@@ -175,4 +175,23 @@ describe('GateRecorder', () => {
     expect(() => recorder.decidedBy('/project')).toThrow(/git identity/);
     expect(store.append).not.toHaveBeenCalled();
   });
+
+  it('hands the store what is to be committed with the record, and keeps a reason on an approval', () => {
+    const { recorder, store } = setUp();
+    const alongside = () => ({ 'conformance.md': '# Report' });
+
+    const record = recorder.record(
+      '/project',
+      epic,
+      {
+        gate: 'definition-of-done',
+        verdict: 'approved',
+        reason: 'AC-2 is accepted as a known gap.',
+      },
+      alongside,
+    );
+
+    expect(record.reason).toBe('AC-2 is accepted as a known gap.');
+    expect(store.append).toHaveBeenCalledWith('/project', expect.anything(), alongside);
+  });
 });

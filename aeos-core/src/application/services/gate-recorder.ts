@@ -18,7 +18,7 @@ export interface GateDecision {
   readonly verdict: GateVerdict;
   readonly fromColumn?: Column;
   readonly toColumn?: Column;
-  /** Required, at least ten characters, unless the verdict is `approved`. */
+  /** Required, at least ten characters, unless the verdict is `approved`; kept when given. */
   readonly reason?: string;
 }
 
@@ -47,9 +47,16 @@ export class GateRecorder {
    * Records a decision about `ticket` as it is now: its current column is the
    * column being decided.
    */
-  record(projectPath: string, ticket: Ticket, decision: GateDecision): GateRecord {
+  record(
+    projectPath: string,
+    ticket: Ticket,
+    decision: GateDecision,
+    /** Files to commit with the record; see `GateRecordStore.append`. */
+    alongside?: (numbered: GateRecord) => Readonly<Record<string, string>>,
+  ): GateRecord {
     const reason = decision.reason?.trim();
-    if (decision.verdict !== 'approved' && (reason?.length ?? 0) < MIN_REASON_LENGTH) {
+    // An approval needs none; one that is given is held to the same length.
+    if ((decision.verdict !== 'approved' || reason) && (reason?.length ?? 0) < MIN_REASON_LENGTH) {
       throw new Error(
         'This decision needs a written reason of at least ten characters (--reason "<why>"). It is recorded with the decision.',
       );
@@ -70,7 +77,7 @@ export class GateRecorder {
     const commit =
       evidencePaths.length > 0 ? this.gitGateway.headCommit(path.join(projectPath, '.aeos')) : '';
 
-    return this.store.append(projectPath, {
+    const record: Omit<GateRecord, 'id'> = {
       gate: decision.gate,
       ticket: ticket.id,
       column: ticket.column,
@@ -86,6 +93,9 @@ export class GateRecorder {
           : null,
       evidence: evidencePaths.map((evidencePath) => ({ repo, commit, path: evidencePath })),
       spec_pin: resolveSpecPin(this.ticketRepo, ticket),
-    });
+    };
+    return alongside
+      ? this.store.append(projectPath, record, alongside)
+      : this.store.append(projectPath, record);
   }
 }

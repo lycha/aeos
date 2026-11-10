@@ -32,6 +32,11 @@ import type { CheckConfig } from '../domain/model/project-executor-config.js';
 import { CheckRegistry } from './checks/check-registry.js';
 import type { CriteriaCollector } from './services/criteria-collector.js';
 import { traceCriteria } from '../domain/services/criteria-trace.js';
+import {
+  buildConformanceReport,
+  renderConformanceMarkdown,
+} from '../domain/services/conformance-builder.js';
+import type { ConformanceService } from './services/conformance.service.js';
 
 // --- Mock factories ---
 
@@ -297,6 +302,7 @@ describe('TicketRunUseCase', () => {
   let checkRegistry: CheckRegistry;
   let gateRecords: GateRecord[];
   let criteriaCollector: { collect: ReturnType<typeof vi.fn> };
+  let conformanceService: { buildConformance: ReturnType<typeof vi.fn> };
   let useCase: TicketRunUseCase;
 
   beforeEach(() => {
@@ -328,6 +334,7 @@ describe('TicketRunUseCase', () => {
         .mockResolvedValue({ exitCode: 0, durationMs: 1200, timedOut: false, outputTail: 'fine' }),
     };
     criteriaCollector = { collect: vi.fn() };
+    conformanceService = { buildConformance: vi.fn() };
     checkRegistry = new CheckRegistry(
       projectRepo,
       checksRunner as ChecksRunner,
@@ -367,6 +374,7 @@ describe('TicketRunUseCase', () => {
       projectRepo,
       { append: vi.fn(), list: () => gateRecords },
       criteriaCollector as unknown as CriteriaCollector,
+      conformanceService as unknown as ConformanceService,
     );
   }
 
@@ -380,6 +388,113 @@ describe('TicketRunUseCase', () => {
       files: call[2] as { brief: string; transcript: string },
     }));
   }
+
+  describe('conformance at the final gate', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    /** A report over AC-1…AC-4 in which exactly `passing` pass by test. */
+    const conformanceWith = (passing: string[]): void => {
+      const report = buildConformanceReport({
+        feature: 'checkout',
+        epic: TICKET_ID,
+        trace: traceCriteria({
+          criteria: ['AC-1', 'AC-2', 'AC-3', 'AC-4'],
+          nonGoals: [],
+          claims: new Map(),
+          instruments: new Map(),
+        }),
+        tests: passing.map((id) => ({ name: `${id} holds`, file: 'a.test.ts', status: 'pass' })),
+        spec: PIN,
+        code: { repo: 'shop', commit: 'deadbee' },
+        generatedAt: '2026-11-10T12:00:00.000Z',
+      });
+      conformanceService.buildConformance.mockResolvedValue({
+        report,
+        markdown: renderConformanceMarkdown(report),
+      });
+    };
+    const conformanceFile = (): string =>
+      (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.calls.find(
+        (call) => call[2] === `${TICKET_ID}-conformance.md`,
+      )?.[3] as string;
+    const workerAnswers = (block: string): void => {
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        artifactPath: '/tmp/artifact',
+        content: `${'A '.repeat(60)}\n\n${block}\n\n${reviewWith('APPROVED')}`,
+      });
+    };
+
+    beforeEach(() => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'DOD_GATE', subState: 'READY', specPin: PIN }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ column: 'DOD_GATE', outputArtifact: 'dod-verification.md' }),
+      );
+    });
+
+    it('invokes no agent when every criterion passes by test, and signs the report off', async () => {
+      conformanceWith(['AC-1', 'AC-2', 'AC-3', 'AC-4']);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(conformanceService.buildConformance).toHaveBeenCalledWith(PROJECT_PATH, TICKET_ID);
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(preflight.run).not.toHaveBeenCalled();
+      for (const id of ['AC-1', 'AC-2', 'AC-3', 'AC-4']) {
+        expect(conformanceFile()).toContain(`| ${id} | pass |`);
+      }
+      expect(conformanceFile()).not.toContain('Judge exactly');
+      expect(stateMachine.setSubState).toHaveBeenLastCalledWith(
+        PROJECT_ID,
+        TICKET_ID,
+        'SIGNED_OFF',
+      );
+    });
+
+    it('asks the agent about exactly the unverified criteria, then the reviewer', async () => {
+      conformanceWith(['AC-1', 'AC-2']);
+      workerAnswers('<!-- AEOS-CONFORMANCE\nAC-3: pass | Stored.\nAC-4: fail | Never read.\n-->');
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      // Written to the ticket directory before the context is assembled, so
+      // the worker and the reviewer are both briefed with it.
+      expect(conformanceFile()).toContain('Judge exactly these criteria: AC-3, AC-4');
+      expect(
+        (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        (contextAssembler.assemble as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+      );
+      // The worker, then the reviewer.
+      expect(executor.run).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ['no verdict block', ''],
+      ['a block that leaves one out', '<!-- AEOS-CONFORMANCE\nAC-3: pass | Stored.\n-->'],
+    ])('escalates on %s, and does not ask the reviewer', async (_name, block) => {
+      conformanceWith(['AC-1', 'AC-2']);
+      workerAnswers(block);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'escalated', reason: 'UNPARSEABLE_VERDICT' });
+      expect(executor.run).toHaveBeenCalledTimes(1);
+      expect(stateMachine.setSubState).toHaveBeenLastCalledWith(PROJECT_ID, TICKET_ID, 'ESCALATED');
+    });
+
+    it('fails the run, with the cause, when the report cannot be built', async () => {
+      conformanceService.buildConformance.mockRejectedValue(new Error('no test report'));
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed', error: 'no test report' });
+      expect(executor.run).not.toHaveBeenCalled();
+    });
+  });
 
   describe('criterion tracing before the worker', () => {
     const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };

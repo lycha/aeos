@@ -82,6 +82,7 @@ function createPullRequestMocks() {
     prGateway: {
       isAvailable: vi.fn().mockReturnValue({ ok: true }),
       create: vi.fn().mockReturnValue({ url: 'https://example.test/pull/7' }),
+      updateBody: vi.fn(),
     } satisfies PullRequestGateway,
     costRepo: {
       record: vi.fn(),

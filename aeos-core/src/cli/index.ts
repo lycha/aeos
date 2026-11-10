@@ -118,13 +118,7 @@ export function buildProgram(): Command {
     container.columnLabels,
   );
   registerTicketReadyCommand(program, () => container.ticketReady, container.projectRepo);
-  registerTicketDodApproveCommand(
-    program,
-    () => container.ticketDodApprove,
-    container.projectRepo,
-    container.rubricLoader,
-    container.artifactStore,
-  );
+  registerTicketDodApproveCommand(program, () => container.ticketDodApprove, container.projectRepo);
   registerOrchestratorCommand(
     program,
     () => container.orchestrator,

@@ -87,6 +87,24 @@ describe('scaffolded project integrity', () => {
     expect(rubric.toString()).toMatch(/^## When reviewing a single task/m);
   });
 
+  it('gives the final gate a worker of its own: no placeholder agents, no TODO', () => {
+    repo.scaffoldDefaults(tmpDir);
+    const inAeos = (file: string): string =>
+      fs.readFileSync(path.join(tmpDir, '.aeos', file), 'utf-8');
+
+    expect(inAeos('column-specs/dod-gate.yaml')).not.toMatch(/TODO|placeholder/i);
+    const spec = new YamlColumnSpecLoader().load(Column.DOD_GATE, tmpDir);
+    expect(spec.workerAgentFile).toBe('agents/conformance-agent.yaml');
+    // The worker judges criteria and says so in the block the engine parses...
+    const agent = new YamlAgentSpecLoader().load(spec.workerAgentFile, tmpDir);
+    expect(agent.taskInstruction).toContain('Judge exactly these criteria');
+    expect(agent.outputFormat).toContain('<!-- AEOS-CONFORMANCE');
+    // ...and the reviewer checks those judgements, not a pipeline checklist.
+    expect(spec.reviewerRubrics).toEqual(['rubrics/dod/dod-evaluation.md']);
+    expect(inAeos('rubrics/dod/dod-evaluation.md')).toMatch(/justified by evidence/i);
+    expect(inAeos('rubrics/dod/dod-evaluation.md')).toMatch(/argued away/i);
+  });
+
   it('reports what it created', () => {
     const created = repo.scaffoldDefaults(tmpDir);
 

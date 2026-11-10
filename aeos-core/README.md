@@ -272,7 +272,7 @@ Every human decision at a gate is appended, as a structured record, to a YAML fi
 - **Late answers amend the spec.** On a spec-backed ticket, `ticket answer` writes each answered question into `.aeos/features/<feature>/decisions.yaml` as a `DECIDED` entry (`NEW-<n>`, becoming the next `AC-<n>`, citing the ticket and its questions file), runs the decisions lint, and commits `decide(<feature>): amendment from <ticket>`. If the lint fails, nothing is written and the ticket stays `BLOCKED`. Otherwise the ticket also stays `BLOCKED`: add the criterion to `spec.md` (the `spec-writer` skill), commit, then run `aeos ticket repin <ticket>`. That re-checks the feature as `--spec` does, moves the epic's pin to the `.aeos` `HEAD` (its tasks follow), and sets the ticket `READY`. Until then `ticket run` refuses every ticket pinned to that spec, and a second amendment is refused. The `amendment` record carries the column the ticket was in; the `repin` record's reason names both commits. A ticket with no spec is unblocked as before.
 - **Where.** A spec-backed ticket (its own pin or its epic's): `.aeos/features/<feature>/gates.yaml`. Any other ticket: `.aeos/tickets/<id>/<id>-gates.yaml`. Ids are `GATE-1`, `GATE-2`, … within a file; records are appended and never rewritten. The format is `schemas/gates.schema.json`.
 - **Who.** `decided_by` is `user.name <user.email>` of the project repository. With neither configured, the command is refused and tells you to set them.
-- **Why.** `ticket move` and `ticket sign-off` require `--reason <text>`, at least ten characters. `ticket dod-approve` asks for one when the answer is no. Existing scripts that call `move` or `sign-off` without `--reason` now fail.
+- **Why.** `ticket move` and `ticket sign-off` require `--reason <text>`, at least ten characters. `ticket dod-approve` asks for one when the answer is no, and requires `--reason` on a yes while any criterion is failed or unverified. Existing scripts that call `move` or `sign-off` without `--reason` now fail.
 - **What was overridden.** A `sign-off-override` names, in `overrides`, the run id of the latest review or checks verdict of that column.
 - **Evidence.** Each record cites the review, the checks table and the run records of the column decided, and the spec pin in force.
 
@@ -332,7 +332,7 @@ When a spec-backed epic runs `INTEGRATION_REVIEW`, a built-in check traces the p
 
 A failure sets the epic `ESCALATED` (`PRE_WORKER_CHECK_FAILED`) with the report as the artifact to read. No worker or reviewer is invoked and no attempt is used: an unclaimed criterion needs a new task or a spec amendment, which is a person's call. Fix it, then `aeos ticket resolve <epic>` and run again. The reviewer of `TASK_BREAKDOWN` is given the unclaimed list too, so a breakdown that leaves a criterion unowned is rejected early. Whether a tagged test passes is not checked here. An epic with no spec is not traced.
 
-### Conformance report (builder)
+### Conformance report
 
 The engine can build a verdict per criterion from deterministic sources: the criteria trace, and the results of the project's own test run. Say how to get those results in `.aeos/project.json`:
 
@@ -350,7 +350,31 @@ The engine can build a verdict per criterion from deterministic sources: the cri
 
 `vitest-json` is the only format read today. The command runs like a check (a red suite is a result, not an error) and the report is read from `path`. A test is an instrument of a criterion when its full name contains the id, or when its file carries an `@AC-n` comment; a tagged scenario is one when the test run reports a result whose name contains the scenario's name. A skipped test is not an instrument. The verdict is `fail` if any instrument failed, `pass` if at least one passed and none failed, and `unverified` when nothing answered. The report follows `schemas/conformance.schema.json` and is serialised as YAML and as a Markdown table. With no `testReport` configured every criterion is `unverified`.
 
-No command builds or shows the report yet: that, the QA agent's and a person's verdicts, and the definition-of-done gate come with I1-M4-002b. `aeos project init` writes `.aeos/.gitignore` with `tmp/`, so the test report is never committed to the `.aeos` repository; an existing `.gitignore` is left alone (add `tmp/` yourself in a project initialised earlier).
+`aeos project init` writes `.aeos/.gitignore` with `tmp/`, so the test report is never committed to the `.aeos` repository; an existing `.gitignore` is left alone (add `tmp/` yourself in a project initialised earlier).
+
+#### At the definition-of-done gate
+
+`DOD_GATE` is the release decision, and the person making it is shown a verdict per criterion.
+
+1. **`aeos ticket run <epic>` at the gate** builds the report and writes it to `.aeos/tickets/<epic>/<epic>-conformance.md`. If every criterion already has a verdict, no agent runs and the epic is `SIGNED_OFF`. Otherwise the `conformance-agent` is asked about exactly the unverified criteria (they are listed under "To judge") and judges each against the pinned spec and the epic's `base..HEAD` diff. It ends its artifact (`<epic>-dod-verification.md`) with one block, which is all the engine reads:
+
+   ```
+   <!-- AEOS-CONFORMANCE
+   AC-3: pass | The diff stores the name in the session (src/session.ts:41).
+   AC-7: fail | Nothing in the diff reads the stored name back.
+   -->
+   ```
+
+   A missing or duplicated block, a line that is not `AC-n: pass|fail | justification`, or a set of ids other than the ones asked about ends the run `ESCALATED`; nothing is guessed. The reviewer then checks the judgements against `rubrics/dod/dod-evaluation.md`: is each verdict justified by evidence, and is any deterministic `fail` being argued away?
+2. **`aeos ticket dod-approve <epic>`** rebuilds the report (so it describes the commit being approved), adds the agent's verdicts from a signed-off run as `agent` instruments citing the run record, prints the summary and the table, then the pull request URL, then asks.
+   - Any `fail` or `unverified` left: a yes needs `--reason "<why>"`, stored on the gate record.
+   - `--verified AC-3,AC-7`: you vouch for those criteria. Each gains a `human` instrument naming you and citing the gate record. A criterion with a failed instrument stays `fail` all the same.
+   - A no is recorded as a `rejected` gate with its reason, and the epic stays at the gate.
+3. **On a yes**, `.aeos/features/<feature>/conformance.yaml` and `conformance.md` are committed in the same commit as the `definition-of-done` gate record, the epic becomes `DONE`, and the conformance section of the pull request is filled with the summary and the table (`gh pr edit`). If the pull request cannot be updated the approval stands and a warning is printed.
+
+The orchestrator still halts with `HUMAN_GATE` when the epic arrives at `DOD_GATE`; it does not run the column for you. Approving without running it is allowed: the criteria no test answered are then `unverified`, and the approval needs a reason.
+
+An existing project needs the new templates: `aeos project sync` reports `agents/conformance-agent.yaml` as missing and `column-specs/dod-gate.yaml` and `rubrics/dod/dod-evaluation.md` as drifted.
 
 ### Protected paths
 
@@ -421,7 +445,7 @@ Notes:
 | `aeos ticket answer <id>`                                    | Unblock a `BLOCKED` ticket after answering pre-flight questions            |
 | `aeos ticket repin <id>`                                     | Move a spec-backed ticket's pin to the current spec after an amendment     |
 | `aeos ticket resolve <id>`                                   | Resume an `ESCALATED` ticket after writing a decision in its `escalation.md` |
-| `aeos ticket dod-approve <id>`                               | Final human gate — mark ticket as DONE _(not yet implemented)_             |
+| `aeos ticket dod-approve <id> [--reason <text>] [--verified <ids>]` | Final human gate — review the conformance report and mark the epic DONE |
 | `aeos dashboard`                                             | Cross-project Kanban summary _(not yet implemented)_                       |
 | `aeos costs [--project] [--epic] [--ticket] [--since]`       | LLM spend report across all projects                                       |
 
@@ -454,6 +478,8 @@ aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation
 aeos ticket approve AEOS-1                             # → INTEGRATION_REVIEW
 aeos ticket run AEOS-1                                 # reviews the whole feature vs spec/tech spec
 aeos ticket approve AEOS-1                             # → DOD_GATE, and opens the pull request
+aeos ticket run AEOS-1                                 # builds the conformance report; an agent judges what no test answered
+aeos ticket dod-approve AEOS-1                         # shows a verdict per criterion, then asks
 ```
 
 Nesting is one level deep: tasks hang off epics, and a task cannot itself have
@@ -568,7 +594,7 @@ Every exit is a named halt reason, including the successful ones.
 | Halt reason              | Meaning                                                  |
 | ------------------------ | -------------------------------------------------------- |
 | `COMPLETE`               | The epic reached `DONE`                                  |
-| `HUMAN_GATE`             | Reached `DOD_GATE` — final sign-off is human-only        |
+| `HUMAN_GATE`             | Reached `DOD_GATE` — final sign-off is human-only. Run `aeos ticket run <epic>` there for the residual conformance judgement, then `aeos ticket dod-approve <epic>` |
 | `AWAITING_APPROVAL`      | A column is set to manual advance                        |
 | `AWAITING_DECOMPOSITION` | The breakdown is signed off but no child tasks exist yet |
 | `NEEDS_HUMAN`            | A ticket escalated, blocked, or was interrupted          |

@@ -539,4 +539,14 @@ describe('ContextAssembler — integration-review diff (WI-2)', () => {
     expect(gitGateway.diffRange).not.toHaveBeenCalled();
     expect(result.codeDiff).toBe('No changes detected');
   });
+
+  it('gives the final gate the whole epic diff too: criteria are judged against the code', async () => {
+    (gitGateway.refExists as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (gitGateway.diffRange as ReturnType<typeof vi.fn>).mockReturnValue('diff --git a/x b/x');
+
+    const result = await assembler.assemble('AEOS-1', '/root', Column.DOD_GATE);
+
+    expect(gitGateway.diffRange).toHaveBeenCalledWith('/root', 'aeos-base/AEOS-1', 'HEAD');
+    expect(result.codeDiff).toContain('diff --git');
+  });
 });

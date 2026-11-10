@@ -85,3 +85,11 @@ export function buildPullRequestBody(input: PullRequestBodyInput): string {
     '',
   ].join('\n');
 }
+
+/** Replaces what stands under the conformance marker of a pull request body. */
+export function fillConformance(body: string, conformance: string): string {
+  return body.replace(
+    /(<!-- aeos:conformance -->\n)[\s\S]*?(?=\n\n## |\s*$)/,
+    (_match, marker: string) => `${marker}${conformance}`,
+  );
+}

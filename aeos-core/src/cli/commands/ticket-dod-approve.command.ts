@@ -5,8 +5,7 @@ import type { Command } from 'commander';
 import type { TicketDodApprovePort } from '../../domain/ports/driving/ticket-dod-approve.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import { formatCostUsd } from '../../domain/model/cost-record.js';
-import type { RubricLoader } from '../../domain/ports/driven/rubric-loader.port.js';
-import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
+import { renderConformanceTable } from '../../domain/services/conformance-builder.js';
 
 /** Asks one question on the terminal and returns the trimmed answer. */
 function prompt(question: string): Promise<string> {
@@ -23,8 +22,6 @@ export function registerTicketDodApproveCommand(
   program: Command,
   getUseCase: () => TicketDodApprovePort,
   projectRepo: ProjectRepository,
-  rubricLoader: RubricLoader,
-  artifactStore: ArtifactStore,
 ): void {
   const ticketCmd =
     program.commands.find((c) => c.name() === 'ticket') ??
@@ -32,9 +29,14 @@ export function registerTicketDodApproveCommand(
 
   ticketCmd
     .command('dod-approve')
-    .description('Review DoD checklist and approve a DOD_GATE ticket as DONE')
+    .description('Review the conformance report and approve a final-gate ticket as DONE')
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
-    .action(async (ticketId: string) => {
+    .option('--reason <text>', 'Required when any criterion is failed or unverified')
+    .option(
+      '--verified <ids>',
+      'Criteria a person vouches for, comma-separated (e.g. AC-3,AC-7). Each gains a human instrument citing the gate record',
+    )
+    .action(async (ticketId: string, options: { reason?: string; verified?: string }) => {
       try {
         const cwd = process.cwd();
         const projectPath = projectRepo.findRoot(cwd);
@@ -47,43 +49,50 @@ export function registerTicketDodApproveCommand(
         }
 
         const project = projectRepo.read(projectPath);
+        const useCase = getUseCase();
 
-        // 1. Load and display DoD rubric
-        const rubricContent = await rubricLoader.load('rubrics/dod/dod-evaluation.md', projectPath);
-        if (rubricContent) {
+        // 1. What is being decided: a verdict per criterion, then the pull request.
+        const verified = (options.verified ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean);
+        const shown = await useCase.review(project.id, projectPath, ticketId, verified);
+        if (!shown.ok) {
           // eslint-disable-next-line no-console
-          console.log('\n── DoD Checklist ──────────────────────────────');
-          // eslint-disable-next-line no-console
-          console.log(rubricContent);
-          // eslint-disable-next-line no-console
-          console.log('───────────────────────────────────────────────\n');
+          console.error(`Error: ${shown.error}`);
+          process.exitCode = 1;
+          return;
         }
-
-        // 2. List artifact files
-        const artifacts = artifactStore.listArtifacts(projectPath, ticketId);
-        if (artifacts.length > 0) {
+        const { report, prUrl } = shown.review;
+        if (report) {
           // eslint-disable-next-line no-console
-          console.log('Artifacts:');
-          for (const filename of artifacts) {
-            // eslint-disable-next-line no-console
-            console.log(`  .aeos/tickets/${ticketId}/${filename}`);
-          }
+          console.log(`\n── Conformance ────────────────────────────────\n`);
+          // eslint-disable-next-line no-console
+          console.log(renderConformanceTable(report));
           // eslint-disable-next-line no-console
           console.log('');
         }
+        // eslint-disable-next-line no-console
+        console.log(`Pull request: ${prUrl ?? 'none'}\n`);
 
-        // 3. Prompt for confirmation
-        const answer = await prompt(
-          `All DoD criteria above must be met. Approve ticket ${ticketId} as DONE? [y/N] `,
-        );
+        // 2. Prompt for the decision
+        const answer = await prompt(`Approve ticket ${ticketId} as DONE? [y/N] `);
         const approved = answer.toLowerCase() === 'y';
         // A no is recorded as a gate decision, and a rejection needs its reason.
-        const reason = approved
-          ? undefined
-          : await prompt('Why not? (recorded with the decision, at least ten characters) ');
+        const reason =
+          approved || options.reason
+            ? options.reason
+            : await prompt('Why not? (recorded with the decision, at least ten characters) ');
 
-        // 4. Execute use case
-        const result = getUseCase().execute(project.id, projectPath, ticketId, approved, reason);
+        // 3. Execute use case
+        const result = useCase.execute(
+          project.id,
+          projectPath,
+          ticketId,
+          approved,
+          reason,
+          shown.review,
+        );
 
         switch (result.status) {
           case 'approved':
@@ -91,6 +100,10 @@ export function registerTicketDodApproveCommand(
             console.log(
               `✓ Ticket ${result.ticketId} approved: DOD_GATE → DONE (total cost: ${formatCostUsd(result.totalCostUsd)})`,
             );
+            if (result.warning) {
+              // eslint-disable-next-line no-console
+              console.error(`Warning: ${result.warning}`);
+            }
             break;
           case 'cancelled':
             // eslint-disable-next-line no-console

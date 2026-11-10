@@ -51,11 +51,8 @@ export class GhPullRequestGateway implements PullRequestGateway {
     const existing = this.openPullRequestUrl(request);
     if (existing) return { url: existing };
 
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-pr-'));
-    const bodyFile = path.join(dir, 'body.md');
-    try {
-      fs.writeFileSync(bodyFile, request.body, 'utf-8');
-      const output = this.run(
+    const output = this.withBodyFile(request.body, (bodyFile) =>
+      this.run(
         'gh',
         [
           'pr',
@@ -70,9 +67,28 @@ export class GhPullRequestGateway implements PullRequestGateway {
           bodyFile,
         ],
         request.cwd,
-      );
-      // gh prints the new pull request's URL as its last line.
-      return { url: output.trim().split('\n').pop() ?? '' };
+      ),
+    );
+    // gh prints the new pull request's URL as its last line.
+    return { url: output.trim().split('\n').pop() ?? '' };
+  }
+
+  updateBody(request: { cwd: string; head: string; update: (body: string) => string }): void {
+    const { body } = JSON.parse(
+      this.run('gh', ['pr', 'view', request.head, '--json', 'body'], request.cwd),
+    ) as { body?: string };
+    this.withBodyFile(request.update(body ?? ''), (bodyFile) =>
+      this.run('gh', ['pr', 'edit', request.head, '--body-file', bodyFile], request.cwd),
+    );
+  }
+
+  /** The body goes through a file, which does not outlive the call. */
+  private withBodyFile(body: string, use: (bodyFile: string) => string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-pr-'));
+    const bodyFile = path.join(dir, 'body.md');
+    try {
+      fs.writeFileSync(bodyFile, body, 'utf-8');
+      return use(bodyFile);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

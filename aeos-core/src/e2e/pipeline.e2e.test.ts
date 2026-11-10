@@ -7,6 +7,7 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import yaml from 'js-yaml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ConformanceReport } from '../domain/model/conformance-report.js';
 import type { GateRecord } from '../domain/model/gate-record.js';
 import type { RunRecord } from '../domain/model/run-record.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
@@ -45,6 +46,7 @@ const ajv = new Ajv2020({
 });
 const validateRunRecord = ajv.compile(schema('run-record.schema.json'));
 const validateGates = ajv.compile(schema('gates.schema.json'));
+const validateConformance = ajv.compile(schema('conformance.schema.json'));
 
 /** Reads a gates file of `.aeos`, checks it against the approved schema, returns its records. */
 function gatesIn(project: TempProject, relative: string): GateRecord[] {
@@ -123,6 +125,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     const refused = await runCli('ticket', 'run', tasks[0]!);
     expect(refused.output).toContain(`on the default branch '${defaultBranch}'`);
     expect(ticketState(tasks[0]!)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'READY' });
+    git('tag', `aeos-base/${epic}`);
     git('checkout', '-b', `aeos/${epic}`);
     for (let i = 0; i < 3; i++) await driveColumn(tasks[0]!);
     await driveTaskToDone(tasks[1]!);
@@ -131,8 +134,21 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect((await runCli('ticket', 'approve', epic)).exitCode).toBe(0);
     await driveColumn(epic);
     expect(ticketState(epic).column).toBe('DOD_GATE');
-    // DOD_GATE is human-only: no run, just the approval.
-    dodApprove(epic);
+    // DOD_GATE: no test answers AC-1 in this project, so the conformance agent
+    // is asked about it, and the reviewer about the agent. Then the person
+    // decides, vouching for AC-1 as well.
+    const stubCallsBeforeGate = vi.mocked(StubExecutor.prototype.run).mock.calls.length;
+    await runCli('ticket', 'run', epic);
+    expect(ticketState(epic)).toMatchObject({ column: 'DOD_GATE', subState: 'SIGNED_OFF' });
+    const gateCalls = vi.mocked(StubExecutor.prototype.run).mock.calls.slice(stubCallsBeforeGate);
+    expect(gateCalls.map(([invocation]) => path.basename(invocation.outputPath))).toEqual([
+      `${epic}-dod-verification.md`,
+      `${epic}-dod-verification-review.md`,
+    ]);
+    expect(gateCalls[0]![0].prompt).toContain('Judge exactly these criteria: AC-1\n');
+    // The agent judges against the code: the whole epic diff is in its brief.
+    expect(gateCalls[0]![0].prompt).toContain(`stub-${tasks[0]}.txt`);
+    await dodApprove(epic, ['AC-1']);
 
     // Approved out of INTEGRATION_REVIEW: the (stub) pull request is recorded.
     expect((await runCli('ticket', 'show', epic)).output).toContain(
@@ -173,6 +189,56 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       `${epic} column-approval approved TASK_BREAKDOWN>INTEGRATION_REVIEW`,
       `${epic} column-approval approved INTEGRATION_REVIEW>DOD_GATE`,
       `${epic} definition-of-done approved DOD_GATE>DONE`,
+    ]);
+    // The conformance report: committed with the definition-of-done gate
+    // record, in one commit, and valid against the approved schema.
+    const aeosRepo = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: path.join(project.projectPath, '.aeos'),
+        encoding: 'utf-8',
+      });
+    const dodCommit = aeosRepo('log', '-1', '--format=%H', '--', 'features/feature-sample');
+    expect(
+      aeosRepo('show', '--name-only', '--format=', dodCommit.trim()).trim().split('\n').sort(),
+    ).toEqual([
+      'features/feature-sample/conformance.md',
+      'features/feature-sample/conformance.yaml',
+      'features/feature-sample/gates.yaml',
+    ]);
+    const conformance = yaml.load(
+      aeosRepo('show', 'HEAD:features/feature-sample/conformance.yaml'),
+    ) as ConformanceReport;
+    expect(validateConformance(conformance), JSON.stringify(validateConformance.errors)).toBe(true);
+    expect(conformance.summary).toEqual({ total: 1, pass: 1, fail: 0, unverified: 0 });
+    const dodRun = fs
+      .readdirSync(path.join(project.projectPath, '.aeos', 'tickets', epic, 'runs'))
+      .map((file) => /^(RUN-.*)\.json$/.exec(file)?.[1])
+      .filter((runId) => runId !== undefined)
+      .map(
+        (runId) =>
+          JSON.parse(aeosRepo('show', `HEAD:tickets/${epic}/runs/${runId}.json`)) as RunRecord,
+      )
+      .find((record) => record.column === 'DOD_GATE' && record.role === 'worker')!;
+    expect(conformance.criteria).toMatchObject([
+      {
+        id: 'AC-1',
+        verdict: 'pass',
+        claimed_by: [tasks[0]],
+        instruments: [
+          {
+            kind: 'agent',
+            name: 'conformance-agent',
+            result: 'pass',
+            evidence: `tickets/${epic}/runs/${dodRun.run_id}.json`,
+          },
+          {
+            kind: 'human',
+            name: 'AEOS E2E <e2e@aeos.invalid>',
+            result: 'pass',
+            evidence: `features/feature-sample/gates.yaml#${featureGates.at(-1)!.id}`,
+          },
+        ],
+      },
     ]);
     const standaloneGates = gatesIn(project, `tickets/${standalone}/${standalone}-gates.yaml`);
     expect(standaloneGates.map(decision)).toEqual(taskGates(standalone));

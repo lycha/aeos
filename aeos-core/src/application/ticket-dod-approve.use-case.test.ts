@@ -9,6 +9,15 @@ import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { ConformanceReport } from '../domain/model/conformance-report.js';
+import type { GateRecord } from '../domain/model/gate-record.js';
+import type { RunRecord } from '../domain/model/run-record.js';
+import type { PullRequestGateway } from '../domain/ports/driven/pull-request-gateway.port.js';
+import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
+import type { DodReview } from '../domain/ports/driving/ticket-dod-approve.port.js';
+import { buildConformanceReport } from '../domain/services/conformance-builder.js';
+import { traceCriteria } from '../domain/services/criteria-trace.js';
+import type { ConformanceService } from './services/conformance.service.js';
 
 function createMockTicketRepo(): TicketRepository {
   return {
@@ -116,6 +125,9 @@ describe('TicketDodApproveUseCase', () => {
   let gitGateway: ReturnType<typeof createMockGitGateway>;
   let stateMachine: ReturnType<typeof createMockStateMachine>;
   let costRepo: ReturnType<typeof createMockCostRepo>;
+  let conformance: { buildConformance: ReturnType<typeof vi.fn> };
+  let runRecordStore: RunRecordStore;
+  let pullRequests: PullRequestGateway;
   let useCase: TicketDodApproveUseCase;
 
   beforeEach(() => {
@@ -124,6 +136,9 @@ describe('TicketDodApproveUseCase', () => {
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
     costRepo = createMockCostRepo();
+    conformance = { buildConformance: vi.fn() };
+    runRecordStore = { write: vi.fn(), list: vi.fn().mockReturnValue([]) };
+    pullRequests = { isAvailable: vi.fn(), create: vi.fn(), updateBody: vi.fn() };
     useCase = new TicketDodApproveUseCase(
       ticketRepo,
       artifactStore,
@@ -131,8 +146,225 @@ describe('TicketDodApproveUseCase', () => {
       gitGateway,
       costRepo,
       recorder,
+      conformance as unknown as ConformanceService,
+      runRecordStore,
+      pullRequests,
     );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(dodGateTicket());
+  });
+
+  describe('conformance at the gate', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    const specBacked = (overrides: Partial<Ticket> = {}): Ticket => ({
+      ...dodGateTicket(),
+      specPin: PIN,
+      ...overrides,
+    });
+    /** AC-1 passes by test, AC-2 fails by test (unless `green`), AC-3 and AC-4 have no instrument. */
+    const built = (green = false): ConformanceReport =>
+      buildConformanceReport({
+        feature: 'checkout',
+        epic: TICKET_ID,
+        trace: traceCriteria({
+          criteria: ['AC-1', 'AC-2', 'AC-3', 'AC-4'],
+          nonGoals: [],
+          claims: new Map(),
+          instruments: new Map(),
+        }),
+        tests: [
+          { name: 'AC-1 greets', file: 'a.test.ts', status: 'pass' },
+          { name: 'AC-2 remembers', file: 'a.test.ts', status: green ? 'pass' : 'fail' },
+        ],
+        spec: PIN,
+        code: { repo: 'shop', commit: 'deadbee' },
+        generatedAt: '2026-11-10T12:00:00.000Z',
+      });
+    const verdictOf = (report: ConformanceReport, id: string) =>
+      report.criteria.find((criterion) => criterion.id === id)!;
+    const review = async (verified: string[] = []): Promise<DodReview> => {
+      const result = await useCase.review(PROJECT_ID, PROJECT_PATH, TICKET_ID, verified);
+      if (!result.ok) throw new Error(result.error);
+      return result.review;
+    };
+    const REASON = 'AC-2 is a known gap, tracked as AEOS-9.';
+
+    beforeEach(() => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(specBacked());
+      conformance.buildConformance.mockResolvedValue({ report: built() });
+      gateRecorder.decidedBy.mockReturnValue('Kris <kris@example.com>');
+      gateRecorder.record.mockReturnValue({ id: 'GATE-7' });
+    });
+
+    it('rebuilds the report and adds the verdicts of the agent that judged the unverified criteria', async () => {
+      (runRecordStore.list as ReturnType<typeof vi.fn>).mockReturnValue([
+        { run_id: 'RUN-0', column: 'QA', role: 'worker', agent: 'qa-agent', output: 'x.md' },
+        {
+          run_id: 'RUN-1',
+          column: 'DOD_GATE',
+          role: 'worker',
+          agent: 'conformance-agent',
+          output: `tickets/${TICKET_ID}/${TICKET_ID}-dod-verification.md`,
+        },
+        {
+          run_id: 'RUN-2',
+          column: 'DOD_GATE',
+          role: 'reviewer',
+          agent: 'reviewer',
+          output: 'r.md',
+        },
+      ] as RunRecord[]);
+      (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
+        // AC-2 already has a failed test: the agent's opinion of it is not asked for.
+        '<!-- AEOS-CONFORMANCE\nAC-2: pass | Looks fine.\nAC-3: pass | The diff stores it.\nAC-4: fail | Never read back.\n-->',
+      );
+
+      const { report, prUrl } = await review();
+
+      expect(conformance.buildConformance).toHaveBeenCalledWith(PROJECT_PATH, TICKET_ID);
+      expect(artifactStore.readArtifact).toHaveBeenCalledWith(
+        PROJECT_PATH,
+        TICKET_ID,
+        `${TICKET_ID}-dod-verification.md`,
+      );
+      expect(verdictOf(report!, 'AC-3')).toMatchObject({
+        verdict: 'pass',
+        notes: 'The diff stores it.',
+        instruments: [
+          {
+            kind: 'agent',
+            name: 'conformance-agent',
+            result: 'pass',
+            evidence: `tickets/${TICKET_ID}/runs/RUN-1.json`,
+          },
+        ],
+      });
+      expect(verdictOf(report!, 'AC-4').verdict).toBe('fail');
+      expect(verdictOf(report!, 'AC-2').instruments).toHaveLength(1);
+      expect(prUrl).toBeNull();
+    });
+
+    it('does not take the verdicts of a run that was not signed off', async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        specBacked({ subState: 'ESCALATED' }),
+      );
+      (runRecordStore.list as ReturnType<typeof vi.fn>).mockReturnValue([
+        { run_id: 'RUN-1', column: 'DOD_GATE', role: 'worker', agent: 'a', output: 'x.md' },
+      ] as RunRecord[]);
+      (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
+        '<!-- AEOS-CONFORMANCE\nAC-3: pass | The diff stores it.\n-->',
+      );
+
+      expect(verdictOf((await review()).report!, 'AC-3').verdict).toBe('unverified');
+    });
+
+    it('refuses to vouch for a criterion the spec does not have', async () => {
+      const result = await useCase.review(PROJECT_ID, PROJECT_PATH, TICKET_ID, ['AC-9']);
+
+      expect(result).toEqual({ ok: false, error: expect.stringContaining('AC-9') });
+    });
+
+    it('refuses a yes with no reason while a criterion is failed or unverified', async () => {
+      const shown = await review();
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true, undefined, shown);
+
+      expect(result).toMatchObject({ status: 'error', error: expect.stringContaining('--reason') });
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it('refuses a decision on a spec-backed ticket whose report was not reviewed', () => {
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true, REASON);
+
+      expect(result.status).toBe('error');
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
+
+    it('approves with a reason, which goes on the gate record, and hands over the report to commit with it', async () => {
+      const shown = await review(['AC-3']);
+      expect(verdictOf(shown.report!, 'AC-3').verdict).toBe('pass');
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true, REASON, shown);
+
+      expect(result).toMatchObject({ status: 'approved', gateRecordId: 'GATE-7' });
+      const [, , decision, alongside] = gateRecorder.record.mock.calls[0] as [
+        string,
+        Ticket,
+        object,
+        (record: GateRecord) => Record<string, string>,
+      ];
+      expect(decision).toEqual({
+        gate: 'definition-of-done',
+        verdict: 'approved',
+        fromColumn: 'DOD_GATE',
+        toColumn: 'DONE',
+        reason: REASON,
+      });
+      const files = alongside({ id: 'GATE-7' } as GateRecord);
+      expect(Object.keys(files).sort()).toEqual(['conformance.md', 'conformance.yaml']);
+      // The person who vouched is an instrument, and cites the decision.
+      expect(files['conformance.yaml']).toContain('kind: "human"');
+      expect(files['conformance.yaml']).toContain('name: "Kris <kris@example.com>"');
+      expect(files['conformance.yaml']).toContain(
+        'evidence: "features/checkout/gates.yaml#GATE-7"',
+      );
+      expect(files['conformance.md']).toContain(
+        '| AC-3 | pass | human: Kris <kris@example.com> (pass)',
+      );
+      expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'DONE');
+    });
+
+    it('needs no reason when every criterion passes', async () => {
+      conformance.buildConformance.mockResolvedValue({ report: built(true) });
+      const shown = await review(['AC-3', 'AC-4']);
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true, undefined, shown);
+
+      expect(result.status).toBe('approved');
+    });
+
+    it('records a no with its reason and writes no report', async () => {
+      const shown = await review();
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, false, REASON, shown);
+
+      expect(result).toEqual({ status: 'cancelled', ticketId: TICKET_ID });
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, specBacked(), {
+        gate: 'definition-of-done',
+        verdict: 'rejected',
+        reason: REASON,
+      });
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it("fills the conformance section of the epic's pull request; a host that refuses is a warning", async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        specBacked({ prUrl: 'https://github.com/o/r/pull/7' }),
+      );
+      const shown = await review();
+      expect(shown.prUrl).toBe('https://github.com/o/r/pull/7');
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true, REASON, shown);
+
+      const request = (pullRequests.updateBody as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+        cwd: string;
+        head: string;
+        update: (body: string) => string;
+      };
+      expect(request).toMatchObject({ cwd: PROJECT_PATH, head: `aeos/${TICKET_ID}` });
+      const body = request.update('## Conformance\n\n<!-- aeos:conformance -->\n_x_\n\n## Cost\n');
+      expect(body).toContain('<!-- aeos:conformance -->\n1 pass, 1 fail, 2 unverified of 4.');
+      expect(body).toContain('| AC-2 | fail |');
+
+      (pullRequests.updateBody as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        throw new Error('gh: not found');
+      });
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true, REASON, shown);
+      expect(result).toMatchObject({
+        status: 'approved',
+        warning: expect.stringContaining('gh: not found'),
+      });
+    });
   });
 
   describe('gate record', () => {
