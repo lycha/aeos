@@ -286,6 +286,25 @@ describe('SimpleGitGateway branches and remotes', () => {
     expect(gateway.showFile(repo, gateway.headCommit(repo), 'a.md')).toBe('edited\n');
   });
 
+  it('lists the files under a directory as they were at a commit', () => {
+    fs.mkdirSync(path.join(repo, 'features', 'x', 'features'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'spec.md'), 'v1\n');
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'features', 'a.feature'), 'Feature: A\n');
+    git('add', '.');
+    git('commit', '-m', 'spec');
+    const pinned = gateway.headCommit(repo);
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'features', 'b.feature'), 'Feature: B\n');
+    git('add', '.');
+    git('commit', '-m', 'later');
+
+    expect(gateway.listFiles(repo, pinned, 'features/x')).toEqual([
+      'features/x/features/a.feature',
+      'features/x/spec.md',
+    ]);
+    expect(gateway.listFiles(repo, pinned, 'contexts/none')).toEqual([]);
+    expect(() => gateway.listFiles(repo, 'deadbeef', 'features/x')).toThrow();
+  });
+
   it('throws when the commit or the file cannot be read', () => {
     expect(() => gateway.showFile(repo, 'deadbeef', 'a.md')).toThrow();
     expect(() => gateway.showFile(repo, gateway.headCommit(repo), 'missing.md')).toThrow();

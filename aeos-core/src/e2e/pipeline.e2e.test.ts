@@ -362,7 +362,15 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
         fs.readFileSync(path.join(aeosDir, 'tickets', epic, `${epic}-ticket.md`), 'utf-8'),
       ).toContain(`- Spec: EE-aeos@${pinned} (features/feature-sample)`);
 
+      fs.appendFileSync(specFile, '\nA later amendment.\n');
+      aeosGit('commit', '-am', 'spec(feature-sample): amend');
+
+      const moved = await runCli('ticket', 'show', epic);
+      expect(moved.output).toContain(pinLine);
+      expect(moved.output).toContain('spec has moved since this epic was pinned');
+
       // Every run of the epic records the pin, and the record still fits the schema.
+      // Its brief carries the spec as pinned, not as amended since.
       await runCli('ticket', 'approve', epic);
       await runCli('ticket', 'run', epic);
       const runsDir = path.join(aeosDir, 'tickets', epic, 'runs');
@@ -379,13 +387,17 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
         });
         expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
       }
-
-      fs.appendFileSync(specFile, '\nA later amendment.\n');
-      aeosGit('commit', '-am', 'spec(feature-sample): amend');
-
-      const moved = await runCli('ticket', 'show', epic);
-      expect(moved.output).toContain(pinLine);
-      expect(moved.output).toContain('spec has moved since this epic was pinned');
+      const briefs = fs
+        .readdirSync(runsDir)
+        .filter((file) => file.endsWith('.brief.md'))
+        .map((file) => fs.readFileSync(path.join(runsDir, file), 'utf-8'));
+      expect(briefs.length).toBeGreaterThan(0);
+      for (const brief of briefs) {
+        expect(brief).toContain(`## Specification (pinned EE-aeos@${pinned.slice(0, 7)})`);
+        expect(brief).toContain('the system shall greet them as "there"');
+        expect(brief).toContain('Scenario: A visitor with no saved name');
+        expect(brief).not.toContain('A later amendment.');
+      }
     },
   );
 

@@ -45,6 +45,7 @@ function createMockGitGateway(): GitGateway {
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
+    listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn().mockReturnValue(''),
   };
 }

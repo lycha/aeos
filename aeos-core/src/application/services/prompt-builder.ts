@@ -40,6 +40,18 @@ export function buildContextSection(context: AssembledContext): string {
 
   parts.push('[CONTEXT]');
 
+  // Specification — the human-written spec, as pinned. Absent for a ticket
+  // with no pin, whose prompt is then exactly what it was before pins existed.
+  if (context.specPin) {
+    const { repo, commit } = context.specPin;
+    const specParts = context.spec
+      .map((artifact) => `### ${artifact.name}\n${artifact.content}`)
+      .join('\n\n');
+    parts.push(
+      `## Specification (pinned ${repo}@${commit.slice(0, 7)})\nThis specification is authoritative. Where it is silent, raise a preflight question; do not invent behaviour.\n\n${specParts}`,
+    );
+  }
+
   // Epic Specification — the parent epic's PRD/tech spec for a child task.
   // Placed first and framed as authoritative: the task must implement against
   // these decisions and must not contradict them.

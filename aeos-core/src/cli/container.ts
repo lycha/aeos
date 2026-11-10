@@ -199,7 +199,12 @@ export function createContainer(): Container {
       );
     },
     get ticketRun() {
-      const contextAssembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
+      const contextAssembler = new ContextAssembler(
+        artifactStore,
+        projectRepo,
+        gitGateway,
+        artefactTree,
+      );
       const columnSpecLoader = new YamlColumnSpecLoader();
       const agentSpecLoader = new YamlAgentSpecLoader();
       const rubricLoader = new FsRubricLoader();

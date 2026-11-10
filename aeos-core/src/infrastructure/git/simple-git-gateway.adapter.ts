@@ -135,6 +135,17 @@ export class SimpleGitGateway implements GitGateway {
     });
   }
 
+  listFiles(dir: string, commit: string, dirPath: string): string[] {
+    return execFileSync('git', ['ls-tree', '-r', '--name-only', '-z', commit, '--', dirPath], {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\0')
+      .filter(Boolean)
+      .sort();
+  }
+
   pathChangedSince(dir: string, commit: string, filePath: string): boolean {
     try {
       execFileSync('git', ['diff', '--quiet', commit, 'HEAD', '--', filePath], {

@@ -50,6 +50,7 @@ function createMockGitGateway(): GitGateway {
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
+    listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn().mockReturnValue(''),
   };
 }
@@ -68,7 +69,133 @@ describe('ContextAssembler', () => {
     artifactStore = createMockArtifactStore();
     projectRepo = createMockProjectRepo();
     gitGateway = createMockGitGateway();
-    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
+    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway, {
+      root: () => '/projects/test/.aeos',
+      featureDir: () => '',
+      exists: () => true,
+      listFeatures: () => [],
+    });
+  });
+
+  describe('pinned spec', () => {
+    const pin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    const TREE = '/projects/test/.aeos';
+    /** The tree as it is at the pinned commit. */
+    const atPin = (files: Record<string, string>): void => {
+      (gitGateway.showFile as ReturnType<typeof vi.fn>).mockImplementation(
+        (_dir: string, _commit: string, file: string) => {
+          if (!(file in files)) throw new Error(`fatal: path '${file}' does not exist`);
+          return files[file];
+        },
+      );
+      (gitGateway.listFiles as ReturnType<typeof vi.fn>).mockImplementation(
+        (_dir: string, _commit: string, dir: string) =>
+          Object.keys(files).filter((file) => file.startsWith(`${dir}/`)),
+      );
+    };
+    const tree = {
+      'features/checkout/spec.md': '---\nfeature: checkout\ncontext: payments\n---\n# Checkout',
+      'features/checkout/decisions.yaml': 'schema_version: 1\nmeta:\n  feature: checkout\n',
+      'features/checkout/feature-inventory.yaml': 'not for agents',
+      'features/checkout/features/pay.feature': 'Feature: Pay',
+      'features/checkout/features/refund.feature': 'Feature: Refund',
+      'features/checkout/features/notes.md': 'not a scenario',
+      'contexts/payments/glossary.md': '# Glossary',
+      'contexts/payments/CONSTRAINTS.md': 'Money is integer minor units.',
+    };
+
+    beforeEach(() => {
+      (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Ticket');
+      (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue([
+        'AEOS-1-ticket.md',
+      ]);
+    });
+
+    it('reads spec.md, decisions.yaml, every .feature and the glossary at the pinned commit', async () => {
+      atPin(tree);
+
+      const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN, pin);
+
+      expect(result.specPin).toEqual(pin);
+      expect(result.spec).toEqual([
+        { name: 'spec.md', content: tree['features/checkout/spec.md'] },
+        { name: 'decisions.yaml', content: tree['features/checkout/decisions.yaml'] },
+        { name: 'features/pay.feature', content: 'Feature: Pay' },
+        { name: 'features/refund.feature', content: 'Feature: Refund' },
+        { name: 'contexts/payments/glossary.md', content: '# Glossary' },
+      ]);
+      for (const call of (gitGateway.showFile as ReturnType<typeof vi.fn>).mock.calls) {
+        expect(call.slice(0, 2)).toEqual([TREE, 'c0ffee1']);
+      }
+    });
+
+    it('puts the project constraints first, then those of the context', async () => {
+      atPin(tree);
+      (projectRepo.readConstraints as ReturnType<typeof vi.fn>).mockReturnValue('Use strict mode.');
+
+      const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN, pin);
+
+      expect(result.constraints).toBe('Use strict mode.\n\nMoney is integer minor units.');
+    });
+
+    it('uses the context constraints alone when the project has none', async () => {
+      atPin(tree);
+      (projectRepo.readConstraints as ReturnType<typeof vi.fn>).mockReturnValue(null);
+
+      const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN, pin);
+
+      expect(result.constraints).toBe('Money is integer minor units.');
+    });
+
+    it('takes the context from decisions.yaml meta when the spec has no front matter', async () => {
+      atPin({
+        ...tree,
+        'features/checkout/spec.md': '# Checkout',
+        'features/checkout/decisions.yaml':
+          'schema_version: 1\nmeta:\n  feature: checkout\n  context: "payments"\nsummary: {}\n',
+      });
+
+      const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN, pin);
+
+      expect(result.spec.map((file) => file.name)).toContain('contexts/payments/glossary.md');
+    });
+
+    it('adds no context files when none is named, or the named one has none', async () => {
+      atPin(
+        Object.fromEntries(Object.entries(tree).filter(([file]) => !file.startsWith('contexts/'))),
+      );
+      (projectRepo.readConstraints as ReturnType<typeof vi.fn>).mockReturnValue('Use strict mode.');
+
+      const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN, pin);
+
+      expect(result.spec.map((file) => file.name)).toEqual([
+        'spec.md',
+        'decisions.yaml',
+        'features/pay.feature',
+        'features/refund.feature',
+      ]);
+      expect(result.constraints).toBe('Use strict mode.');
+    });
+
+    it('fails, naming the commit, when the pinned commit cannot be read', async () => {
+      (gitGateway.showFile as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        throw new Error('fatal: invalid object name');
+      });
+
+      await expect(
+        assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN, pin),
+      ).rejects.toThrow(/AEOS-aeos@c0ffee1.*never read from the working tree/s);
+    });
+
+    it('reads nothing from git and changes nothing for a ticket with no pin', async () => {
+      (projectRepo.readConstraints as ReturnType<typeof vi.fn>).mockReturnValue('Use strict mode.');
+
+      const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
+
+      expect(result).toMatchObject({ spec: [], specPin: null, constraints: 'Use strict mode.' });
+      expect(gitGateway.showFile).not.toHaveBeenCalled();
+      expect(gitGateway.listFiles).not.toHaveBeenCalled();
+    });
   });
 
   it('reads ticket content via readArtifact', async () => {
@@ -291,7 +418,12 @@ describe('ContextAssembler — epic context (WI-3)', () => {
     artifactStore = createMockArtifactStore();
     projectRepo = createMockProjectRepo();
     gitGateway = createMockGitGateway();
-    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
+    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway, {
+      root: () => '/projects/test/.aeos',
+      featureDir: () => '',
+      exists: () => true,
+      listFeatures: () => [],
+    });
   });
 
   it("injects the parent epic's PRD and tech spec, PRD first", async () => {
@@ -344,7 +476,12 @@ describe('ContextAssembler — integration-review diff (WI-2)', () => {
     gitGateway = createMockGitGateway();
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue(['AEOS-1-ticket.md']);
     (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('# Epic');
-    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway);
+    assembler = new ContextAssembler(artifactStore, projectRepo, gitGateway, {
+      root: () => '/projects/test/.aeos',
+      featureDir: () => '',
+      exists: () => true,
+      listFeatures: () => [],
+    });
   });
 
   it('diffs the epic base tag..HEAD when the base tag exists', async () => {

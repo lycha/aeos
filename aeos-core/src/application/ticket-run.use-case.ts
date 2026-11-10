@@ -253,11 +253,22 @@ export class TicketRunUseCase implements TicketRunPort {
       const aeosDir = path.join(projectPath, '.aeos');
 
       this.emitStageEvent(emitter, 'stage.started', 'context', 'Assembling ticket context');
-      const baseContext = await this.contextAssembler.assemble(
-        ticketId,
-        projectPath,
-        columnSpec.column,
-      );
+      const specPin = resolveSpecPin(this.ticketRepo, mirroredTicket);
+      let baseContext: AssembledContext;
+      try {
+        baseContext = await this.contextAssembler.assemble(
+          ticketId,
+          projectPath,
+          columnSpec.column,
+          specPin,
+        );
+      } catch (err) {
+        // Nothing has run yet and the ticket is still READY: a pinned spec that
+        // cannot be read fails the run here instead of crashing the caller.
+        const message = err instanceof Error ? err.message : String(err);
+        emitter.emit({ type: 'ticket-run.failed', phase: 'complete', payload: { message } });
+        return { status: 'failed', ticketId, error: message };
+      }
       this.emitStageEvent(emitter, 'stage.completed', 'context', 'Context assembled');
 
       const workerExecutor = this.createExecutor(resolvedWorkerAgentSpec);
@@ -289,7 +300,7 @@ export class TicketRunUseCase implements TicketRunPort {
         protectedGlobs: protectedGlobs(
           this.projectRepo.readExecutorConfig(projectPath)?.protectedPaths,
         ),
-        specPin: resolveSpecPin(this.ticketRepo, mirroredTicket),
+        specPin,
       };
 
       // ── Preflight ────────────────────────────────────────────────
@@ -550,7 +561,12 @@ export class TicketRunUseCase implements TicketRunPort {
     // review file dropped so a review appears once.
     let workerContext = ctx.baseContext;
     if (feedback) {
-      const fresh = await this.contextAssembler.assemble(ticketId, projectPath, columnSpec.column);
+      const fresh = await this.contextAssembler.assemble(
+        ticketId,
+        projectPath,
+        columnSpec.column,
+        ctx.specPin,
+      );
       workerContext = this.withExtraArtifact(
         {
           ...fresh,
@@ -916,6 +932,7 @@ export class TicketRunUseCase implements TicketRunPort {
       ticketId,
       projectPath,
       ctx.columnSpec.column,
+      ctx.specPin,
     );
     const enrichedContext =
       rubricContents.length > 0

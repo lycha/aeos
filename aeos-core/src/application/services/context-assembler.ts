@@ -3,7 +3,9 @@
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import type { GitGateway } from '../../domain/ports/driven/git-gateway.port.js';
+import type { ArtefactTree } from '../../domain/ports/driven/artefact-tree.port.js';
 import type { AssembledContext, PriorArtifact } from '../../domain/model/assembled-context.js';
+import type { SpecPin } from '../../domain/model/spec-pin.js';
 import { Column } from '../../domain/model/column.js';
 
 /** Maximum characters before a diff is truncated. */
@@ -23,14 +25,38 @@ function parentEpicId(ticketContent: string): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * The bounded context a spec belongs to: `context:` in the front matter of
+ * spec.md, else in `meta` of decisions.yaml. Null when neither names one.
+ */
+function specContext(specMd: string, decisionsYaml: string): string | null {
+  const frontMatter = /^---\n([\s\S]*?)\n---/.exec(specMd)?.[1] ?? '';
+  const name =
+    /^context:[ \t]*(.+)$/m.exec(frontMatter)?.[1] ??
+    /^meta:\n(?:[ \t]+.*\n)*?[ \t]+context:[ \t]*(.+)$/m.exec(decisionsYaml)?.[1];
+  const context = name?.trim().replace(/^["']|["']$/g, '');
+  // The name becomes a path in the tree.
+  return context && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(context) ? context : null;
+}
+
 export class ContextAssembler {
   constructor(
     private artifactStore: ArtifactStore,
     private projectRepo: ProjectRepository,
     private gitGateway: GitGateway,
+    private artefactTree: ArtefactTree,
   ) {}
 
-  async assemble(ticketId: string, projectRoot: string, column: string): Promise<AssembledContext> {
+  /**
+   * `specPin` is the ticket's pin (its own or its parent epic's, see
+   * `resolveSpecPin`), or null for a ticket that is not spec-backed.
+   */
+  async assemble(
+    ticketId: string,
+    projectRoot: string,
+    column: string,
+    specPin: SpecPin | null = null,
+  ): Promise<AssembledContext> {
     // 1. Read ticket content
     const ticketFilename = `${ticketId}-ticket.md`;
     const ticketContent = this.artifactStore.readArtifact(projectRoot, ticketId, ticketFilename);
@@ -62,8 +88,14 @@ export class ContextAssembler {
     //     scoped it. The task's own artifact dir never contains these.
     const epicContext = this.gatherEpicContext(ticketContent, projectRoot);
 
-    // 4. Read constraints
-    const constraints = this.projectRepo.readConstraints(projectRoot);
+    // 3b. The pinned spec, for a spec-backed ticket.
+    const pinned = specPin ? this.readPinnedSpec(projectRoot, specPin) : null;
+
+    // 4. Read constraints: the project's first, then those of the spec's context.
+    const constraints =
+      [this.projectRepo.readConstraints(projectRoot), pinned?.constraints ?? null]
+        .filter((part) => part !== null)
+        .join('\n\n') || null;
 
     // 5. Inject a git diff for the review columns.
     //    - CODE_REVIEW reviews the working-tree diff of one task.
@@ -82,7 +114,59 @@ export class ContextAssembler {
       codeDiff = this.clampDiff(raw);
     }
 
-    return { ticketContent, settledDecisions, priorArtifacts, epicContext, constraints, codeDiff };
+    return {
+      ticketContent,
+      settledDecisions,
+      priorArtifacts,
+      epicContext,
+      spec: pinned?.spec ?? [],
+      specPin,
+      constraints,
+      codeDiff,
+    };
+  }
+
+  /**
+   * Reads the spec through git at the pinned commit, never from the working
+   * tree: a later edit must not change what an in-flight run is told.
+   */
+  private readPinnedSpec(
+    projectRoot: string,
+    pin: SpecPin,
+  ): { spec: PriorArtifact[]; constraints: string | null } {
+    const treeRoot = this.artefactTree.root(projectRoot);
+    const read = (file: string): string => {
+      try {
+        return this.gitGateway.showFile(treeRoot, pin.commit, file);
+      } catch {
+        throw new Error(
+          `Cannot read the pinned spec ${pin.repo}@${pin.commit}: ${file} is not readable at that commit in ${treeRoot}. The spec is never read from the working tree. Check that the commit still exists in the .aeos repository.`,
+        );
+      }
+    };
+    const inFeature = (name: string): PriorArtifact => ({
+      name,
+      content: read(`${pin.path}/${name}`),
+    });
+
+    const spec = [inFeature('spec.md'), inFeature('decisions.yaml')];
+    // shortcut: every scenario goes to every agent; give a task worker only the
+    // scenarios of the criteria it claims once I1-M4-001 adds claims.
+    const scenariosDir = `${pin.path}/features`;
+    for (const file of this.gitGateway.listFiles(treeRoot, pin.commit, scenariosDir)) {
+      if (file.endsWith('.feature')) spec.push(inFeature(file.slice(pin.path.length + 1)));
+    }
+
+    const context = specContext(spec[0]!.content, spec[1]!.content);
+    if (!context) return { spec, constraints: null };
+    const contextFiles = this.gitGateway.listFiles(treeRoot, pin.commit, `contexts/${context}`);
+    const glossary = `contexts/${context}/glossary.md`;
+    if (contextFiles.includes(glossary)) spec.push({ name: glossary, content: read(glossary) });
+    const constraints = `contexts/${context}/CONSTRAINTS.md`;
+    return {
+      spec,
+      constraints: contextFiles.includes(constraints) ? read(constraints) : null,
+    };
   }
 
   /** Normalizes an empty diff to a marker and truncates an oversized one. */

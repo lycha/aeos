@@ -80,6 +80,7 @@ function createMockGitGateway(): GitGateway {
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
+    listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn().mockReturnValue('diff --git a/src/file.ts b/src/file.ts'),
   };
 }
@@ -239,6 +240,8 @@ function defaultContext(): AssembledContext {
     settledDecisions: null,
     priorArtifacts: [],
     epicContext: [],
+    spec: [],
+    specPin: null,
     constraints: null,
     codeDiff: null,
   };
@@ -1312,6 +1315,36 @@ describe('TicketRunUseCase', () => {
   // --- Run records (I1-M1-003) ---
 
   describe('run records', () => {
+    it("assembles a child task's context against its parent epic's pin, on every assembly", async () => {
+      const specPin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+      const epic = runnableTicket({ id: 'AEOS-9', kind: 'EPIC', specPin });
+      const task = runnableTicket({ kind: 'TASK', parentId: 'AEOS-9' });
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockImplementation(
+        (_project: string, id: string) => (id === 'AEOS-9' ? epic : task),
+      );
+      (gitGateway.currentBranch as ReturnType<typeof vi.fn>).mockReturnValue('aeos/AEOS-9');
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const calls = (contextAssembler.assemble as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.length).toBeGreaterThan(1);
+      for (const call of calls) expect(call[3]).toEqual(specPin);
+    });
+
+    it('fails the run with the error when the pinned spec cannot be read', async () => {
+      (contextAssembler.assemble as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Cannot read the pinned spec AEOS-aeos@c0ffee1'),
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: expect.stringContaining('AEOS-aeos@c0ffee1'),
+      });
+      expect(executor.run).not.toHaveBeenCalled();
+    });
+
     it('fills spec_pin on every record of a spec-backed ticket', async () => {
       const specPin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
       (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(

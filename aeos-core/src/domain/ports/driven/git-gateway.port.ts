@@ -97,6 +97,13 @@ export interface GitGateway {
   showFile(dir: string, commit: string, path: string): string;
 
   /**
+   * Every file under `path` (relative to `dir`) as of `commit`, as paths
+   * relative to `dir`, sorted. Empty when the commit has no such directory;
+   * throws when the commit cannot be read.
+   */
+  listFiles(dir: string, commit: string, path: string): string[];
+
+  /**
    * True when `path` (relative to `dir`) differs between `commit` and `HEAD`,
    * or when `commit` cannot be read.
    */
