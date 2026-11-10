@@ -174,6 +174,10 @@ export async function runCli(...args: string[]): Promise<CliResult> {
   ];
   try {
     await buildProgram().parseAsync(['node', 'aeos', ...args]);
+  } catch (error) {
+    // As the entrypoint does with an error no command caught.
+    capture(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
   } finally {
     for (const spy of spies) spy.mockRestore();
   }

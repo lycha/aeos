@@ -282,6 +282,7 @@ export function AppShell({ container, cwd, buildProgram }: AppShellProps) {
     setTicketRunState(createInitialTicketRunShellState(commandLine));
 
     try {
+      container.checkPipelines(nextProjectContext.root);
       const result = await useCase.execute(
         nextProjectContext.id,
         nextProjectContext.root,

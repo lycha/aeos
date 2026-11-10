@@ -238,6 +238,20 @@ UPDATE cost_records SET "column" = 'SPEC_REVIEW' WHERE "column" = 'PRODUCT_SCOPI
       }
     },
   },
+  {
+    version: 13,
+    description: 'The pipeline last accepted for each ticket kind of a project',
+    apply: (db) => {
+      db.exec(`
+CREATE TABLE IF NOT EXISTS pipeline_state (
+  project_id   TEXT NOT NULL,
+  kind         TEXT NOT NULL,
+  columns_json TEXT NOT NULL,
+  accepted_at  TEXT NOT NULL,
+  PRIMARY KEY (project_id, kind)
+);`);
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

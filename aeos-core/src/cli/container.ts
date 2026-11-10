@@ -68,7 +68,9 @@ import { OpenCodeCliExecutor } from '../infrastructure/executor/opencode-cli-exe
 import { OllamaCliExecutor } from '../infrastructure/executor/ollama-cli-executor.adapter.js';
 import { YamlColumnSpecLoader } from '../infrastructure/spec-loader/yaml-column-spec-loader.adapter.js';
 import { YamlPipelineLoader } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
-import { Column } from '../domain/model/column.js';
+import { Column, displayOrder } from '../domain/model/column.js';
+import { PipelineGuard } from '../application/services/pipeline-guard.js';
+import { SqlitePipelineStateRepository } from '../infrastructure/persistence/sqlite-pipeline-state.repository.js';
 import { YamlAgentSpecLoader } from '../infrastructure/spec-loader/yaml-agent-spec-loader.adapter.js';
 import { FsRubricLoader } from '../infrastructure/filesystem/fs-rubric-loader.adapter.js';
 import { PreflightService } from '../application/services/preflight.js';
@@ -103,6 +105,11 @@ export interface Container {
   columnLabels: (projectPath: string) => ColumnLabels;
   /** The same by project id, for `aeos costs`; the defaults for a project that cannot be read. */
   columnLabelsOfProject: (projectId: string) => ColumnLabels;
+  /**
+   * Holds the project to its accepted pipelines: a changed pipelines file is
+   * accepted, or this throws while tickets of that kind are in flight.
+   */
+  checkPipelines: (projectPath: string) => void;
 }
 
 export function createContainer(): Container {
@@ -162,6 +169,23 @@ export function createContainer(): Container {
 
   const newPipelineLoader = (): YamlPipelineLoader =>
     new YamlPipelineLoader(new YamlColumnSpecLoader());
+
+  const newPipelineGuard = (): PipelineGuard =>
+    new PipelineGuard(
+      newPipelineLoader(),
+      new SqlitePipelineStateRepository(getDb()),
+      getTicketRepo(),
+      projectRepo,
+      getGateRecorder(),
+      // eslint-disable-next-line no-console
+      (line) => console.log(line),
+    );
+  // The columns in force, so a ticket still shows where a refused change left it.
+  const labelsOf = (projectPath: string): ColumnLabels =>
+    new YamlColumnSpecLoader().labels(
+      projectPath,
+      displayOrder(newPipelineGuard().accepted(projectPath)),
+    );
 
   const createExecutor = (agentSpec: AgentSpec) => {
     if (agentSpec.executor.type === 'stub') {
@@ -362,11 +386,12 @@ export function createContainer(): Container {
       return new CostsUseCase(getCostRepo(), configStore);
     },
     projectRepo,
-    columnLabels: (projectPath) => new YamlColumnSpecLoader().labels(projectPath),
+    columnLabels: labelsOf,
+    checkPipelines: (projectPath) => newPipelineGuard().check(projectPath),
     columnLabelsOfProject: (projectId) => {
       try {
         const entry = configStore.readRegistry().find((project) => project.id === projectId);
-        if (entry) return new YamlColumnSpecLoader().labels(entry.path);
+        if (entry) return labelsOf(entry.path);
       } catch {
         // A report across projects must not fail on one project's labels.
       }

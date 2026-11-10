@@ -90,8 +90,9 @@ export class YamlColumnSpecLoader implements ColumnSpecLoader {
    * The label of every column of the project. Throws, naming the files, when
    * the labels are not valid together. A spec file that is missing or cannot
    * be read contributes no label here; `load` reports it for its own column.
+   * `columns` are the project's, when they are not the ones its file lists.
    */
-  labels(root?: string): ColumnLabels {
+  labels(root?: string, columns = displayOrder(readPipelines(root))): ColumnLabels {
     const readYaml = (file: string): unknown => {
       try {
         return yaml.load(fs.readFileSync(path.join(aeosDir(root), file), 'utf-8'));
@@ -102,7 +103,6 @@ export class YamlColumnSpecLoader implements ColumnSpecLoader {
     const { byColumn } = specFiles(root);
     const specs: Partial<Record<Column, { label?: string }>> = {};
     const sourceOf = (column: Column): string => byColumn.get(column)?.file ?? 'project.json';
-    const columns = displayOrder(readPipelines(root));
     for (const column of columns) {
       const label = (byColumn.get(column)?.parsed as { label?: unknown } | null)?.label;
       if (typeof label === 'string') specs[column] = { label };

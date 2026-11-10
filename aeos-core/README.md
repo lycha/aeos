@@ -202,6 +202,14 @@ The file is checked every time it is loaded, and a command that needs it fails w
 
 `ticket move` takes a column of that ticket's own pipeline; anything else is refused with the list. The file is a protected path: an agentic run may not edit it.
 
+**The order of a kind may change only while none of its tickets is in flight**, that is, while every ticket of that kind is in `BACKLOG` or `DONE`. AEOS remembers the pipeline it last accepted for each kind and compares the file with it whenever a `ticket` or `orchestrator` command runs:
+
+- unchanged: nothing happens. A changed label or role is not a change of order.
+- changed, and no ticket of that kind is in flight: the change is accepted, one line says so, and a `pipeline-change` gate record with the old and new order is committed to `.aeos/tickets/pipelines/pipelines-gates.yaml` under your git identity.
+- changed, with tickets in flight: the command is refused. The message names each ticket and its column and prints the previous order. Finish those tickets, move them to `BACKLOG` or `DONE`, or restore the order.
+
+`EPIC` and `TASK` are judged separately. While a change is refused, `ticket list`, `ticket show`, `orchestrator status` and `costs` still work, with the accepted order.
+
 A project scaffolded before roles has specs without these fields. `aeos project sync` reports each as `drifted` (and `pipelines.yaml` as `missing`). Take the change: a spec with no `role` is `standard`, so until you do, the spec gate is recorded as an ordinary approval, the epic join and the criterion trace do not run, the final gate is not treated as one, and reviews are given no diff.
 
 ## Ticket State Machine
@@ -310,6 +318,7 @@ Every human decision at a gate is appended, as a structured record, to a YAML fi
 | `ticket answer` | `answer` | `approved` |
 | `ticket answer` on a spec-backed ticket | `amendment` | `approved` |
 | `ticket repin` | `repin` | `approved` |
+| a changed `pipelines.yaml`, accepted on the next command | `pipeline-change` | `approved` |
 | `ticket resolve` | `escalation-resolution` | `approved` |
 
 - **Late answers amend the spec.** On a spec-backed ticket, `ticket answer` writes each answered question into `.aeos/features/<feature>/decisions.yaml` as a `DECIDED` entry (`NEW-<n>`, becoming the next `AC-<n>`, citing the ticket and its questions file), runs the decisions lint, and commits `decide(<feature>): amendment from <ticket>`. If the lint fails, nothing is written and the ticket stays `BLOCKED`. Otherwise the ticket also stays `BLOCKED`: add the criterion to `spec.md` (the `spec-writer` skill), commit, then run `aeos ticket repin <ticket>`. That re-checks the feature as `--spec` does, moves the epic's pin to the `.aeos` `HEAD` (its tasks follow), and sets the ticket `READY`. Until then `ticket run` refuses every ticket pinned to that spec, and a second amendment is refused. The `amendment` record carries the column the ticket was in; the `repin` record's reason names both commits. A ticket with no spec is unblocked as before.

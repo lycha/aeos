@@ -14,7 +14,8 @@ export type GateKind =
   | 'answer'
   | 'escalation-resolution'
   | 'amendment'
-  | 'repin';
+  | 'repin'
+  | 'pipeline-change';
 
 export type GateVerdict = 'approved' | 'rejected' | 'overridden';
 

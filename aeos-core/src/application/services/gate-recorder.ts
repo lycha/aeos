@@ -7,6 +7,7 @@ import type { Column } from '../../domain/model/column.js';
 import type { GateKind, GateRecord, GateVerdict } from '../../domain/model/gate-record.js';
 import { runRecordPaths } from '../../domain/model/run-record.js';
 import type { Ticket } from '../../domain/model/ticket.js';
+import type { TicketKind } from '../../domain/model/ticket-kind.js';
 import type { GateRecordStore } from '../../domain/ports/driven/gate-record-store.port.js';
 import type { GitGateway } from '../../domain/ports/driven/git-gateway.port.js';
 import type { RunRecordStore } from '../../domain/ports/driven/run-record-store.port.js';
@@ -41,6 +42,33 @@ export class GateRecorder {
       );
     }
     return identity;
+  }
+
+  /**
+   * Records that a person changed a kind's pipeline. No ticket is its subject,
+   * so the records share one file, `.aeos/tickets/pipelines/pipelines-gates.yaml`,
+   * and the old and new order are the reason.
+   */
+  recordPipelineChange(
+    projectPath: string,
+    kind: TicketKind,
+    from: readonly Column[],
+    to: readonly Column[],
+  ): GateRecord {
+    return this.store.append(projectPath, {
+      gate: 'pipeline-change',
+      ticket: 'pipelines',
+      column: null,
+      from_column: null,
+      to_column: null,
+      decided_by: this.decidedBy(projectPath),
+      decided_at: new Date().toISOString(),
+      verdict: 'approved',
+      reason: `${kind} pipeline changed from ${from.join(' → ')} to ${to.join(' → ')}`,
+      overrides: null,
+      evidence: [],
+      spec_pin: null,
+    });
   }
 
   /**

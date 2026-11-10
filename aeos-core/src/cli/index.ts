@@ -127,6 +127,17 @@ export function buildProgram(): Command {
   );
   registerCostsCommand(program, () => container.costs, container.columnLabelsOfProject);
 
+  // Every command that acts on tickets is held to the accepted pipelines
+  // (I1-M4-005c). The ones that only read go on, with the accepted order.
+  const READ_ONLY = new Set(['ticket list', 'ticket show', 'orchestrator status']);
+  program.hook('preAction', (_program, action) => {
+    const group = action.parent?.name() ?? '';
+    if (!['ticket', 'orchestrator'].includes(group)) return;
+    if (READ_ONLY.has(`${group} ${action.name()}`)) return;
+    const projectPath = container.projectRepo.findRoot(process.cwd());
+    if (projectPath) container.checkPipelines(projectPath);
+  });
+
   return program;
 }
 
