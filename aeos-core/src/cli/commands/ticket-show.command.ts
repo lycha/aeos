@@ -83,8 +83,8 @@ export function registerTicketShowCommand(
         // eslint-disable-next-line no-console
         console.log(`Parent: ${result.parent.id} — ${result.parent.title}`);
       }
-      // eslint-disable-next-line no-console
       // The one place the identifier is shown, so a person can always find it.
+      // eslint-disable-next-line no-console
       console.log(`Column: ${labels[result.ticket.column]} (${result.ticket.column})`);
       // eslint-disable-next-line no-console
       console.log(`State:  ${subState}`);
