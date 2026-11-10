@@ -100,6 +100,20 @@ describe('stub end-to-end pipeline', () => {
     }
   });
 
+  it('accepts a budget on a stub run and completes it', async () => {
+    await runCli('install');
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const epic = await createTicket('An epic');
+    await runCli('ticket', 'approve', epic);
+
+    const run = await runCli('orchestrator', 'run', epic, '--budget', '5');
+
+    // Columns advance manually, so the run stops for approval after one column.
+    expect(run.output).toContain(`${epic} — AWAITING_APPROVAL`);
+    expect(run.exitCode).toBe(0);
+    expect(ticketState(epic)).toMatchObject({ column: 'PRODUCT_SCOPING', subState: 'SIGNED_OFF' });
+  });
+
   it('escalates when the reviewer output carries no verdict trailer', async () => {
     // Wrap what the harness installed, not the spy itself.
     const stubRun = vi.mocked(StubExecutor.prototype.run).getMockImplementation()!;

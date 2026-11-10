@@ -1,7 +1,7 @@
 // Driving port — TicketDodApprove use case interface (final human gate → DONE)
 
 export type TicketDodApproveResult =
-  | { status: 'approved'; ticketId: string; totalCostUsd: number }
+  | { status: 'approved'; ticketId: string; totalCostUsd: number | null }
   | { status: 'cancelled'; ticketId: string }
   | { status: 'error'; ticketId: string; error: string };
 

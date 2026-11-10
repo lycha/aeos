@@ -80,7 +80,11 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
 
     // 7. Calculate total cost
     const costRecords = this.costRepo.findByTicket(projectId, ticketId);
-    const totalCostUsd = costRecords.reduce((sum, r) => sum + r.costUsd, 0);
+    // One unknown cost makes the total unknown; a partial sum would read as the whole.
+    const totalCostUsd = costRecords.reduce<number | null>(
+      (sum, r) => (sum === null || r.costUsd === null ? null : sum + r.costUsd),
+      0,
+    );
 
     // 8. Return success
     return { status: 'approved', ticketId, totalCostUsd };

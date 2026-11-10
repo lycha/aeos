@@ -1068,7 +1068,7 @@ export class TicketRunUseCase implements TicketRunPort {
       model: model ?? 'unknown',
       inputTokens: usage?.inputTokens ?? 0,
       outputTokens: usage?.outputTokens ?? 0,
-      costUsd: usage?.costUsd ?? 0,
+      costUsd: usage?.costUsd ?? null,
       recordedAt: new Date().toISOString(),
     });
   }
@@ -1153,7 +1153,7 @@ export class TicketRunUseCase implements TicketRunPort {
         role,
         inputTokens: usage?.inputTokens ?? 0,
         outputTokens: usage?.outputTokens ?? 0,
-        costUsd: usage?.costUsd ?? 0,
+        costUsd: usage?.costUsd ?? null,
       },
     });
   }

@@ -354,6 +354,7 @@ Every exit is a named halt reason, including the successful ones.
 | `NEEDS_HUMAN`            | A ticket escalated, blocked, or was interrupted          |
 | `FAILED`                 | A ticket failed outright                                 |
 | `BUDGET_EXCEEDED`        | Spend reached the ceiling                                |
+| `COST_UNKNOWN`           | The epic has a ceiling, but a run recorded no known cost |
 
 ### Controls
 
@@ -493,7 +494,9 @@ Every executor invocation (both agent and reviewer) records token usage and cost
 
 `claude-cli` runs with `--output-format stream-json --verbose`; tokens and cost come from the final `result` line of that stream. The cost is the CLI's client-side estimate, not billing data. The other executors do not report usage yet.
 
-`aeos ticket show <id>` surfaces this history back to the operator as an `Executions:` section showing the column, agent, executor, and model used.
+An unknown cost is stored and shown as `unknown`, never as `$0.00`. Only `claude-cli` and `stub` report cost, so `aeos orchestrator run --budget` (or a budget persisted earlier) is refused when any agent of the epic or task columns resolves to `auggie-cli`, `opencode-cli` or `ollama-cli`; the message names the agent and the executor. Spend is the sum of known costs. If a run with an unknown cost is recorded against a budgeted epic anyway (an `--executor` override, or an executor failure), the orchestrator halts with `COST_UNKNOWN`.
+
+`aeos ticket show <id>` surfaces this history back to the operator as an `Executions:` section showing the column, agent, executor, model, and cost of each run.
 
 ## Development
 

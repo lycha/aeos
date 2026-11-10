@@ -19,6 +19,7 @@ import type { Ticket } from '../domain/model/ticket.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
+import type { ExecutorInvocation } from '../domain/model/executor-invocation.js';
 import type { TicketRunEvent } from '../domain/model/ticket-run-event.js';
 
 // --- Mock factories ---
@@ -393,6 +394,33 @@ describe('TicketRunUseCase', () => {
         (event) => event.type === 'executor.stderr.chunk' && event.payload.source === 'reviewer',
       ),
     ).toBe(true);
+  });
+
+  it('records an unknown cost as null when the executor reports no usage', async () => {
+    const events: TicketRunEvent[] = [];
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, undefined, {
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(costRepo.record).toHaveBeenCalledWith(expect.objectContaining({ costUsd: null }));
+    const costEvents = events.filter((event) => event.type === 'cost.recorded');
+    expect(costEvents.length).toBeGreaterThan(0);
+    for (const event of costEvents) expect(event.payload).toMatchObject({ costUsd: null });
+  });
+
+  it('records the reported cost when the executor reports usage', async () => {
+    const reported = await executor.run({} as ExecutorInvocation);
+    (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...reported,
+      usage: { inputTokens: 3, outputTokens: 4, costUsd: 0.5 },
+    });
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(costRepo.record).toHaveBeenCalledWith(
+      expect.objectContaining({ inputTokens: 3, outputTokens: 4, costUsd: 0.5 }),
+    );
   });
 
   it('should create executors from worker and reviewer agent specs', async () => {

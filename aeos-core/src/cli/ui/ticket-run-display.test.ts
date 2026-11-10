@@ -56,4 +56,21 @@ describe('ticket-run-display — agent visibility', () => {
     // The operator can tell *which* agent is working, not just "worker".
     expect(output()).toContain('agent=architect-agent');
   });
+
+  it('prints an unknown cost as unknown, and a known one in dollars', () => {
+    const { stream, output } = fakeStdout();
+    const display = createTicketRunDisplay(stream);
+    display.start();
+    const cost = (costUsd: number | null): TicketRunEvent =>
+      event({
+        type: 'cost.recorded',
+        payload: { role: 'worker', inputTokens: 1, outputTokens: 2, costUsd },
+      });
+
+    display.observer.onEvent?.(cost(null));
+    display.observer.onEvent?.(cost(0.0123));
+
+    expect(output()).toContain('cost=unknown');
+    expect(output()).toContain('cost=$0.0123');
+  });
 });

@@ -24,6 +24,8 @@ export const HaltReason = {
   FAILED: 'FAILED',
   /** Spend reached the configured ceiling. */
   BUDGET_EXCEEDED: 'BUDGET_EXCEEDED',
+  /** The epic has a ceiling, but a recorded run has no known cost to count against it. */
+  COST_UNKNOWN: 'COST_UNKNOWN',
   /** A column is set to manual advance, so the operator must approve. */
   AWAITING_APPROVAL: 'AWAITING_APPROVAL',
   /** The operator interrupted the run (Ctrl+C); the in-flight ticket was stopped. */
@@ -46,8 +48,10 @@ export interface OrchestratorPolicyInput {
   readonly epic: Ticket;
   /** Child tasks of the epic, in creation order. Empty for an undecomposed epic. */
   readonly children: readonly Ticket[];
-  /** Total USD recorded against the epic and its children so far. */
+  /** Total known USD recorded against the epic and its children so far. */
   readonly spentUsd: number;
+  /** True when at least one of those records has no known cost. */
+  readonly costUnknown: boolean;
   /** Ceiling in USD, or null for no ceiling. */
   readonly budgetUsd: number | null;
   /** Whether the given column may advance without a human. */
@@ -140,7 +144,7 @@ function decideForTicket(
  * one step at a time keeps the loop restartable and every decision auditable.
  */
 export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAction {
-  const { epic, children, spentUsd, budgetUsd, autoAdvance } = input;
+  const { epic, children, spentUsd, costUnknown, budgetUsd, autoAdvance } = input;
 
   // Budget is checked first: an exhausted budget stops everything, regardless
   // of what the pipeline would otherwise do next.
@@ -149,6 +153,15 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
       kind: 'halt',
       reason: HaltReason.BUDGET_EXCEEDED,
       message: `Epic ${epic.id} has spent $${spentUsd.toFixed(2)} against a $${budgetUsd.toFixed(2)} ceiling.`,
+    };
+  }
+
+  // A ceiling over a total with a hole in it would only look enforced.
+  if (budgetUsd !== null && costUnknown) {
+    return {
+      kind: 'halt',
+      reason: HaltReason.COST_UNKNOWN,
+      message: `Epic ${epic.id} has a $${budgetUsd.toFixed(2)} ceiling, but a recorded run has no known cost, so spend cannot be checked against it.`,
     };
   }
 

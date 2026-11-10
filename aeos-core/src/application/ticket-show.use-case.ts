@@ -33,6 +33,7 @@ export class TicketShowUseCase implements TicketShowPort {
       agent: record.agent,
       column: record.column,
       recordedAt: record.recordedAt,
+      costUsd: record.costUsd,
     }));
 
     // Lineage: an epic shows what it decomposed into, a task shows what it

@@ -95,7 +95,7 @@ export type TicketRunArtifactEvent =
         role: 'worker' | 'reviewer';
         inputTokens: number;
         outputTokens: number;
-        costUsd: number;
+        costUsd: number | null;
       };
     });
 

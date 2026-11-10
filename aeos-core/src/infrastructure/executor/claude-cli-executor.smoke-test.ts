@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     console.log('✓ ClaudeCodeCliExecutor: output is non-empty valid text');
 
     // --- 5. Usage and cost reported ---
-    if (!result.usage || result.usage.costUsd <= 0) {
+    if (!result.usage?.costUsd || result.usage.costUsd <= 0) {
       console.error(`✗ Expected a cost greater than zero, got ${result.usage?.costUsd}`);
       process.exit(1);
     }

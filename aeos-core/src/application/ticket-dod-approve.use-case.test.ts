@@ -122,6 +122,15 @@ describe('TicketDodApproveUseCase', () => {
     }
   });
 
+  it('reports the total cost as unknown when any record is unknown', () => {
+    (costRepo.findByTicket as ReturnType<typeof vi.fn>).mockReturnValue([
+      { costUsd: 0.05 },
+      { costUsd: null },
+    ]);
+    const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true);
+    expect(result).toMatchObject({ status: 'approved', totalCostUsd: null });
+  });
+
   it('should transition column to DONE on approval', () => {
     useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true);
     expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'DONE');

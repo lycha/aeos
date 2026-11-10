@@ -7,7 +7,12 @@
 // Every loop exit is a HaltReason, including the happy ones. "Why did this
 // stop?" is always answerable without reading logs.
 
-import { Column, isValidColumn } from '../domain/model/column.js';
+import {
+  Column,
+  EPIC_COLUMN_ORDER,
+  isValidColumn,
+  TASK_COLUMN_ORDER,
+} from '../domain/model/column.js';
 import { OrchestratorStatus, type OrchestratorState } from '../domain/model/orchestrator-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import {
@@ -19,6 +24,9 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
+import type { AgentSpecLoader } from '../domain/ports/driven/agent-spec-loader.port.js';
+import { reportsCost } from '../domain/services/executor-capabilities.js';
+import type { ExecutorConfigResolver } from './services/executor-config-resolver.js';
 import type { OrchestratorStateRepository } from '../domain/ports/driven/orchestrator-state-repository.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketRunObserver } from '../domain/model/ticket-run-event.js';
@@ -48,6 +56,10 @@ const STALE_AFTER_MS = 5 * 60 * 1000;
 /** Minimum gap between heartbeat writes; events arrive far faster than this. */
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 
+function sumKnown(costs: readonly (number | null)[]): number {
+  return costs.reduce<number>((total, cost) => total + (cost ?? 0), 0);
+}
+
 export class OrchestratorUseCase implements OrchestratorPort {
   private lastHeartbeatMs = 0;
   private interruptRequested = false;
@@ -61,6 +73,8 @@ export class OrchestratorUseCase implements OrchestratorPort {
     private readonly ticketRun: TicketRunPort,
     private readonly ticketApprove: TicketApprovePort,
     private readonly gitGateway: GitGateway,
+    private readonly agentSpecLoader: AgentSpecLoader,
+    private readonly executorConfigResolver: ExecutorConfigResolver,
   ) {}
 
   /**
@@ -121,6 +135,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
 
     // A budget supplied on this run persists, so later runs inherit the ceiling.
     const budgetUsd = options.budgetUsd ?? existing?.budgetUsd ?? null;
+    if (budgetUsd !== null) this.assertExecutorsReportCost(projectPath, epicId);
     const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
     const steps: OrchestratorStep[] = [];
 
@@ -146,12 +161,14 @@ export class OrchestratorUseCase implements OrchestratorPort {
           throw new Error(`Ticket ${epicId} disappeared mid-run`);
         }
         const children = this.ticketRepo.findChildren(projectId, epicId);
-        const spentUsd = this.spendFor(projectId, epicId);
+        const costs = this.costsFor(projectId, epicId);
+        const spentUsd = sumKnown(costs);
 
         const action = decideNextAction({
           epic: current,
           children,
           spentUsd,
+          costUnknown: costs.includes(null),
           budgetUsd,
           autoAdvance: (column) => this.autoAdvance(projectPath, column),
         });
@@ -330,20 +347,47 @@ export class OrchestratorUseCase implements OrchestratorPort {
   }
 
   /**
-   * Sums recorded spend for the epic and every child.
+   * A budget is only a ceiling if every run reports what it cost. Refuses when
+   * any agent of any pipeline column resolves to an executor that cannot.
+   */
+  private assertExecutorsReportCost(projectPath: string, epicId: string): void {
+    for (const column of [...EPIC_COLUMN_ORDER, ...TASK_COLUMN_ORDER]) {
+      if (column === Column.BACKLOG || column === Column.DONE || column === Column.DOD_GATE) {
+        continue;
+      }
+      const spec = this.columnSpecLoader.load(column, projectPath);
+      for (const agentFile of [spec.workerAgentFile, spec.reviewerAgentFile]) {
+        const agent = this.agentSpecLoader.load(agentFile, projectPath);
+        const { executorType } = this.executorConfigResolver.resolveExecutorConfig(
+          projectPath,
+          agent,
+        );
+        if (!reportsCost(executorType)) {
+          throw new Error(
+            `Cannot run ${epicId} with a budget: agent '${agent.name}' in ${column} resolves to executor '${executorType}', which does not report cost. Use an executor that does, or run without a budget.`,
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * The recorded cost of every run for the epic and its children; null where
+   * the executor reported none.
    *
    * Cost is already captured per invocation by TicketRunUseCase, so this is a
    * rollup rather than new accounting.
    */
-  private spendFor(projectId: string, epicId: string): number {
+  private costsFor(projectId: string, epicId: string): (number | null)[] {
     const ticketIds = [epicId, ...this.ticketRepo.findChildren(projectId, epicId).map((t) => t.id)];
-    let total = 0;
-    for (const ticketId of ticketIds) {
-      for (const record of this.costRepo.findByTicket(projectId, ticketId)) {
-        total += record.costUsd;
-      }
-    }
-    return total;
+    return ticketIds.flatMap((ticketId) =>
+      this.costRepo.findByTicket(projectId, ticketId).map((record) => record.costUsd),
+    );
+  }
+
+  /** Known spend only: an unknown cost is not counted as zero, it halts a budgeted epic. */
+  private spendFor(projectId: string, epicId: string): number {
+    return sumKnown(this.costsFor(projectId, epicId));
   }
 
   /**

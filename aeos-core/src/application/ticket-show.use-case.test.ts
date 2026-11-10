@@ -91,6 +91,32 @@ describe('TicketShowUseCase', () => {
     }
   });
 
+  it('carries each execution cost through, null when unknown', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
+    (costRepo.findByTicket as ReturnType<typeof vi.fn>).mockReturnValue([
+      {
+        executor: 'claude-cli',
+        model: 'm',
+        agent: 'a',
+        column: 'TECH_SPEC',
+        recordedAt: 't',
+        costUsd: 0.5,
+      },
+      {
+        executor: 'ollama-cli',
+        model: 'm',
+        agent: 'b',
+        column: 'TECH_SPEC',
+        recordedAt: 'u',
+        costUsd: null,
+      },
+    ]);
+
+    const result = useCase.execute(defaultInput);
+
+    expect(result.ok && result.executions.map((e) => e.costUsd)).toEqual([0.5, null]);
+  });
+
   it('should call findById with projectId and ticketId', () => {
     const ticket = makeTicket();
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(ticket);

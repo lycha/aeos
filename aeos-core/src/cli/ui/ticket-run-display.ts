@@ -1,3 +1,4 @@
+import { formatCostUsd } from '../../domain/model/cost-record.js';
 import * as readline from 'node:readline';
 
 import type {
@@ -186,7 +187,7 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
         break;
       case 'cost.recorded':
         this.appendLogLine(
-          `[cost] ${event.payload.role} | in=${event.payload.inputTokens} out=${event.payload.outputTokens} usd=${event.payload.costUsd.toFixed(4)}`,
+          `[cost] ${event.payload.role} | in=${event.payload.inputTokens} out=${event.payload.outputTokens} cost=${formatCostUsd(event.payload.costUsd)}`,
         );
         break;
       case 'executor.stdout.chunk':

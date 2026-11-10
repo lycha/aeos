@@ -220,6 +220,8 @@ export function createContainer(): Container {
         this.ticketRun,
         this.ticketApprove,
         gitGateway,
+        new YamlAgentSpecLoader(),
+        new ExecutorConfigResolver(projectRepo),
       );
     },
     get ticketDodApprove() {

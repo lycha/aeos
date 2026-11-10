@@ -29,6 +29,15 @@ function createMockTicketShowUseCase(): TicketShowPort {
           agent: 'worker-agent',
           column: 'PRODUCT_SCOPING',
           recordedAt: '2026-01-01T00:00:00.000Z',
+          costUsd: 0.0123,
+        },
+        {
+          executor: 'ollama-cli',
+          model: 'llama',
+          agent: 'reviewer-agent',
+          column: 'PRODUCT_SCOPING',
+          recordedAt: '2026-01-01T00:01:00.000Z',
+          costUsd: null,
         },
       ],
     }),
@@ -92,6 +101,17 @@ describe('registerTicketShowCommand', () => {
     expect(consoleSpy).toHaveBeenCalledWith('Artifacts:');
     expect(consoleSpy).toHaveBeenCalledWith('  • AEOS-1-ticket.md');
     expect(consoleSpy).toHaveBeenCalledWith('  • AEOS-1-prd.md');
+  });
+
+  it('shows the cost of each execution, and unknown when it is null', () => {
+    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '  • PRODUCT_SCOPING (worker-agent): claude-cli / claude-opus-4-6 — $0.0123',
+    );
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '  • PRODUCT_SCOPING (reviewer-agent): ollama-cli / llama — unknown',
+    );
   });
 
   it('should display em-dash for null sub_state', () => {

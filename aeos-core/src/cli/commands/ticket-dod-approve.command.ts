@@ -4,6 +4,7 @@ import * as readline from 'node:readline';
 import type { Command } from 'commander';
 import type { TicketDodApprovePort } from '../../domain/ports/driving/ticket-dod-approve.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { formatCostUsd } from '../../domain/model/cost-record.js';
 import type { RubricLoader } from '../../domain/ports/driven/rubric-loader.port.js';
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
 
@@ -83,7 +84,7 @@ export function registerTicketDodApproveCommand(
           case 'approved':
             // eslint-disable-next-line no-console
             console.log(
-              `✓ Ticket ${result.ticketId} approved: DOD_GATE → DONE (total cost: $${result.totalCostUsd.toFixed(4)})`,
+              `✓ Ticket ${result.ticketId} approved: DOD_GATE → DONE (total cost: ${formatCostUsd(result.totalCostUsd)})`,
             );
             break;
           case 'cancelled':

@@ -14,6 +14,8 @@ export interface TicketExecutionInfo {
   agent: string;
   column: string;
   recordedAt: string;
+  /** Null when the executor did not report a cost. */
+  costUsd: number | null;
 }
 
 export type TicketShowResult =

@@ -36,6 +36,7 @@ function decide(input: Partial<Parameters<typeof decideNextAction>[0]> = {}) {
     epic: epic(),
     children: [],
     spentUsd: 0,
+    costUnknown: false,
     budgetUsd: null,
     autoAdvance: alwaysAuto,
     ...input,
@@ -52,6 +53,22 @@ describe('decideNextAction', () => {
       if (action.kind !== 'halt') return;
       expect(action.reason).toBe(HaltReason.BUDGET_EXCEEDED);
       expect(action.message).toContain('$50.00');
+    });
+
+    it('halts when recorded costs total more than the budget', () => {
+      const action = decide({ spentUsd: 1.2, budgetUsd: 1.0 });
+
+      expect(action).toMatchObject({ kind: 'halt', reason: HaltReason.BUDGET_EXCEEDED });
+    });
+
+    it('halts with COST_UNKNOWN when a budgeted epic has a cost it cannot count', () => {
+      const action = decide({ spentUsd: 0.5, costUnknown: true, budgetUsd: 5 });
+
+      expect(action).toMatchObject({ kind: 'halt', reason: HaltReason.COST_UNKNOWN });
+    });
+
+    it('ignores an unknown cost when no ceiling is set', () => {
+      expect(decide({ costUnknown: true, budgetUsd: null }).kind).toBe('run');
     });
 
     it('proceeds while under the ceiling', () => {
