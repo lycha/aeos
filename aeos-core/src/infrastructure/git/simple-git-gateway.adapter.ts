@@ -146,9 +146,15 @@ export class SimpleGitGateway implements GitGateway {
       .sort();
   }
 
-  pathChangedSince(dir: string, commit: string, filePath: string): boolean {
+  pathChangedSince(
+    dir: string,
+    commit: string,
+    filePath: string,
+    excluding: string[] = [],
+  ): boolean {
+    const excluded = excluding.map((excludedPath) => `:(exclude)${excludedPath}`);
     try {
-      execFileSync('git', ['diff', '--quiet', commit, 'HEAD', '--', filePath], {
+      execFileSync('git', ['diff', '--quiet', commit, 'HEAD', '--', filePath, ...excluded], {
         cwd: dir,
         stdio: 'ignore',
       });
@@ -156,6 +162,12 @@ export class SimpleGitGateway implements GitGateway {
     } catch {
       return true;
     }
+  }
+
+  userIdentity(dir: string): string | null {
+    const name = this.read(dir, ['config', 'user.name']);
+    const email = this.read(dir, ['config', 'user.email']);
+    return name && email ? `${name} <${email}>` : null;
   }
 
   changedFiles(dir: string): string[] {

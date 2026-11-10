@@ -54,7 +54,7 @@ aeos ticket run MYPRJ-1 --executor opencode-cli --model ollama/qwen2.5-coder:14b
 aeos ticket approve MYPRJ-1
 
 # Optional: move a ticket directly to any workflow status
-aeos ticket move MYPRJ-1 QA
+aeos ticket move MYPRJ-1 QA --reason "Built by hand; skipping to QA."
 
 # 6. Repeat steps 4–5 for each column, then final approval
 aeos ticket dod-approve MYPRJ-1
@@ -103,7 +103,7 @@ Each column follows the same cycle:
 5. **Review** — a reviewer agent (on a _different model_ from the worker) evaluates against column-specific rubrics and emits a machine-readable verdict: `APPROVED`, `APPROVED_WITH_WARNINGS`, or `REJECTED`. Only `BLOCKER` findings gate; warnings are recorded on the artifact and do not block.
 6. **Revision loop** — a `REJECTED` review, or a failed check, sends the artifact back to the worker with the review or the check's output attached, up to the configured cap. See [Review Loop](#review-loop).
 7. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
-8. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
+8. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move --reason`). Either way the decision is written to the gate records (see [Gate records](#gate-records))
 
 ## What `project init` creates
 
@@ -220,10 +220,32 @@ In other words:
 Operators can deliberately override the normal path:
 
 - `aeos ticket ready <id>` sets any non-`BACKLOG`, non-`DONE` ticket to `READY`
-- `aeos ticket sign-off <id>` manually marks any non-`BACKLOG`, non-`DONE` ticket as `SIGNED_OFF`
-- `aeos ticket move <id> <status>` moves a ticket to any column; non-terminal targets are reset to `READY`, while `BACKLOG` and `DONE` use `null`
+- `aeos ticket sign-off <id> --reason <text>` manually marks any non-`BACKLOG`, non-`DONE` ticket as `SIGNED_OFF`
+- `aeos ticket move <id> <status> --reason <text>` moves a ticket to any column; non-terminal targets are reset to `READY`, while `BACKLOG` and `DONE` use `null`
 
 So the domain state machine is intentionally permissive for operator control, while the normal workflow policy is enforced by the higher-level ticket commands.
+
+### Gate records
+
+Every human decision at a gate is appended, as a structured record, to a YAML file in the `.aeos` repository and committed there, **before** the ticket changes state. If the record cannot be written, the command fails and the ticket stays where it was.
+
+| Command | `gate` | `verdict` |
+| --- | --- | --- |
+| `ticket approve` out of `SPEC_REVIEW` | `spec` | `approved` |
+| `ticket approve` anywhere else | `column-approval` | `approved` |
+| `ticket dod-approve` (yes / no) | `definition-of-done` | `approved` / `rejected` |
+| `ticket sign-off` | `sign-off-override` | `overridden` |
+| `ticket move` | `move-override` | `overridden` |
+| `ticket answer` | `answer` | `approved` |
+| `ticket resolve` | `escalation-resolution` | `approved` |
+
+- **Where.** A spec-backed ticket (its own pin or its epic's): `.aeos/features/<feature>/gates.yaml`. Any other ticket: `.aeos/tickets/<id>/<id>-gates.yaml`. Ids are `GATE-1`, `GATE-2`, … within a file; records are appended and never rewritten. The format is `schemas/gates.schema.json`.
+- **Who.** `decided_by` is `user.name <user.email>` of the project repository. With neither configured, the command is refused and tells you to set them.
+- **Why.** `ticket move` and `ticket sign-off` require `--reason <text>`, at least ten characters. `ticket dod-approve` asks for one when the answer is no. Existing scripts that call `move` or `sign-off` without `--reason` now fail.
+- **What was overridden.** A `sign-off-override` names, in `overrides`, the run id of the latest review or checks verdict of that column.
+- **Evidence.** Each record cites the review, the checks table and the run records of the column decided, and the spec pin in force.
+
+When the orchestrator advances an `advanceMode: auto` column, no person decided, and nothing is recorded.
 
 ## Executors
 
@@ -329,8 +351,8 @@ Notes:
 | `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, recorded executions, and run ids |
 | `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |
 | `aeos ticket approve <id>`                                   | Advance a SIGNED_OFF ticket to the next column                             |
-| `aeos ticket sign-off <id>`                                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
-| `aeos ticket move <id> <status>`                             | Human override — move a ticket directly to any workflow status             |
+| `aeos ticket sign-off <id> --reason <text>`                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
+| `aeos ticket move <id> <status> --reason <text>`             | Human override — move a ticket directly to any workflow status             |
 | `aeos ticket answer <id>`                                    | Unblock a `BLOCKED` ticket after answering pre-flight questions            |
 | `aeos ticket resolve <id>`                                   | Resume an `ESCALATED` ticket after writing a decision in its `escalation.md` |
 | `aeos ticket dod-approve <id>`                               | Final human gate — mark ticket as DONE _(not yet implemented)_             |
@@ -393,7 +415,7 @@ The epic is refused, with the reason, unless all of this holds, checked in this 
 
 Steps 2 and 3 are one run of the linter, which needs `python3` with the `PyYAML` and `jsonschema` modules; a missing one is named in the error. `--spec` cannot be combined with `--parent`.
 
-The pin is the triple `{ repo, commit, path }`: `<project key>-aeos`, the `HEAD` of the `.aeos` repository at creation, and `features/<feature>`. A task has no pin of its own; it uses its epic's. `aeos ticket show` prints the pin for both, and warns `spec has moved since this epic was pinned` once the feature has later commits. The pin is also written to every run record (`spec_pin`), to the pull request body, and to each task commit as a `Spec:` trailer.
+The pin is the triple `{ repo, commit, path }`: `<project key>-aeos`, the `HEAD` of the `.aeos` repository at creation, and `features/<feature>`. A task has no pin of its own; it uses its epic's. `aeos ticket show` prints the pin for both, and warns `spec has moved since this epic was pinned` once the feature has later commits (gate records, which live in the same directory, do not count). The pin is also written to every run record (`spec_pin`), to the pull request body, and to each task commit as a `Spec:` trailer.
 
 Every prompt for a spec-backed epic and for its tasks (preflight, worker and reviewer) opens its context with a `## Specification (pinned <repo>@<commit>)` section: `spec.md`, `decisions.yaml` and every `features/*.feature`, plus `contexts/<context>/glossary.md` when the front matter of `spec.md` (or `meta` of `decisions.yaml`) names a `context`. That context's `CONSTRAINTS.md` is appended to the project's `.aeos/CONSTRAINTS.md`. All of it is read through git at the pinned commit, never from the working tree, so editing the spec does not change what a running epic is told; a pinned commit that can no longer be read fails the run. A task still receives its epic's tech spec as before. A ticket with no pin gets exactly the prompt it got before.
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { TicketDodApproveUseCase } from './ticket-dod-approve.use-case.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
@@ -46,6 +47,7 @@ function createMockGitGateway(): GitGateway {
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
+    userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
     listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn().mockReturnValue(''),
   };
@@ -78,6 +80,16 @@ function createMockCostRepo(): CostRepository {
     findByFilters: vi.fn().mockReturnValue([]),
   };
 }
+
+// Shared by every describe below: the recorder is a mock, reset per test.
+const gateRecorder = { decidedBy: vi.fn(), record: vi.fn() };
+const recorder = gateRecorder as unknown as GateRecorder;
+const callOrder = (mock: unknown): number =>
+  (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+beforeEach(() => {
+  gateRecorder.decidedBy.mockReset();
+  gateRecorder.record.mockReset();
+});
 
 const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
@@ -117,8 +129,60 @@ describe('TicketDodApproveUseCase', () => {
       stateMachine,
       gitGateway,
       costRepo,
+      recorder,
     );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(dodGateTicket());
+  });
+
+  describe('gate record', () => {
+    it('records the approval as the definition-of-done gate before the ticket is DONE', () => {
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true);
+
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, dodGateTicket(), {
+        gate: 'definition-of-done',
+        verdict: 'approved',
+        fromColumn: 'DOD_GATE',
+        toColumn: 'DONE',
+      });
+      expect(callOrder(gateRecorder.record)).toBeLessThan(callOrder(stateMachine.transition));
+    });
+
+    it('records a no as a rejection, with its reason, and leaves the ticket in DOD_GATE', () => {
+      const result = useCase.execute(
+        PROJECT_ID,
+        PROJECT_PATH,
+        TICKET_ID,
+        false,
+        'AC-3 is not demonstrated.',
+      );
+
+      expect(result).toEqual({ status: 'cancelled', ticketId: TICKET_ID });
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, dodGateTicket(), {
+        gate: 'definition-of-done',
+        verdict: 'rejected',
+        reason: 'AC-3 is not demonstrated.',
+      });
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it('does not mark the ticket DONE when the record cannot be written', () => {
+      gateRecorder.record.mockImplementation(() => {
+        throw new Error('disk full');
+      });
+
+      expect(() => useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true)).toThrow('disk full');
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it('records nothing for a ticket that is not at the gate', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...dodGateTicket(),
+        column: 'QA',
+      });
+
+      expect(useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true).status).toBe('error');
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
   });
 
   it('should approve a DOD_GATE ticket and return approved status with total cost', () => {

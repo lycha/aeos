@@ -64,6 +64,8 @@ export class ContextAssembler {
     // 2. Detect decisions artifact and read it when present
     const decisionsFilename = `${ticketId}-decisions.md`;
     const questionsFilename = `${ticketId}-questions.md`;
+    // The gate records of a ticket with no spec: a log of decisions, not an input.
+    const gatesFilename = `${ticketId}-gates.yaml`;
     const allFilenames = this.artifactStore.listArtifacts(projectRoot, ticketId);
     const hasDecisions = allFilenames.includes(decisionsFilename);
     const settledDecisions = hasDecisions
@@ -76,6 +78,7 @@ export class ContextAssembler {
         (filename) =>
           filename !== ticketFilename &&
           filename !== decisionsFilename &&
+          filename !== gatesFilename &&
           !(hasDecisions && filename === questionsFilename),
       )
       .map((filename) => ({

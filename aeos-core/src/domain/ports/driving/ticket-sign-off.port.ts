@@ -6,6 +6,8 @@ export interface TicketSignOffInput {
   projectId: string;
   projectPath: string;
   ticketId: string;
+  /** Why the review is being overridden. Recorded as a gate; at least ten characters. */
+  reason: string;
 }
 
 export type TicketSignOffResult =

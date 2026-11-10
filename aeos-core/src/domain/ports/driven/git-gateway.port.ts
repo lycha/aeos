@@ -105,7 +105,13 @@ export interface GitGateway {
 
   /**
    * True when `path` (relative to `dir`) differs between `commit` and `HEAD`,
-   * or when `commit` cannot be read.
+   * or when `commit` cannot be read. Paths in `excluding` are not compared.
    */
-  pathChangedSince(dir: string, commit: string, path: string): boolean;
+  pathChangedSince(dir: string, commit: string, path: string, excluding?: string[]): boolean;
+
+  /**
+   * `Name <email>` from `user.name` and `user.email` as git resolves them in
+   * `dir`, or null when either is not configured.
+   */
+  userIdentity(dir: string): string | null;
 }

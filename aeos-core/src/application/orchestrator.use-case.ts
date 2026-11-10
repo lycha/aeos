@@ -324,7 +324,9 @@ export class OrchestratorUseCase implements OrchestratorPort {
     ticketRunObserver: TicketRunObserver | undefined,
   ): Promise<{ outcome: string; approveError?: string }> {
     if (action.kind === 'advance') {
-      const result = this.ticketApprove.execute(projectId, projectPath, action.ticketId);
+      const result = this.ticketApprove.execute(projectId, projectPath, action.ticketId, {
+        byEngine: true,
+      });
       if (result.status === 'advanced') {
         return { outcome: `advanced ${result.fromColumn} → ${result.toColumn}` };
       }

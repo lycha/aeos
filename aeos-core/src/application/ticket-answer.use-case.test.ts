@@ -2,6 +2,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TicketAnswerUseCase } from './ticket-answer.use-case.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
@@ -57,6 +58,7 @@ function createMockGitGateway(): GitGateway {
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
+    userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
     listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn().mockReturnValue(''),
   };
@@ -83,6 +85,16 @@ function createMockDecisionPromotionService() {
     }),
   } as unknown as DecisionPromotionService;
 }
+
+// Shared by every describe below: the recorder is a mock, reset per test.
+const gateRecorder = { decidedBy: vi.fn(), record: vi.fn() };
+const recorder = gateRecorder as unknown as GateRecorder;
+const callOrder = (mock: unknown): number =>
+  (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+beforeEach(() => {
+  gateRecorder.decidedBy.mockReset();
+  gateRecorder.record.mockReset();
+});
 
 const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
@@ -124,8 +136,40 @@ describe('TicketAnswerUseCase', () => {
       stateMachine,
       gitGateway,
       decisionPromotionService,
+      recorder,
     );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(blockedTicket());
+  });
+
+  describe('gate record', () => {
+    it('records the answer before the ticket is unblocked', () => {
+      useCase.execute(defaultInput);
+
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, blockedTicket(), {
+        gate: 'answer',
+        verdict: 'approved',
+      });
+      expect(callOrder(gateRecorder.record)).toBeLessThan(callOrder(stateMachine.setSubState));
+    });
+
+    it('leaves the ticket BLOCKED when the record cannot be written', () => {
+      gateRecorder.record.mockImplementation(() => {
+        throw new Error('disk full');
+      });
+
+      expect(() => useCase.execute(defaultInput)).toThrow('disk full');
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
+    });
+
+    it('records nothing for a ticket that is not blocked', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...blockedTicket(),
+        subState: 'READY',
+      });
+
+      expect(useCase.execute(defaultInput).ok).toBe(false);
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
   });
 
   it('should unblock a BLOCKED ticket with modified questions file', () => {

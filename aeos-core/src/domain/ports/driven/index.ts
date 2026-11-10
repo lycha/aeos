@@ -15,3 +15,4 @@ export * from './checks-runner.port.js';
 export * from './pull-request-gateway.port.js';
 export * from './artefact-tree.port.js';
 export * from './decisions-lint.port.js';
+export * from './gate-record-store.port.js';

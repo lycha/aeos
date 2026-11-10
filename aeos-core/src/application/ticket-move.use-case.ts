@@ -12,6 +12,7 @@ import type {
   TicketMovePort,
   TicketMoveResult,
 } from '../domain/ports/driving/ticket-move.port.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 
 export class TicketMoveUseCase implements TicketMovePort {
@@ -20,10 +21,11 @@ export class TicketMoveUseCase implements TicketMovePort {
     private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
     private readonly gitGateway: GitGateway,
+    private readonly gateRecorder: GateRecorder,
   ) {}
 
   execute(input: TicketMoveInput): TicketMoveResult {
-    const { projectId, projectPath, ticketId, targetColumn } = input;
+    const { projectId, projectPath, ticketId, targetColumn, reason } = input;
 
     const ticket = this.ticketRepo.findById(projectId, ticketId);
     if (!ticket) {
@@ -31,6 +33,19 @@ export class TicketMoveUseCase implements TicketMovePort {
     }
 
     const currentColumn = ticket.column;
+    // Checked here as well as by the state machine: a move that will not
+    // happen must not be recorded as one.
+    if (currentColumn === targetColumn) {
+      return { status: 'error', ticketId, error: `Already in ${currentColumn}` };
+    }
+    this.gateRecorder.record(projectPath, ticket, {
+      gate: 'move-override',
+      verdict: 'overridden',
+      fromColumn: currentColumn,
+      toColumn: targetColumn,
+      reason,
+    });
+
     const transitionResult = this.stateMachine.transition(projectId, ticketId, targetColumn);
     if (!transitionResult.ok) {
       return { status: 'error', ticketId, error: transitionResult.reason };

@@ -12,6 +12,7 @@ import type {
 } from '../domain/ports/driving/ticket-answer.port.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { syncTicketDocument } from './services/ticket-document.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import type { DecisionPromotionService } from './services/decision-promotion.service.js';
 
 export class TicketAnswerUseCase implements TicketAnswerPort {
@@ -21,6 +22,7 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
     private readonly stateMachine: StateMachineService,
     private readonly gitGateway: GitGateway,
     private readonly decisionPromotionService: DecisionPromotionService,
+    private readonly gateRecorder: GateRecorder,
   ) {}
 
   execute(input: TicketAnswerInput): TicketAnswerResult {
@@ -71,6 +73,8 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
     if (promotion.status === 'validation-error') {
       return { ok: false, error: promotion.error ?? 'Decision promotion failed' };
     }
+
+    this.gateRecorder.record(projectPath, ticket, { gate: 'answer', verdict: 'approved' });
 
     // 6. Transition sub-state to READY so ticket run can resume execution
     const result = this.stateMachine.setSubState(projectId, ticketId, SubState.READY);

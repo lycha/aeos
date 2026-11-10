@@ -137,6 +137,7 @@ describe('OrchestratorUseCase', () => {
       headCommit: vi.fn().mockReturnValue('c0ffee1'),
       showFile: vi.fn().mockReturnValue(''),
       pathChangedSince: vi.fn().mockReturnValue(false),
+      userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
       listFiles: vi.fn().mockReturnValue([]),
     };
 
@@ -209,6 +210,10 @@ describe('OrchestratorUseCase', () => {
     expect(result.haltReason).toBe(HaltReason.NEEDS_HUMAN);
     expect(result.message).toContain('`gh` is not authenticated');
     expect(ticketApprove.execute).toHaveBeenCalledTimes(1);
+    // An engine advance is not a human decision: no gate record.
+    expect(ticketApprove.execute).toHaveBeenCalledWith(PROJECT_ID, PROJECT_PATH, EPIC_ID, {
+      byEngine: true,
+    });
     expect(result.steps).toHaveLength(1);
   });
 

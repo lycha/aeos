@@ -50,6 +50,7 @@ function createMockGitGateway(): GitGateway {
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
+    userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
     listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn().mockReturnValue(''),
   };
@@ -276,6 +277,19 @@ describe('ContextAssembler', () => {
     const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
 
     expect(result.priorArtifacts).toEqual([{ name: 'AEOS-1-prd.md', content: '# PRD' }]);
+  });
+
+  it('keeps gate records out of priorArtifacts: they are a log, not an input', async () => {
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('content');
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue([
+      'AEOS-1-gates.yaml',
+      'AEOS-1-tech-spec.md',
+      'AEOS-1-ticket.md',
+    ]);
+
+    const result = await assembler.assemble(TICKET_ID, PROJECT_ROOT, NON_REVIEW_COLUMN);
+
+    expect(result.priorArtifacts.map((a) => a.name)).toEqual(['AEOS-1-tech-spec.md']);
   });
 
   it('filters out the ticket file from priorArtifacts', async () => {

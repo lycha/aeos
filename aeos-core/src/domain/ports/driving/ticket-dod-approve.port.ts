@@ -11,5 +11,7 @@ export interface TicketDodApprovePort {
     projectPath: string,
     ticketId: string,
     approved: boolean,
+    /** Why not, when `approved` is false. Recorded as a gate; at least ten characters. */
+    reason?: string,
   ): TicketDodApproveResult;
 }

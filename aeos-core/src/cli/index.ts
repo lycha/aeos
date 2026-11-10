@@ -63,8 +63,9 @@ export function buildProgram(): Command {
         '  aeos ticket create "Title"                Create a ticket\n' +
         '  aeos ticket run <id>                      Run the pipeline column\n' +
         '  aeos ticket approve <id>                  Advance to next column\n' +
-        '  aeos ticket sign-off <id>                 Manually mark as SIGNED_OFF\n' +
-        '  aeos ticket move <id> <status>            Move ticket to any status\n' +
+        '  aeos ticket sign-off <id> --reason <text> Manually mark as SIGNED_OFF\n' +
+        '  aeos ticket move <id> <status> --reason <text>\n' +
+        '                                            Move ticket to any status\n' +
         '  aeos ticket ready <id>                    Reset ticket sub-state to READY\n' +
         '  aeos orchestrator run <epicId>            Drive an epic autonomously\n\n' +
         'Environment variables:\n' +

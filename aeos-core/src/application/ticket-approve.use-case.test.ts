@@ -2,6 +2,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TicketApproveUseCase } from './ticket-approve.use-case.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
@@ -49,6 +50,7 @@ function createMockGitGateway(): GitGateway {
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
+    userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
     listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn().mockReturnValue(''),
   };
@@ -98,6 +100,16 @@ function createPullRequestMocks() {
   };
 }
 
+// Shared by every describe below: the recorder is a mock, reset per test.
+const gateRecorder = { decidedBy: vi.fn(), record: vi.fn() };
+const recorder = gateRecorder as unknown as GateRecorder;
+const callOrder = (mock: unknown): number =>
+  (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+beforeEach(() => {
+  gateRecorder.decidedBy.mockReset();
+  gateRecorder.record.mockReset();
+});
+
 const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
 const TICKET_ID = 'AEOS-1';
@@ -138,8 +150,79 @@ describe('TicketApproveUseCase', () => {
       pr.costRepo,
       pr.columnSpecLoader,
       pr.projectRepo,
+      recorder,
     );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket());
+  });
+
+  describe('gate record', () => {
+    it('records leaving SPEC_REVIEW as the spec gate, before the ticket moves', () => {
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, signedOffTicket(), {
+        gate: 'spec',
+        verdict: 'approved',
+        fromColumn: 'SPEC_REVIEW',
+        toColumn: 'TECH_SPEC',
+      });
+      expect(callOrder(gateRecorder.record)).toBeLessThan(callOrder(stateMachine.transition));
+    });
+
+    it('records leaving any other column as a column approval', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        signedOffTicket('TECH_SPEC'),
+      );
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(gateRecorder.record).toHaveBeenCalledWith(
+        PROJECT_PATH,
+        expect.anything(),
+        expect.objectContaining({ gate: 'column-approval', verdict: 'approved' }),
+      );
+    });
+
+    it('records nothing when the engine advances the ticket: that is not a human decision', () => {
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { byEngine: true });
+
+      expect(result.status).toBe('advanced');
+      expect(gateRecorder.decidedBy).not.toHaveBeenCalled();
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
+
+    it('leaves the ticket where it is when the record cannot be written', () => {
+      gateRecorder.record.mockImplementation(() => {
+        throw new Error('disk full');
+      });
+
+      expect(() => useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toThrow('disk full');
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
+    });
+
+    it('asks who is deciding before it commits the task or opens a pull request', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...signedOffTicket('QA'),
+        kind: 'TASK',
+      });
+      gateRecorder.decidedBy.mockImplementation(() => {
+        throw new Error('no git identity');
+      });
+
+      expect(() => useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toThrow('no git identity');
+      expect(gitGateway.commitAll).not.toHaveBeenCalled();
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it('records nothing for an approval that is refused', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...signedOffTicket(),
+        subState: 'WORKING',
+      });
+
+      expect(useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID).status).toBe('error');
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
   });
 
   it('should advance a SIGNED_OFF ticket to the next column', () => {
@@ -355,6 +438,7 @@ describe('TicketApproveUseCase — per-task commit', () => {
       pr.costRepo,
       pr.columnSpecLoader,
       pr.projectRepo,
+      recorder,
     );
   });
 
@@ -436,6 +520,7 @@ describe('TicketApproveUseCase — pull requests', () => {
       pr.costRepo,
       pr.columnSpecLoader,
       pr.projectRepo,
+      recorder,
     );
   });
 

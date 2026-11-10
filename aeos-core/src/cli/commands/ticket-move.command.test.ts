@@ -35,6 +35,8 @@ function createMockProjectRepo(): ProjectRepository {
   };
 }
 
+const REASON = 'The reviewer misread AC-2.';
+
 describe('registerTicketMoveCommand', () => {
   let program: Command;
   let useCase: ReturnType<typeof createMockTicketMoveUseCase>;
@@ -62,22 +64,23 @@ describe('registerTicketMoveCommand', () => {
   });
 
   it('passes an uppercased target status to the use case', () => {
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'qa']);
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'qa', '--reason', REASON]);
     expect(useCase.execute).toHaveBeenCalledWith({
       projectId: 'proj-1',
       projectPath: '/test',
       ticketId: 'AEOS-1',
       targetColumn: 'QA',
+      reason: REASON,
     });
   });
 
   it('prints a success message when the move succeeds', () => {
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA']);
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA', '--reason', REASON]);
     expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 moved: SPEC_REVIEW → QA');
   });
 
   it('rejects an invalid status', () => {
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'not-real']);
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'not-real', '--reason', REASON]);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining("Unknown status 'not-real'"),
     );
@@ -91,17 +94,25 @@ describe('registerTicketMoveCommand', () => {
       ticketId: 'AEOS-1',
       error: 'Already in QA',
     });
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA']);
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA', '--reason', REASON]);
     expect(consoleErrorSpy).toHaveBeenCalledWith('Error: Already in QA');
     expect(process.exitCode).toBe(1);
   });
 
   it('shows an error when not inside an AEOS project', () => {
     (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA']);
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA', '--reason', REASON]);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       'Error: No AEOS project found. Run "aeos project init" first.',
     );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('is refused without --reason, and the use case is not run', () => {
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA']);
+
+    expect(useCase.execute).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('--reason'));
     expect(process.exitCode).toBe(1);
   });
 });

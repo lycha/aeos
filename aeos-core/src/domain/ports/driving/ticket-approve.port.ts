@@ -8,5 +8,14 @@ export type TicketApproveResult =
   | { status: 'error'; ticketId: string; error: string };
 
 export interface TicketApprovePort {
-  execute(projectId: string, projectPath: string, ticketId: string): TicketApproveResult;
+  /**
+   * `byEngine`: the orchestrator advancing an `advanceMode: auto` column. That
+   * is not a human decision, so no gate record is written for it.
+   */
+  execute(
+    projectId: string,
+    projectPath: string,
+    ticketId: string,
+    options?: { byEngine?: boolean },
+  ): TicketApproveResult;
 }

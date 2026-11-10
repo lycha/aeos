@@ -17,6 +17,7 @@ import type {
   TicketApprovePort,
   TicketApproveResult,
 } from '../domain/ports/driving/ticket-approve.port.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import { buildPullRequestBody, buildTaskCommitMessage } from './services/pull-request-text.js';
 import { formatSpecPin, resolveSpecPin } from './services/spec-pin.js';
@@ -31,9 +32,15 @@ export class TicketApproveUseCase implements TicketApprovePort {
     private readonly costRepo: CostRepository,
     private readonly columnSpecLoader: ColumnSpecLoader,
     private readonly projectRepo: ProjectRepository,
+    private readonly gateRecorder: GateRecorder,
   ) {}
 
-  execute(projectId: string, projectPath: string, ticketId: string): TicketApproveResult {
+  execute(
+    projectId: string,
+    projectPath: string,
+    ticketId: string,
+    options: { byEngine?: boolean } = {},
+  ): TicketApproveResult {
     const ticket = this.ticketRepo.findById(projectId, ticketId);
     if (!ticket) {
       return { status: 'error', ticketId, error: `Ticket ${ticketId} not found` };
@@ -85,6 +92,12 @@ export class TicketApproveUseCase implements TicketApprovePort {
       };
     }
 
+    // A person's approval is a gate decision. Who they are is asked now, before
+    // anything is committed or pushed; the record itself is written last, so a
+    // pull request that cannot be opened leaves no approval on record.
+    const byPerson = !options.byEngine;
+    if (byPerson) this.gateRecorder.decidedBy(projectPath);
+
     // A finished task's work becomes one commit in the source repo. This is the
     // only point it is safe to commit: CODE_REVIEW reads `git diff HEAD`, so
     // committing any earlier would leave the reviewer with nothing to review.
@@ -110,6 +123,16 @@ export class TicketApproveUseCase implements TicketApprovePort {
     ) {
       const error = this.openPullRequest(projectId, projectPath, ticket);
       if (error) return { status: 'error', ticketId, error };
+    }
+
+    if (byPerson) {
+      this.gateRecorder.record(projectPath, ticket, {
+        // shortcut: keyed on the column's name; I1-M4-005a replaces it with the column's role.
+        gate: currentColumn === Column.SPEC_REVIEW ? 'spec' : 'column-approval',
+        verdict: 'approved',
+        fromColumn: currentColumn,
+        toColumn: nextColumn,
+      });
     }
 
     const transitionResult = this.stateMachine.transition(projectId, ticketId, nextColumn);

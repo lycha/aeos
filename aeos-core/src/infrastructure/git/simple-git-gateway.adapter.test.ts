@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { SimpleGitGateway } from './simple-git-gateway.adapter.js';
 
@@ -324,6 +324,36 @@ describe('SimpleGitGateway branches and remotes', () => {
     fs.writeFileSync(path.join(repo, 'features', 'x', 'spec.md'), 'v2\n');
     git('commit', '-am', 'spec moved');
     expect(gateway.pathChangedSince(repo, pinned, 'features/x')).toBe(true);
+  });
+
+  it('can leave paths out when asking whether a path changed', () => {
+    fs.mkdirSync(path.join(repo, 'features', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'spec.md'), 'v1\n');
+    git('add', '.');
+    git('commit', '-m', 'spec');
+    const pinned = gateway.headCommit(repo);
+
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'gates.yaml'), 'records:\n');
+    git('add', '.');
+    git('commit', '-m', 'a gate record');
+
+    expect(gateway.pathChangedSince(repo, pinned, 'features/x')).toBe(true);
+    expect(gateway.pathChangedSince(repo, pinned, 'features/x', ['features/x/gates.yaml'])).toBe(
+      false,
+    );
+  });
+
+  it("reads the repository's git identity, and has none without a name and an email", () => {
+    // Keep the developer's own global identity out of the answer.
+    vi.stubEnv('GIT_CONFIG_GLOBAL', path.join(repo, 'no-global-config'));
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    try {
+      expect(gateway.userIdentity(repo)).toBe('Test <test@test.com>');
+      git('config', '--unset', 'user.email');
+      expect(gateway.userIdentity(repo)).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('reports the current branch', () => {

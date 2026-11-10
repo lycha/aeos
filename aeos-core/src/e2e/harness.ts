@@ -105,6 +105,9 @@ export function createTempProject(): TempProject {
     execFileSync('git', args, { cwd: projectPath, stdio: 'ignore' });
   };
   git('init');
+  // Gate records are signed with the project repository's identity.
+  git('config', 'user.name', 'AEOS E2E');
+  git('config', 'user.email', 'e2e@aeos.invalid');
   git('add', '.');
   git('commit', '-m', 'initial');
 

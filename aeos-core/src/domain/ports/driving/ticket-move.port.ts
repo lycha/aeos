@@ -7,6 +7,8 @@ export interface TicketMoveInput {
   projectPath: string;
   ticketId: string;
   targetColumn: Column;
+  /** Why the normal path is being bypassed. Recorded as a gate; at least ten characters. */
+  reason: string;
 }
 
 export type TicketMoveResult =

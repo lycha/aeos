@@ -4,8 +4,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
+import yaml from 'js-yaml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { GateRecord } from '../domain/model/gate-record.js';
 import type { RunRecord } from '../domain/model/run-record.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
 import {
@@ -28,20 +30,32 @@ const realRegistry = (): string | null => {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null;
 };
 
-// The approved contract lives with the plugin, outside this package.
-const runRecordSchema = JSON.parse(
-  fs.readFileSync(
-    path.resolve(
-      import.meta.dirname,
-      '../../../plugins/artefact-tree-pipeline/schemas/run-record.schema.json',
+// The approved contracts live with the plugin, outside this package.
+const schema = (name: string): object =>
+  JSON.parse(
+    fs.readFileSync(
+      path.resolve(import.meta.dirname, '../../../plugins/artefact-tree-pipeline/schemas', name),
+      'utf-8',
     ),
-    'utf-8',
-  ),
-) as object;
-const validateRunRecord = new Ajv2020({
+  ) as object;
+const ajv = new Ajv2020({
   // shortcut: one format in use, so a pattern instead of the ajv-formats package.
   formats: { 'date-time': /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/ },
-}).compile(runRecordSchema);
+});
+const validateRunRecord = ajv.compile(schema('run-record.schema.json'));
+const validateGates = ajv.compile(schema('gates.schema.json'));
+
+/** Reads a gates file of `.aeos`, checks it against the approved schema, returns its records. */
+function gatesIn(project: TempProject, relative: string): GateRecord[] {
+  const document = yaml.load(
+    fs.readFileSync(path.join(project.projectPath, '.aeos', relative), 'utf-8'),
+  ) as { records: GateRecord[] };
+  expect(validateGates(document), JSON.stringify(validateGates.errors)).toBe(true);
+  expect(document.records.map((record) => record.id)).toEqual(
+    document.records.map((_, index) => `GATE-${index + 1}`),
+  );
+  return document.records;
+}
 
 async function createTicket(...args: string[]): Promise<string> {
   const { output } = await runCli('ticket', 'create', ...args);
@@ -136,6 +150,45 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     for (const id of [epic, ...tasks, standalone]) {
       expect(ticketState(id).column, id).toBe('DONE');
     }
+
+    // Gate records: one per human decision, valid against the approved schema.
+    // The epic and its tasks are spec-backed, so theirs are with the feature.
+    const decision = (r: GateRecord): string =>
+      `${r.ticket} ${r.gate} ${r.verdict} ${r.from_column}>${r.to_column}`;
+    const taskGates = (id: string): string[] => [
+      `${id} column-approval approved BACKLOG>IMPLEMENTATION`,
+      `${id} column-approval approved IMPLEMENTATION>CODE_REVIEW`,
+      `${id} column-approval approved CODE_REVIEW>QA`,
+      `${id} column-approval approved QA>DONE`,
+    ];
+    const featureGates = gatesIn(project, 'features/feature-sample/gates.yaml');
+    expect(featureGates.map(decision)).toEqual([
+      `${epic} column-approval approved BACKLOG>SPEC_REVIEW`,
+      `${epic} spec approved SPEC_REVIEW>TECH_SPEC`,
+      `${epic} column-approval approved TECH_SPEC>TASK_BREAKDOWN`,
+      ...taskGates(tasks[0]!),
+      ...taskGates(tasks[1]!),
+      `${epic} column-approval approved TASK_BREAKDOWN>INTEGRATION_REVIEW`,
+      `${epic} column-approval approved INTEGRATION_REVIEW>DOD_GATE`,
+      `${epic} definition-of-done approved DOD_GATE>DONE`,
+    ]);
+    const standaloneGates = gatesIn(project, `tickets/${standalone}/${standalone}-gates.yaml`);
+    expect(standaloneGates.map(decision)).toEqual(taskGates(standalone));
+    for (const record of [...featureGates, ...standaloneGates]) {
+      expect(record.decided_by).toBe('AEOS E2E <e2e@aeos.invalid>');
+      // Identifiers only, never a label.
+      for (const column of [record.column, record.from_column, record.to_column]) {
+        expect(column).toMatch(/^[A-Z_]+$/);
+      }
+    }
+    // The spec gate cites what the person was shown, and the pin in force.
+    const specGate = featureGates[1]!;
+    expect(specGate.spec_pin).toMatchObject({ path: 'features/feature-sample' });
+    expect(specGate.evidence.map((ref) => ref.path)).toContain(
+      `tickets/${epic}/${epic}-spec-review-review.md`,
+    );
+    // Recording decisions in the feature directory is not the spec moving.
+    expect((await runCli('ticket', 'show', epic)).output).not.toContain('spec has moved');
 
     // Run records: one per executor invocation, each valid against the
     // approved schema, with its brief and its log, all committed.
@@ -257,11 +310,90 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     await runCli('install');
     await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
     const epic = await createEpic('An epic');
+
+    // A gate decision is signed: with no git identity it is refused, with the fix.
+    const gitConfig = (...args: string[]): void => {
+      execFileSync('git', ['config', ...args], { cwd: project.projectPath });
+    };
+    gitConfig('--unset', 'user.name');
+    const unsigned = await runCli('ticket', 'approve', epic);
+    expect(unsigned.exitCode).toBe(1);
+    expect(unsigned.output).toContain('git config user.name');
+    expect(ticketState(epic).column).toBe('BACKLOG');
+    gitConfig('user.name', 'AEOS E2E');
     await runCli('ticket', 'approve', epic);
 
     await runCli('ticket', 'run', epic);
 
     expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'ESCALATED' });
+
+    // Overrides need a reason, and say what they overrode.
+    const noReason = await runCli('ticket', 'move', epic, 'QA');
+    expect(noReason.exitCode).toBe(1);
+    expect(noReason.output).toContain('--reason');
+    const tooShort = await runCli('ticket', 'sign-off', epic, '--reason', 'because');
+    expect(tooShort.exitCode).toBe(1);
+    expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'ESCALATED' });
+
+    const signOff = await runCli(
+      'ticket',
+      'sign-off',
+      epic,
+      '--reason',
+      'The review is sound; only its trailer is missing.',
+    );
+    expect(signOff.exitCode).toBe(0);
+    expect(ticketState(epic).subState).toBe('SIGNED_OFF');
+    const move = await runCli(
+      'ticket',
+      'move',
+      epic,
+      'TECH_SPEC',
+      '--reason',
+      'Moving it by hand.',
+    );
+    expect(move.exitCode).toBe(0);
+    expect(ticketState(epic).column).toBe('TECH_SPEC');
+
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const review = fs
+      .readdirSync(path.join(aeosDir, 'tickets', epic, 'runs'))
+      .filter((file) => file.endsWith('.json'))
+      .map(
+        (file) =>
+          JSON.parse(
+            fs.readFileSync(path.join(aeosDir, 'tickets', epic, 'runs', file), 'utf-8'),
+          ) as RunRecord,
+      )
+      .filter((record) => record.role === 'reviewer')
+      .at(-1)!;
+    expect(gatesIn(project, 'features/feature-sample/gates.yaml')).toMatchObject([
+      { id: 'GATE-1', gate: 'column-approval', verdict: 'approved' },
+      {
+        id: 'GATE-2',
+        gate: 'sign-off-override',
+        verdict: 'overridden',
+        column: 'SPEC_REVIEW',
+        reason: 'The review is sound; only its trailer is missing.',
+        overrides: review.run_id,
+      },
+      {
+        id: 'GATE-3',
+        gate: 'move-override',
+        verdict: 'overridden',
+        from_column: 'SPEC_REVIEW',
+        to_column: 'TECH_SPEC',
+        reason: 'Moving it by hand.',
+        overrides: null,
+      },
+    ]);
+    // Each record is committed with the decision.
+    expect(
+      execFileSync('git', ['status', '--porcelain', '--', 'features'], {
+        cwd: aeosDir,
+        encoding: 'utf-8',
+      }),
+    ).toBe('');
   });
 
   it('runs the project checks before the reviewer, and skips the reviewer when one fails', async () => {

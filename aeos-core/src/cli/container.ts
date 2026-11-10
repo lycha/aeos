@@ -28,6 +28,8 @@ import { FsArtefactTree } from '../infrastructure/filesystem/fs-artefact-tree.ad
 import { PythonDecisionsLint } from '../infrastructure/spec/decisions-lint.adapter.js';
 import { FsArtifactStore } from '../infrastructure/filesystem/fs-artifact-store.adapter.js';
 import { FsRunRecordStore } from '../infrastructure/filesystem/fs-run-record-store.adapter.js';
+import { FsGateRecordStore } from '../infrastructure/filesystem/fs-gate-record-store.adapter.js';
+import { GateRecorder } from '../application/services/gate-recorder.js';
 import { SimpleGitGateway } from '../infrastructure/git/simple-git-gateway.adapter.js';
 import { SqliteTicketRepository } from '../infrastructure/persistence/sqlite-ticket.repository.js';
 import { getDb } from '../infrastructure/persistence/database.js';
@@ -115,6 +117,14 @@ export function createContainer(): Container {
   const getOrchestratorStateRepo = (): SqliteOrchestratorStateRepository =>
     (orchestratorStateRepo ??= new SqliteOrchestratorStateRepository(getDb()));
 
+  const getGateRecorder = (): GateRecorder =>
+    new GateRecorder(
+      new FsGateRecordStore(artefactTree, gitGateway),
+      gitGateway,
+      getTicketRepo(),
+      runRecordStore,
+    );
+
   let stateMachine: StateMachineService | null = null;
   const getStateMachine = (): StateMachineService =>
     (stateMachine ??= new StateMachineService(getTicketRepo(), getTransitionRepo()));
@@ -188,6 +198,7 @@ export function createContainer(): Container {
         getStateMachine(),
         gitGateway,
         new DecisionPromotionService(artifactStore),
+        getGateRecorder(),
       );
     },
     get ticketResolve() {
@@ -196,6 +207,7 @@ export function createContainer(): Container {
         artifactStore,
         getStateMachine(),
         gitGateway,
+        getGateRecorder(),
       );
     },
     get ticketRun() {
@@ -243,13 +255,25 @@ export function createContainer(): Container {
         getCostRepo(),
         new YamlColumnSpecLoader(),
         projectRepo,
+        getGateRecorder(),
       );
     },
     get ticketSignOff() {
-      return new TicketSignOffUseCase(getTicketRepo(), artifactStore, getStateMachine());
+      return new TicketSignOffUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getStateMachine(),
+        getGateRecorder(),
+      );
     },
     get ticketMove() {
-      return new TicketMoveUseCase(getTicketRepo(), artifactStore, getStateMachine(), gitGateway);
+      return new TicketMoveUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getStateMachine(),
+        gitGateway,
+        getGateRecorder(),
+      );
     },
     get ticketReady() {
       return new TicketReadyUseCase(getTicketRepo(), artifactStore, getStateMachine());
@@ -275,6 +299,7 @@ export function createContainer(): Container {
         getStateMachine(),
         gitGateway,
         getCostRepo(),
+        getGateRecorder(),
       );
     },
     get costs() {
