@@ -36,6 +36,7 @@ export const AgentSpecSchema = z.object({
   taskInstruction: z.string().min(1),
   outputFormat: z.string().min(1),
   selfVerificationChecklist: z.array(z.string()).default([]),
+  bugTrack: z.object({ reproduce: z.string().min(1), fix: z.string().min(1) }).optional(),
   executor: z.object({
     type: z.enum(['claude-cli', 'auggie-cli', 'opencode-cli', 'ollama-cli', 'stub']),
     model: z.string().optional(),

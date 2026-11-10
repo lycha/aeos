@@ -98,6 +98,23 @@ export class StubExecutor implements Executor {
       );
     }
 
+    // The bug track: a "test" that fails until the "fix" exists, and the
+    // command that runs it; then the fix.
+    if (invocation.bugPhase && invocation.workingDirectory) {
+      const fix = `stub-fix-${invocation.ticketId}.txt`;
+      if (invocation.bugPhase === 'reproduce') {
+        const test = `stub-repro-${invocation.ticketId}.cjs`;
+        await fs.writeFile(
+          path.join(invocation.workingDirectory, test),
+          `process.exit(require('node:fs').existsSync(${JSON.stringify(fix)}) ? 0 : 1);\n`,
+          'utf8',
+        );
+        lines.push('<!-- AEOS-REPRO', `command: node ${test}`, '-->', '');
+      } else {
+        await fs.writeFile(path.join(invocation.workingDirectory, fix), 'the fix\n', 'utf8');
+      }
+    }
+
     // Test hook, off unless set: a worker run also edits the named file, as an
     // agent straying outside its task would. Relative paths resolve against
     // the run's working directory.

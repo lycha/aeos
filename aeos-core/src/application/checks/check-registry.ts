@@ -12,6 +12,7 @@ import { TicketKind } from '../../domain/model/ticket-kind.js';
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
 import type { CriteriaCollector } from '../services/criteria-collector.js';
 import { CriteriaTraceCheck } from './criteria-trace.check.js';
+import { ReproCheck } from './repro-check.js';
 import { ShellCheck } from './shell-check.js';
 
 export class CheckRegistry {
@@ -31,6 +32,11 @@ export class CheckRegistry {
   checksFor(projectPath: string): Check[] {
     const configured = this.projectRepo.readExecutorConfig(projectPath)?.checks ?? [];
     return [...configured.map((config) => new ShellCheck(config, this.runner)), ...this.registered];
+  }
+
+  /** The run of a bug's reproducing test, expected to fail (`red`) or to pass (`green`). */
+  reproCheck(command: string, expected: 'red' | 'green'): ReproCheck {
+    return new ReproCheck(command, expected, this.runner);
   }
 
   /**

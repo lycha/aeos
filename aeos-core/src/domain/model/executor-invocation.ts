@@ -18,6 +18,11 @@ export interface ExecutorInvocation {
   readonly mode?: 'artifact' | 'agentic';
   /** Working directory for the executor process, used by agentic runs. */
   readonly workingDirectory?: string;
+  /**
+   * Set on the two worker runs of a bug's implementation. Informational: the
+   * prompt already carries the phase's instruction. The stub plays its part by it.
+   */
+  readonly bugPhase?: 'reproduce' | 'fix';
   /** Optional callback for live stdout/stderr chunks. */
   readonly onChunk?: ExecutorChunkObserver;
 }

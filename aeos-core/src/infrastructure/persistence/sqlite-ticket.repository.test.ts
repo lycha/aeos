@@ -136,6 +136,14 @@ describe('SqliteTicketRepository — spec pin', () => {
     expect(repo.findById('p', 'AEOS-2')?.implements).toBeNull();
   });
 
+  it('round-trips the bug track; a ticket on no track reads back null', () => {
+    repo.save(ticket({ kind: 'TASK', track: 'bug' }));
+    repo.save(ticket({ id: 'AEOS-2' }));
+
+    expect(repo.findById('p', 'AEOS-1')?.track).toBe('bug');
+    expect(repo.findByProject('p').map((found) => found.track)).toEqual(['bug', null]);
+  });
+
   it('moves the commit of a pin and leaves the feature alone', () => {
     repo.save(
       ticket({ specPin: { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' } }),

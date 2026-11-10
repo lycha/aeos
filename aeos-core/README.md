@@ -435,7 +435,7 @@ Notes:
 | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | `aeos install`                                               | One-time global setup (`~/.aeos/`, global gitignore)                       |
 | `aeos project init [--name] [--key]`                         | Initialise `.aeos/` in the current directory                               |
-| `aeos ticket create <title> [--parent <epicId>] [--spec <feature>] [--implements <ids>]` | Create a ticket in BACKLOG — an epic with `--spec` (required for an epic), a task with `--parent`, claiming criteria with `--implements` |
+| `aeos ticket create <title> [--parent <epicId>] [--spec <feature>] [--implements <ids>] [--bug]` | Create a ticket in BACKLOG — an epic with `--spec` (required for an epic), a task with `--parent`, claiming criteria with `--implements`, or a standalone bug with `--bug` |
 | `aeos ticket list [--column]`                                | List tickets, optionally filtered by column                                |
 | `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, recorded executions, and run ids |
 | `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |
@@ -488,6 +488,34 @@ is unfinished reports which tasks are outstanding and refuses the transition.
 
 > Creating child tickets from `tasks.md` is a manual step today. Automating that
 > decomposition belongs with the orchestrator, which owns scheduling.
+
+## The bug track
+
+A bug does not travel the epic pipeline. It needs a failing test that reproduces it before any fix, and proof that the fix did not weaken that test.
+
+```bash
+aeos ticket create "Returns 500 for a missing ticket" --bug [--body-file bug.md]   # → AEOS-7 (TASK, standalone)
+aeos ticket approve AEOS-7 && aeos ticket run AEOS-7                               # implementation, in two phases
+```
+
+`--bug` creates a standalone task (no parent, no spec; it is refused with `--parent` or `--spec`) that goes through the task pipeline on its own `aeos/<id>` branch and ends in a pull request, like any standalone task. Its `IMPLEMENTATION` runs the worker twice inside one attempt:
+
+1. **Reproduce.** The worker adds a failing test and nothing else, and ends its notes with the command that runs it:
+
+   ```
+   <!-- AEOS-REPRO
+   command: npx vitest run src/foo.test.ts -t "returns 404 for a missing ticket"
+   -->
+   ```
+
+   AEOS runs that command in the project root and requires a **non-zero** exit. Zero means the test does not reproduce the bug: the attempt is rejected with that feedback and the phase is retried. No block, or more than one, ends the run `ESCALATED` (`UNPARSEABLE_REPRO`). Then AEOS records the SHA-256 of every file the phase added or changed and commits them to the project repository as `[<id>][REPRO] …`.
+2. **Fix.** The worker is told the command and the files it must not edit. Afterwards AEOS compares the hashes: a changed file fails the attempt ("The reproducing test was modified", naming it) and is restored. Then the same command must exit **zero**; if it does not, the output goes back to the worker like a failed check.
+
+Then the column continues as usual: the project's checks, the reviewer, the gate. Once reproduced, a bug is not reproduced again: a retry, or a later `ticket run`, is the fix alone.
+
+**Evidence.** Each of the two runs of the command is a run record (`role: checks`). `<id>-repro.md` in the ticket directory shows the command, both exit codes and both output tails; it is committed with the implementation notes and included in the pull request body. On the branch the `[REPRO]` commit precedes the fix.
+
+The two instructions are the `bugTrack.reproduce` and `bugTrack.fix` sections of `agents/engineer-agent.yaml`; the engine uses one in place of `taskInstruction`. A project scaffolded earlier sees that file as drifted in `aeos project sync`, and a bug is refused until its agent has them. Flaky tests are not handled: one red run and one green run are the evidence.
 
 ## Spec-backed epics
 
@@ -548,7 +576,7 @@ Spec: AEOS-aeos@4f9c1a2b7d3e5f60a1b2c3d4e5f60718293a4b5c
 
 `Spec:` is there only for a task of a [spec-backed epic](#spec-backed-epics).
 
-`aeos ticket approve` then opens the pull request against the default branch: for an epic when it is approved out of `INTEGRATION_REVIEW`, for a standalone task when it is approved to `DONE`. It pushes the `aeos/<id>` branch to `origin` and runs `gh pr create`; if the branch already has an open pull request, that one is used. The body carries the ticket, the path of the integration (or code) review with its verdict, the checks table and the total recorded cost; artifact paths are not links because `.aeos/` has no remote. The URL is stored on the ticket and shown by `aeos ticket show`. Merging stays yours.
+`aeos ticket approve` then opens the pull request against the default branch: for an epic when it is approved out of `INTEGRATION_REVIEW`, for a standalone task when it is approved to `DONE`. It pushes the `aeos/<id>` branch to `origin` and runs `gh pr create`; if the branch already has an open pull request, that one is used. The body carries the ticket, the path of the integration (or code) review with its verdict, the checks table, a bug's reproduction (its test red, then green) and the total recorded cost; artifact paths are not links because `.aeos/` has no remote. The URL is stored on the ticket and shown by `aeos ticket show`. Merging stays yours.
 
 If the pull request cannot be opened (`gh` not on `PATH`, not authenticated, no remote, or the host refuses), `approve` stops with the cause and the fix and the ticket stays `SIGNED_OFF`, so running `approve` again retries. Under `aeos orchestrator run` this halts the epic as needing a human. For a project with no code host:
 

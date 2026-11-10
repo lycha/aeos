@@ -88,6 +88,7 @@ export class ContextAssembler {
           filename !== gatesFilename &&
           // The markdown report says the same, for a reader.
           filename !== `${ticketId}-criteria-trace.json` &&
+          filename !== `${ticketId}-repro.json` &&
           !(hasDecisions && filename === questionsFilename),
       )
       .map((filename) => ({

@@ -229,6 +229,15 @@ UPDATE cost_records SET "column" = 'SPEC_REVIEW' WHERE "column" = 'PRODUCT_SCOPI
       }
     },
   },
+  {
+    version: 12,
+    description: 'The track of a standalone task (bug)',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'track')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN track TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

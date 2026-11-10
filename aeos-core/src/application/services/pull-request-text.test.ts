@@ -104,4 +104,13 @@ describe('buildPullRequestBody', () => {
       body.split('<!-- aeos:conformance -->')[0],
     );
   });
+
+  it('shows the reproduction of a bug: the command, red, then green', () => {
+    const repro = '# Reproduction\n\nCommand: `npx vitest run a.test.ts`\n\n| Run | Exit code |';
+
+    expect(buildPullRequestBody({ ...base, repro })).toContain(
+      `## Reproduction\n\n${repro.split('\n').slice(2).join('\n')}`,
+    );
+    expect(buildPullRequestBody(base)).not.toContain('## Reproduction');
+  });
 });

@@ -21,12 +21,12 @@ import { CostsUseCase } from '../application/costs.use-case.js';
 import { OrchestratorUseCase } from '../application/orchestrator.use-case.js';
 import { SqliteOrchestratorStateRepository } from '../infrastructure/persistence/sqlite-orchestrator-state.repository.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
-import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { PullRequestGateway } from '../domain/ports/driven/pull-request-gateway.port.js';
 import { FsConfigStore } from '../infrastructure/filesystem/fs-config.adapter.js';
 import { FsProjectRepository } from '../infrastructure/filesystem/fs-project.repository.js';
 import { FsArtefactTree } from '../infrastructure/filesystem/fs-artefact-tree.adapter.js';
 import { PythonDecisionsLint } from '../infrastructure/spec/decisions-lint.adapter.js';
+import { FsFileHasher } from '../infrastructure/filesystem/fs-file-hasher.adapter.js';
 import { FsArtifactStore } from '../infrastructure/filesystem/fs-artifact-store.adapter.js';
 import { FsRunRecordStore } from '../infrastructure/filesystem/fs-run-record-store.adapter.js';
 import { FsGateRecordStore } from '../infrastructure/filesystem/fs-gate-record-store.adapter.js';
@@ -101,7 +101,6 @@ export interface Container {
   columnLabels: (projectPath: string) => ColumnLabels;
   /** The same by project id, for `aeos costs`; the defaults for a project that cannot be read. */
   columnLabelsOfProject: (projectId: string) => ColumnLabels;
-  artifactStore: ArtifactStore;
 }
 
 export function createContainer(): Container {
@@ -287,6 +286,7 @@ export function createContainer(): Container {
         gateRecordStore,
         criteriaCollector,
         newConformanceService(),
+        new FsFileHasher(),
       );
     },
     get ticketApprove() {
@@ -363,6 +363,5 @@ export function createContainer(): Container {
       }
       return columnLabels({}, null);
     },
-    artifactStore,
   };
 }

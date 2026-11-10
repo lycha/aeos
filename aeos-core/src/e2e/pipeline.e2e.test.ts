@@ -157,7 +157,11 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // A standalone task started from the default branch moves to its own.
     git('checkout', defaultBranch);
-    const standalone = createStandaloneTask('A standalone task');
+    // A bug does not travel an epic.
+    const bugUnderEpic = await runCli('ticket', 'create', 'A bug', '--bug', '--parent', epic);
+    expect(bugUnderEpic.exitCode).toBe(1);
+    expect(bugUnderEpic.output).toContain('--bug');
+    const standalone = await createStandaloneTask('A standalone task');
     await driveTaskToDone(standalone);
     expect(git('branch', '--show-current').trim()).toBe(`aeos/${standalone}`);
     expect(git('tag', '--list', `aeos-base/${standalone}`).trim()).toBe(`aeos-base/${standalone}`);
@@ -277,8 +281,41 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     }
     // Criterion tracing ran in process before the epic's integration worker,
     // passed (AC-1 is claimed, and tagged on a scenario), and left its report.
-    const [trace, ...otherChecks] = records.filter((record) => record.role === 'checks');
+    const checksOf = (id: string): RunRecord[] =>
+      records.filter((record) => record.role === 'checks' && record.ticket === id);
+    const [trace, ...otherChecks] = checksOf(epic);
     expect(otherChecks).toEqual([]);
+    for (const id of tasks) expect(checksOf(id)).toEqual([]);
+
+    // The bug: its test was seen red, then green, and the evidence is committed.
+    expect(
+      checksOf(standalone)
+        .sort((a, b) => a.started_at.localeCompare(b.started_at))
+        .map(({ verdict, executor, output }) => ({ verdict, executor, output })),
+    ).toEqual([
+      { verdict: 'CHECKS_PASSED', executor: 'shell', output: null },
+      {
+        verdict: 'CHECKS_PASSED',
+        executor: 'shell',
+        output: `tickets/${standalone}/${standalone}-repro.md`,
+      },
+    ]);
+    for (const record of checksOf(standalone)) {
+      expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
+    }
+    const repro = read(`tickets/${standalone}/${standalone}-repro.md`);
+    expect(repro).toContain(`Command: \`node stub-repro-${standalone}.cjs\``);
+    expect(repro).toContain('| Before the fix | 1 |');
+    expect(repro).toContain('| After the fix | 0 |');
+    expect(aeosGitStatus(`tickets/${standalone}`)).not.toContain('repro');
+    // On its branch the reproducing test is committed before the fix.
+    expect(git('log', `aeos/${standalone}`, '--format=%s', '-2').trim().split('\n')).toEqual([
+      `[${standalone}] A standalone task`,
+      `[${standalone}][REPRO] failing test that reproduces the bug`,
+    ]);
+    expect(
+      git('show', '--name-only', '--format=', `aeos/${standalone}~1`).trim().split('\n'),
+    ).toEqual([`stub-repro-${standalone}.cjs`]);
     expect(trace).toMatchObject({
       ticket: epic,
       column: 'INTEGRATION_REVIEW',
@@ -305,8 +342,9 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
         record.brief!.sha256,
       );
       expect(fs.existsSync(path.join(aeosDir, record.transcript!))).toBe(true);
-      // Every artefact's last line names the run that wrote it.
-      if (record.role !== 'preflight') {
+      // Every artefact's last line names the run that wrote it. (A bug's
+      // reproduce phase keeps no artefact: the fix's notes are the task's.)
+      if (record.role !== 'preflight' && record.output) {
         expect(read(record.output!).trimEnd().split('\n').pop()).toMatch(/^<!-- AEOS-RUN: RUN-/);
       }
     }
@@ -351,11 +389,14 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     const messages = git('log', '--all', '--format=%B%x00').split('\0');
     const commitOf = (id: string): string[] =>
       messages.map((message) => message.trim()).filter((m) => m.startsWith(`[${id}]`));
-    for (const id of [...tasks, standalone]) expect(commitOf(id), id).toHaveLength(1);
+    for (const id of tasks) expect(commitOf(id), id).toHaveLength(1);
+    expect(commitOf(standalone)).toHaveLength(2);
     for (const id of tasks) expect(commitOf(id)[0]).toContain(`\n\nTicket: ${id}\nEpic: ${epic}`);
     // The task's claim is in its commit.
     expect(commitOf(tasks[0]!)[0]).toContain('\nImplements: AC-1');
-    expect(commitOf(standalone)[0]).toMatch(new RegExp(`\\n\\nTicket: ${standalone}$`));
+    expect(commitOf(standalone).find((message) => !message.includes('[REPRO]'))).toMatch(
+      new RegExp(`\\n\\nTicket: ${standalone}$`),
+    );
 
     // The engine committed nothing on the default branch: only the test's own two commits.
     expect(git('log', defaultBranch, '--format=%s').trim().split('\n')).toEqual([
@@ -528,17 +569,22 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // Passing: the reviewer is briefed with the checks table.
     setChecks('node -e "process.exit(0)"');
-    const green = createStandaloneTask('A task with green checks');
+    const green = await createStandaloneTask('A task with green checks');
     await runCli('ticket', 'approve', green);
     await runCli('ticket', 'run', green);
 
     expect(ticketState(green)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
     const greenRuns = runsOf(green);
-    // Run ids sort by second, so the order within one run is not fixed.
+    // Run ids sort by second, so the order within one run is not fixed. The
+    // task is a bug: two worker phases, and its test run red and green before
+    // the project's own checks.
     expect(greenRuns.map((record) => record.role).sort()).toEqual([
+      'checks',
+      'checks',
       'checks',
       'preflight',
       'reviewer',
+      'worker',
       'worker',
     ]);
     expect(briefOf(greenRuns.find((record) => record.role === 'reviewer')!)).toMatch(
@@ -547,20 +593,20 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // Failing: no reviewer run for the attempt, and the output reaches the retry.
     setChecks(`node -e "console.log('gate is red'); process.exit(1)"`);
-    const red = createStandaloneTask('A task with red checks');
+    const red = await createStandaloneTask('A task with red checks');
     await runCli('ticket', 'approve', red);
     await runCli('ticket', 'run', red);
 
     expect(ticketState(red)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'ESCALATED' });
     const redRuns = runsOf(red);
     expect(redRuns.filter((record) => record.role === 'reviewer')).toEqual([]);
-    const redChecks = redRuns.filter((record) => record.role === 'checks');
+    const redChecks = redRuns.filter((record) => record.verdict === 'CHECKS_FAILED');
     expect(redChecks.length).toBeGreaterThan(0);
     for (const record of [...greenRuns, ...redRuns]) {
       expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
     }
     for (const record of redChecks) {
-      expect(record).toMatchObject({ verdict: 'CHECKS_FAILED', executor: 'shell' });
+      expect(record).toMatchObject({ role: 'checks', executor: 'shell' });
     }
     const retry = redRuns.find((record) => record.role === 'worker' && record.attempt === 2)!;
     expect(briefOf(retry)).toContain('gate is red');
@@ -912,7 +958,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect((await runCli('ticket', 'show', epic)).output).toContain('Column: Shaping (TECH_SPEC)');
 
     // No label: the identifier in sentence case.
-    const task = createStandaloneTask('A task');
+    const task = await createStandaloneTask('A task');
     await runCli('ticket', 'move', task, 'QA', '--reason', 'Moving it by hand.');
     expect((await runCli('ticket', 'show', task)).output).toContain('Column: Qa (QA)');
 
@@ -979,7 +1025,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(validateRunRecord(failedRun(epic)), JSON.stringify(validateRunRecord.errors)).toBe(true);
 
     // Project repository: a new file under a configured glob.
-    const task = createStandaloneTask('A task that writes generated code');
+    const task = await createStandaloneTask('A task that writes generated code');
     await runCli('ticket', 'approve', task);
     const generated = 'src/cli/generated/commands.ts';
 

@@ -8,15 +8,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { vi } from 'vitest';
 
-import { buildInitialTicketDocument } from '../application/services/ticket-document.js';
 import { buildProgram, createContainer } from '../cli/index.js';
 import type { Column } from '../domain/model/column.js';
 import type { SubStateOrNull } from '../domain/model/sub-state.js';
-import { TicketKind } from '../domain/model/ticket-kind.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
 import { PythonDecisionsLint } from '../infrastructure/spec/decisions-lint.adapter.js';
-import { getDb, resetDb } from '../infrastructure/persistence/database.js';
-import { SqliteTicketRepository } from '../infrastructure/persistence/sqlite-ticket.repository.js';
+import { resetDb } from '../infrastructure/persistence/database.js';
 
 /** `ticket create --spec` runs lint_decisions.py, which needs python3 with PyYAML and jsonschema. */
 export const pythonReady =
@@ -52,7 +49,7 @@ export interface CliResult {
  * IMPLEMENTATION run must leave a real git diff. Rather than weaken that
  * guarantee, the stub is wrapped here so every IMPLEMENTATION run also writes
  * `stub-<ticketId>.txt` into its working directory, as a real engineer agent
- * would edit the repository.
+ * would edit the repository. (On the bug track the stub edits it itself.)
  */
 export function createTempProject(): TempProject {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-e2e-')));
@@ -90,7 +87,12 @@ export function createTempProject(): TempProject {
     this: StubExecutor,
     invocation,
   ) {
-    if (invocation.column === 'IMPLEMENTATION' && invocation.workingDirectory) {
+    // A bug's two phases are the stub's own to play: it writes the test, then the fix.
+    if (
+      invocation.column === 'IMPLEMENTATION' &&
+      invocation.workingDirectory &&
+      !invocation.bugPhase
+    ) {
       fs.writeFileSync(
         path.join(invocation.workingDirectory, `stub-${invocation.ticketId}.txt`),
         'stub change\n',
@@ -225,36 +227,10 @@ export async function dodApprove(ticketId: string, verified: string[] = []): Pro
   }
 }
 
-/**
- * Creates a TASK with no parent, and returns its id.
- *
- * shortcut: inserted through the repository because no command creates a
- * standalone task yet; switch to `ticket create --bug` when I1-M4-003 lands.
- */
-export function createStandaloneTask(title: string): string {
-  const projectPath = process.cwd();
-  const container = createContainer();
-  const project = container.projectRepo.read(projectPath);
-  const ticket = new SqliteTicketRepository(getDb()).createAtomic(project.id, (nextNum) => {
-    const now = new Date().toISOString();
-    return {
-      id: `${project.key}-${nextNum}`,
-      projectId: project.id,
-      title,
-      kind: TicketKind.TASK,
-      parentId: null,
-      taskKey: null,
-      column: 'BACKLOG',
-      subState: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-  });
-  container.artifactStore.writeArtifact(
-    projectPath,
-    ticket.id,
-    `${ticket.id}-ticket.md`,
-    buildInitialTicketDocument(ticket),
-  );
-  return ticket.id;
+/** Creates a standalone task on the bug track (`ticket create --bug`), and returns its id. */
+export async function createStandaloneTask(title: string): Promise<string> {
+  const { output } = await runCli('ticket', 'create', title, '--bug');
+  const id = /Created \w+ (\S+):/.exec(output)?.[1];
+  if (!id) throw new Error(`ticket create --bug printed no id:\n${output}`);
+  return id;
 }

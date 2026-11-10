@@ -376,6 +376,33 @@ describe('TicketCreateUseCase', () => {
     expect(ticketRepo.createAtomic).toHaveBeenCalledTimes(2);
   });
 
+  describe('--bug', () => {
+    it('creates a standalone task on the bug track: no parent, no spec', () => {
+      const result = useCase.execute({
+        ...defaultInput,
+        title: 'Returns 500 for a missing ticket',
+        bug: true,
+      });
+
+      expect(result).toMatchObject({ kind: 'TASK', parentId: null, alreadyExisted: false });
+      const saved = (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mock.results[0]!
+        .value as Ticket;
+      expect(saved).toMatchObject({ kind: 'TASK', parentId: null, track: 'bug', specPin: null });
+    });
+
+    it('is refused with --parent: a bug does not travel an epic', () => {
+      expect(() => useCase.execute({ ...defaultInput, parentId: 'AEOS-1', bug: true })).toThrow(
+        /--bug.*--parent/,
+      );
+      expect(ticketRepo.createAtomic).not.toHaveBeenCalled();
+    });
+
+    it('is refused with --spec', () => {
+      expect(() => useCase.execute({ ...epicInput, bug: true })).toThrow(/--bug.*--spec/);
+      expect(ticketRepo.createAtomic).not.toHaveBeenCalled();
+    });
+  });
+
   describe('child tasks', () => {
     const epic = {
       id: 'AEOS-1',

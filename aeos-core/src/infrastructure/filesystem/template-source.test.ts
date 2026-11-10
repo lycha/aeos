@@ -105,6 +105,16 @@ describe('scaffolded project integrity', () => {
     expect(inAeos('rubrics/dod/dod-evaluation.md')).toMatch(/argued away/i);
   });
 
+  it('gives the engineer the two instructions of the bug track', () => {
+    repo.scaffoldDefaults(tmpDir);
+
+    const { bugTrack } = new YamlAgentSpecLoader().load('agents/engineer-agent.yaml', tmpDir);
+
+    expect(bugTrack?.reproduce).toContain('<!-- AEOS-REPRO');
+    expect(bugTrack?.reproduce).toMatch(/failing test/i);
+    expect(bugTrack?.fix).toMatch(/without editing/i);
+  });
+
   it('reports what it created', () => {
     const created = repo.scaffoldDefaults(tmpDir);
 

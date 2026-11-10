@@ -39,6 +39,11 @@ export interface TicketCreateInput {
    * Refused without `parentId`.
    */
   implements?: string[];
+  /**
+   * Create a standalone TASK on the bug track: no parent, no spec. Refused
+   * with `parentId` or `spec`.
+   */
+  bug?: boolean;
 }
 
 export interface TicketCreateResult {

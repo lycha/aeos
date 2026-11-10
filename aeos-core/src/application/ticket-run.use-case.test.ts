@@ -37,6 +37,7 @@ import {
   renderConformanceMarkdown,
 } from '../domain/services/conformance-builder.js';
 import type { ConformanceService } from './services/conformance.service.js';
+import type { FileHasher } from '../domain/ports/driven/file-hasher.port.js';
 
 // --- Mock factories ---
 
@@ -303,6 +304,7 @@ describe('TicketRunUseCase', () => {
   let gateRecords: GateRecord[];
   let criteriaCollector: { collect: ReturnType<typeof vi.fn> };
   let conformanceService: { buildConformance: ReturnType<typeof vi.fn> };
+  let fileHasher: { sha256: ReturnType<typeof vi.fn> };
   let useCase: TicketRunUseCase;
 
   beforeEach(() => {
@@ -335,6 +337,7 @@ describe('TicketRunUseCase', () => {
     };
     criteriaCollector = { collect: vi.fn() };
     conformanceService = { buildConformance: vi.fn() };
+    fileHasher = { sha256: vi.fn().mockReturnValue({}) };
     checkRegistry = new CheckRegistry(
       projectRepo,
       checksRunner as ChecksRunner,
@@ -375,6 +378,7 @@ describe('TicketRunUseCase', () => {
       { append: vi.fn(), list: () => gateRecords },
       criteriaCollector as unknown as CriteriaCollector,
       conformanceService as unknown as ConformanceService,
+      fileHasher as FileHasher,
     );
   }
 
@@ -388,6 +392,240 @@ describe('TicketRunUseCase', () => {
       files: call[2] as { brief: string; transcript: string },
     }));
   }
+
+  describe('the bug track', () => {
+    const COMMAND = 'npx vitest run src/foo.test.ts -t "returns 404"';
+    const TEST_FILE = 'src/foo.test.ts';
+    const red = {
+      exitCode: 1,
+      durationMs: 40,
+      timedOut: false,
+      outputTail: 'expected 404, got 500',
+    };
+    const green = { exitCode: 0, durationMs: 40, timedOut: false, outputTail: '1 passed' };
+    const notes = `${'A '.repeat(60)}`;
+    /** What the ticket directory holds: the engine reads its own repro record back from it. */
+    let stored: Record<string, string>;
+    /** What the reproduce phase answers with. */
+    let reproduceNotes: string;
+
+    const invocations = (): ExecutorInvocation[] =>
+      (executor.run as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0] as ExecutorInvocation,
+      );
+    const phases = (): string[] =>
+      invocations().map((invocation) =>
+        invocation.outputPath.endsWith('-review.md') ? 'review' : (invocation.bugPhase ?? 'worker'),
+      );
+    const prompts = (): Array<{ context: AssembledContext; agent: AgentSpec }> =>
+      (buildPromptFn as ReturnType<typeof vi.fn>).mock.calls.map((call) => ({
+        context: call[0] as AssembledContext,
+        agent: call[1] as AgentSpec,
+      }));
+    const projectCommits = (): string[] =>
+      (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls
+        .filter((call) => call[0] === PROJECT_PATH)
+        .map((call) => call[2] as string);
+    const checksRecords = (): RunRecord[] =>
+      writtenRuns()
+        .map((run) => run.record)
+        .filter((record) => record.role === 'checks');
+
+    beforeEach(() => {
+      stored = {};
+      reproduceNotes = `${notes}\n\n<!-- AEOS-REPRO\ncommand: ${COMMAND}\n-->`;
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ kind: 'TASK', subState: 'READY', track: 'bug' }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ executorMode: 'agentic' }),
+      );
+      (agentSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultAgentSpec({ bugTrack: { reproduce: 'ADD A FAILING TEST', fix: 'MAKE IT PASS' } }),
+      );
+      (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mockImplementation(
+        (_project: string, _ticket: string, name: string, content: string) => {
+          stored[name] = content;
+        },
+      );
+      (artifactStore.artifactExists as ReturnType<typeof vi.fn>).mockImplementation(
+        (_project: string, _ticket: string, name: string) => name in stored,
+      );
+      (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockImplementation(
+        (_project: string, _ticket: string, name: string) => stored[name] ?? 'ticket content',
+      );
+      (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (invocation: ExecutorInvocation) => ({
+          ok: true,
+          artifactPath: invocation.outputPath,
+          content: invocation.outputPath.endsWith('-review.md')
+            ? reviewWith('APPROVED')
+            : invocation.bugPhase === 'reproduce'
+              ? reproduceNotes
+              : notes,
+        }),
+      );
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockImplementation((dir: string) =>
+        dir === PROJECT_PATH ? [TEST_FILE] : [],
+      );
+      fileHasher.sha256.mockReturnValue({ [TEST_FILE]: 'hash-of-the-test' });
+      checksRunner.run.mockResolvedValueOnce(red).mockResolvedValueOnce(green);
+    });
+
+    it('reproduces, commits the test, fixes, proves it green, and goes to review with the evidence', async () => {
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(phases()).toEqual(['reproduce', 'fix', 'review']);
+      // Each phase is briefed with its own instruction, selected by the engine.
+      expect(prompts()[0]!.agent.taskInstruction).toBe('ADD A FAILING TEST');
+      expect(prompts()[1]!.agent.taskInstruction).toBe('MAKE IT PASS');
+      // ...and the fix is told the command and the files it must leave alone.
+      const reproduction = prompts()[1]!.context.priorArtifacts.find(
+        (artifact) => artifact.name === 'reproduction.md',
+      )!.content;
+      expect(reproduction).toContain(COMMAND);
+      expect(reproduction).toContain(TEST_FILE);
+
+      // The same command, through the checks runner, before and after the fix.
+      expect(checksRunner.run.mock.calls.map((call) => [call[0].command, call[1]])).toEqual([
+        [COMMAND, PROJECT_PATH],
+        [COMMAND, PROJECT_PATH],
+      ]);
+      // The reproducing test is committed before the fix is asked for.
+      expect(gitGateway.commitFiles).toHaveBeenCalledWith(
+        PROJECT_PATH,
+        [path.join(PROJECT_PATH, TEST_FILE)],
+        expect.stringMatching(/^\[AEOS-1\]\[REPRO\]/),
+      );
+      const reproCommit = (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.findIndex(
+        (call) => call[0] === PROJECT_PATH,
+      );
+      expect(
+        (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.invocationCallOrder[reproCommit],
+      ).toBeLessThan((executor.run as ReturnType<typeof vi.fn>).mock.invocationCallOrder[1]!);
+
+      // Evidence: two checks records, and repro.md with red then green.
+      expect(checksRecords()).toMatchObject([
+        { verdict: 'CHECKS_PASSED', executor: 'shell', output: null },
+        { verdict: 'CHECKS_PASSED', executor: 'shell', output: 'tickets/AEOS-1/AEOS-1-repro.md' },
+      ]);
+      const evidence = stored['AEOS-1-repro.md']!;
+      expect(evidence).toContain(`Command: \`${COMMAND}\``);
+      expect(evidence).toContain('| Before the fix | 1 |');
+      expect(evidence).toContain('| After the fix | 0 |');
+      expect(evidence.indexOf('expected 404, got 500')).toBeLessThan(evidence.indexOf('1 passed'));
+      expect(evidence).toContain(`<!-- AEOS-RUN: ${checksRecords()[1]!.run_id} -->`);
+      // ...committed with the artefact.
+      const artifactCommit = (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.find(
+        (call) => (call[2] as string).includes('[impl.md]'),
+      )!;
+      expect(artifactCommit[1]).toContain(
+        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, 'AEOS-1-repro.md'),
+      );
+    });
+
+    it('rejects the attempt when the test passes before any fix: it does not reproduce the bug', async () => {
+      checksRunner.run.mockReset().mockResolvedValue(green);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // Rejected, retried in the same phase with that feedback, and escalated when it repeats.
+      expect(result.status).toBe('escalated');
+      expect(phases()).toEqual(['reproduce', 'reproduce']);
+      expect(
+        prompts()[1]!.context.priorArtifacts.find((a) => a.name === 'previous-checks.md')!.content,
+      ).toContain('The test does not reproduce the bug');
+      expect(projectCommits()).toEqual([]);
+      expect(checksRecords()).toMatchObject([
+        { verdict: 'CHECKS_FAILED' },
+        { verdict: 'CHECKS_FAILED' },
+      ]);
+    });
+
+    it('does not hand the fix the feedback that was about the reproduction', async () => {
+      checksRunner.run
+        .mockReset()
+        .mockResolvedValueOnce(green)
+        .mockResolvedValueOnce(red)
+        .mockResolvedValueOnce(green);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(phases()).toEqual(['reproduce', 'reproduce', 'fix', 'review']);
+      expect(prompts()[2]!.context.priorArtifacts.map((artifact) => artifact.name)).toEqual([
+        'reproduction.md',
+      ]);
+    });
+
+    it('fails the attempt, naming the file, when the fix edits the reproducing test', async () => {
+      fileHasher.sha256
+        .mockReturnValueOnce({ [TEST_FILE]: 'hash-of-the-test' })
+        .mockReturnValueOnce({ [TEST_FILE]: 'another-hash' });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      if (result.status !== 'failed') return;
+      expect(result.error).toContain('The reproducing test was modified');
+      expect(result.error).toContain(TEST_FILE);
+      expect(gitGateway.restoreFiles).toHaveBeenCalledWith(PROJECT_PATH, [TEST_FILE]);
+      expect(phases()).toEqual(['reproduce', 'fix']);
+      // The fix was not run against a test it had rewritten.
+      expect(checksRunner.run).toHaveBeenCalledTimes(1);
+    });
+
+    it('escalates when the reproduce phase names no command', async () => {
+      reproduceNotes = notes;
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'escalated', reason: 'UNPARSEABLE_REPRO' });
+      expect(stateMachine.setSubState).toHaveBeenLastCalledWith(PROJECT_ID, TICKET_ID, 'ESCALATED');
+      expect(phases()).toEqual(['reproduce']);
+      expect(checksRunner.run).not.toHaveBeenCalled();
+    });
+
+    it('sends the fix back when the test still fails after it, without asking the reviewer', async () => {
+      checksRunner.run.mockReset().mockResolvedValue(red);
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // Reproduced once; from then on only the fix is retried.
+      expect(phases()).toEqual(['reproduce', 'fix', 'fix']);
+      expect(
+        prompts()[2]!.context.priorArtifacts.find((a) => a.name === 'previous-checks.md')!.content,
+      ).toContain('still fails after the fix');
+      expect(projectCommits()).toHaveLength(1);
+      expect(stored).not.toHaveProperty('AEOS-1-repro.md');
+    });
+
+    it('does not reproduce again on a later run: the committed test and its hashes stand', async () => {
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      (executor.run as ReturnType<typeof vi.fn>).mockClear();
+      checksRunner.run.mockReset().mockResolvedValue(green);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(phases()).toEqual(['fix', 'review']);
+      expect(projectCommits()).toHaveLength(1);
+      expect(stored['AEOS-1-repro.md']).toContain('| Before the fix | 1 |');
+    });
+
+    it('refuses to run a bug with an agent that has no bug-track instructions', async () => {
+      (agentSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(defaultAgentSpec());
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: expect.stringContaining('bugTrack'),
+      });
+      expect(executor.run).not.toHaveBeenCalled();
+    });
+  });
 
   describe('conformance at the final gate', () => {
     const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };

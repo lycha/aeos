@@ -549,4 +549,16 @@ describe('ContextAssembler — integration-review diff (WI-2)', () => {
     expect(gitGateway.diffRange).toHaveBeenCalledWith('/root', 'aeos-base/AEOS-1', 'HEAD');
     expect(result.codeDiff).toContain('diff --git');
   });
+
+  it("keeps the engine's own record of a reproduction out of the context: repro.md says the same", async () => {
+    (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockReturnValue([
+      'AEOS-1-ticket.md',
+      'AEOS-1-repro.json',
+      'AEOS-1-repro.md',
+    ]);
+
+    const result = await assembler.assemble('AEOS-1', '/root', Column.CODE_REVIEW);
+
+    expect(result.priorArtifacts.map((artifact) => artifact.name)).toEqual(['AEOS-1-repro.md']);
+  });
 });

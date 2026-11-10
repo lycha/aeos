@@ -228,6 +228,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
         this.costRepo.findByTicket(projectId, id).map((record) => record.costUsd),
       ),
       specPin: resolveSpecPin(this.ticketRepo, ticket),
+      repro: read(`${ticket.id}-repro.md`),
     });
   }
 }

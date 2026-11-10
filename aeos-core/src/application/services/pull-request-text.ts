@@ -38,6 +38,8 @@ export interface PullRequestBodyInput {
   readonly costs: readonly (number | null)[];
   /** The pinned spec of a spec-backed ticket. */
   readonly specPin?: SpecPin | null;
+  /** The content of a bug's `<ticket>-repro.md`: the test red, then green. */
+  readonly repro?: string | null;
 }
 
 export function buildPullRequestBody(input: PullRequestBodyInput): string {
@@ -74,6 +76,15 @@ export function buildPullRequestBody(input: PullRequestBodyInput): string {
     '',
     input.checksTable ?? 'No checks were recorded for this ticket.',
     '',
+    ...(input.repro
+      ? [
+          '## Reproduction',
+          '',
+          // Under its own heading here; the link to its run means nothing on the code host.
+          input.repro.replace(/^# .*\n+/, '').replace(/\n*<!-- AEOS-RUN: \S+ -->\s*$/, ''),
+          '',
+        ]
+      : []),
     '## Conformance',
     '',
     '<!-- aeos:conformance -->',

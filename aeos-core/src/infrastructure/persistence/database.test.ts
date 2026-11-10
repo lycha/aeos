@@ -152,6 +152,19 @@ describe('database', () => {
       expect(column).toMatchObject({ notnull: 0 });
     });
 
+    it('adds the nullable track column (v12), and can run twice', () => {
+      const db = getDb();
+      _testing.MIGRATIONS.find((migration) => migration.version === 12)!.apply(db);
+
+      const column = (
+        db.prepare('PRAGMA table_info(tickets)').all() as Array<{
+          name: string;
+          notnull: number;
+        }>
+      ).find((info) => info.name === 'track');
+      expect(column).toMatchObject({ notnull: 0 });
+    });
+
     it('should record each migration with description and timestamp', () => {
       const db = getDb();
       const rows = db

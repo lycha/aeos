@@ -39,6 +39,10 @@ export function registerTicketCreateCommand(
       'Back this epic with the spec at .aeos/features/<feature>. Refused unless the decisions lint is clean',
     )
     .option(
+      '--bug',
+      'Create a standalone bug task that must show a reproducing test red, then green',
+    )
+    .option(
       '--implements <ids>',
       'Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2)',
     )
@@ -52,6 +56,7 @@ export function registerTicketCreateCommand(
           bodyFile?: string;
           spec?: string;
           implements?: string;
+          bug?: boolean;
         },
       ) => {
         try {
@@ -95,6 +100,7 @@ export function registerTicketCreateCommand(
             taskKey: options.key,
             body,
             spec: options.spec,
+            bug: options.bug,
             implements: options.implements
               ?.split(',')
               .map((id) => id.trim())

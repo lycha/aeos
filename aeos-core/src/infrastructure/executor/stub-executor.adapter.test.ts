@@ -2,10 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { spawnSync } from 'node:child_process';
 
 import { Column } from '../../domain/model/column.js';
 import type { ExecutorInvocation } from '../../domain/model/executor-invocation.js';
 import { parseConformanceVerdicts } from '../../domain/services/conformance-verdict-parser.js';
+import { parseRepro } from '../../domain/services/repro-parser.js';
 import { StubExecutor } from './stub-executor.adapter.js';
 
 describe('StubExecutor', () => {
@@ -223,5 +225,25 @@ describe('StubExecutor', () => {
       outputPath: path.join(tmpDir, 'EE-1-dod-verification-review.md'),
     });
     expect(review.ok && review.content).not.toContain('AEOS-CONFORMANCE');
+  });
+
+  it('plays both phases of a bug: a test that fails, then the fix that makes it pass', async () => {
+    const run = (): number =>
+      spawnSync(parsedCommand, { cwd: tmpDir, shell: true, stdio: 'ignore' }).status ?? -1;
+    let parsedCommand = '';
+
+    const reproduce = await executor.run(
+      makeInvocation({ mode: 'agentic', workingDirectory: tmpDir, bugPhase: 'reproduce' }),
+    );
+    const parsed = parseRepro((reproduce.ok && reproduce.content) || '');
+    if (!parsed.ok) throw new Error(parsed.reason);
+    parsedCommand = parsed.command;
+    expect(run()).not.toBe(0);
+
+    const fix = await executor.run(
+      makeInvocation({ mode: 'agentic', workingDirectory: tmpDir, bugPhase: 'fix' }),
+    );
+    expect(fix.ok && fix.content).not.toContain('AEOS-REPRO');
+    expect(run()).toBe(0);
   });
 });

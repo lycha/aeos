@@ -9,7 +9,7 @@ import type { SubStateOrNull } from '../../domain/model/sub-state.js';
 import type { TicketKind } from '../../domain/model/ticket-kind.js';
 import type { TicketRepository } from '../../domain/ports/driven/ticket-repository.port.js';
 
-const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, escalation_reason, escalation_message, escalation_artifact, pr_url, spec_feature, spec_commit, implements`;
+const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, escalation_reason, escalation_message, escalation_artifact, pr_url, spec_feature, spec_commit, implements, track`;
 
 interface TicketRow {
   id: string;
@@ -30,6 +30,7 @@ interface TicketRow {
   spec_commit: string | null;
   /** Comma-separated criterion ids. */
   implements: string | null;
+  track: 'bug' | null;
 }
 
 const FEATURES_PREFIX = 'features/';
@@ -69,6 +70,7 @@ export class SqliteTicketRepository implements TicketRepository {
             }
           : null,
       implements: row.implements ? row.implements.split(',') : null,
+      track: row.track ?? null,
     };
   }
 
@@ -85,8 +87,8 @@ export class SqliteTicketRepository implements TicketRepository {
   save(ticket: Ticket): void {
     this.db
       .prepare(
-        `INSERT INTO tickets (id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, spec_feature, spec_commit, implements)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, spec_feature, spec_commit, implements, track)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         ticket.id,
@@ -102,6 +104,7 @@ export class SqliteTicketRepository implements TicketRepository {
         ticket.specPin ? ticket.specPin.path.slice(FEATURES_PREFIX.length) : null,
         ticket.specPin?.commit ?? null,
         ticket.implements?.length ? ticket.implements.join(',') : null,
+        ticket.track ?? null,
       );
   }
 

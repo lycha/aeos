@@ -27,12 +27,17 @@ export class TicketCreateUseCase implements TicketCreatePort {
   execute(input: TicketCreateInput): TicketCreateResult {
     const { title, projectId, projectKey, projectPath, parentId, taskKey, body } = input;
 
+    if (input.bug && (parentId || input.spec !== undefined)) {
+      throw new Error(
+        `--bug creates a standalone task and cannot be combined with ${parentId ? '--parent' : '--spec'}. A bug does not travel an epic: it needs a failing test that reproduces it, then the fix.`,
+      );
+    }
     if (input.spec !== undefined && parentId) {
       throw new Error(
         '--spec backs an epic with a spec; it cannot be combined with --parent. A task inherits the pin of its epic.',
       );
     }
-    if (input.spec === undefined && !parentId) {
+    if (input.spec === undefined && !parentId && !input.bug) {
       throw new Error(
         'An epic needs a spec: pass --spec <feature>. A person writes the spec; AEOS reviews it and builds from it. ' +
           'The skills that produce one, in order: prototype-harvest (what exists), gap-interrogation-solo or ' +
@@ -64,8 +69,8 @@ export class TicketCreateUseCase implements TicketCreatePort {
             input.spec,
           );
 
-    // A parent makes this a task; without one it is an epic.
-    const kind = parentId ? TicketKind.TASK : TicketKind.EPIC;
+    // A parent makes this a task, and so does the bug track; otherwise it is an epic.
+    const kind = parentId || input.bug ? TicketKind.TASK : TicketKind.EPIC;
 
     // A key only identifies a task under a parent; an epic never carries one,
     // matching the port contract ("ignored without a parent").
@@ -126,6 +131,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
         taskKey: resolvedTaskKey,
         specPin,
         implements: input.implements?.length ? input.implements : null,
+        track: input.bug ? ('bug' as const) : null,
         column: 'BACKLOG' as const,
         subState: null,
         createdAt: now,

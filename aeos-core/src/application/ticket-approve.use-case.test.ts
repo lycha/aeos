@@ -703,6 +703,23 @@ describe('TicketApproveUseCase — pull requests', () => {
     expect(body).toContain('Code review:');
   });
 
+  it("puts a bug's reproduction, red then green, in its pull request", () => {
+    approving({ ...standaloneTaskAtQa(), track: 'bug' });
+    (artifactStore.artifactExists as ReturnType<typeof vi.fn>).mockImplementation(
+      (_path: string, _ticket: string, name: string) => name === 'AEOS-1-repro.md',
+    );
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
+      '# Reproduction\n\nCommand: `node repro.cjs`\n\n| Before the fix | 1 |\n',
+    );
+
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    const { body } = pr.prGateway.create.mock.calls[0]![0] as { body: string };
+    expect(body).toContain(
+      '## Reproduction\n\nCommand: `node repro.cjs`\n\n| Before the fix | 1 |',
+    );
+  });
+
   it('opens no pull request for a child task, or for an epic leaving any other column', () => {
     approving({ ...standaloneTaskAtQa(), parentId: 'AEOS-9' });
     useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);

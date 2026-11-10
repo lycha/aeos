@@ -64,4 +64,9 @@ export interface Ticket {
    * e.g. `['AC-1', 'AC-12a']`. Null when it claims none.
    */
   implements?: string[] | null;
+  /**
+   * The small-change track a standalone TASK travels (`ticket create --bug`):
+   * a bug must show a reproducing test red, then green. Null on no track.
+   */
+  track?: 'bug' | null;
 }

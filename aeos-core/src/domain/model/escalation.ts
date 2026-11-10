@@ -30,6 +30,8 @@ export const EscalationReason = {
    * ran and no attempt was used: what is missing is a person's decision.
    */
   PRE_WORKER_CHECK_FAILED: 'PRE_WORKER_CHECK_FAILED',
+  /** A bug's reproduce phase named no command to run its test with. */
+  UNPARSEABLE_REPRO: 'UNPARSEABLE_REPRO',
   /** An epic from before spec pins: it has no spec to be reviewed against. */
   SPEC_REQUIRED: 'SPEC_REQUIRED',
 } as const;

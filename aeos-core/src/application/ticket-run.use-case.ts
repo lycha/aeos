@@ -78,6 +78,13 @@ import type { CheckRegistry } from './checks/check-registry.js';
 import type { CriteriaCollector } from './services/criteria-collector.js';
 import type { ConformanceService } from './services/conformance.service.js';
 import { parseConformanceVerdicts } from '../domain/services/conformance-verdict-parser.js';
+import { parseRepro } from '../domain/services/repro-parser.js';
+import type { FileHasher } from '../domain/ports/driven/file-hasher.port.js';
+import {
+  renderReproEvidence,
+  reproductionBrief,
+  type ReproState,
+} from './services/repro-evidence.js';
 import { DEFAULT_GLOBAL_CONFIG } from '../shared/config.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import { TicketRunEventEmitter } from './services/ticket-run-event-emitter.js';
@@ -114,6 +121,11 @@ interface RunContext {
    * must judge. Empty means no agent is needed; null off the gate.
    */
   readonly judging: readonly string[] | null;
+  /**
+   * The two task instructions of a bug's implementation, which then runs the
+   * worker twice: reproduce, fix. Null for anything else.
+   */
+  readonly bugTrack: NonNullable<AgentSpec['bugTrack']> | null;
 }
 
 /** One executor invocation, as much as the call site knows about it. */
@@ -178,6 +190,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly gateRecordStore: GateRecordStore,
     private readonly criteriaCollector: CriteriaCollector,
     private readonly conformanceService: ConformanceService,
+    private readonly fileHasher: FileHasher,
   ) {}
 
   async execute(
@@ -237,6 +250,16 @@ export class TicketRunUseCase implements TicketRunPort {
           status: 'failed',
           ticketId,
           error: `Executor '${resolvedWorkerConfig.executorType}' does not support agentic IMPLEMENTATION runs. Use 'claude-cli', 'auggie-cli', 'opencode-cli', or omit --executor.`,
+        };
+      }
+
+      // A bug is implemented in two phases, wherever code is written.
+      const isBugFix = mirroredTicket.track === 'bug' && workerMode === 'agentic';
+      if (isBugFix && !workerAgentSpec.bugTrack) {
+        return {
+          status: 'failed',
+          ticketId,
+          error: `${ticketId} is a bug, and ${columnSpec.workerAgentFile} has no \`bugTrack\` instructions (reproduce, fix). \`aeos project sync\` shows the template's.`,
         };
       }
 
@@ -341,6 +364,7 @@ export class TicketRunUseCase implements TicketRunPort {
         ),
         specPin,
         judging,
+        bugTrack: (isBugFix && workerAgentSpec.bugTrack) || null,
       };
 
       // ── Pre-worker checks ────────────────────────────────────────
@@ -602,8 +626,7 @@ export class TicketRunUseCase implements TicketRunPort {
     attempt: number,
     feedback: { name: string; content: string } | undefined,
   ): Promise<AttemptOutcome> {
-    const { emitter, ticketId, projectPath, projectId, aeosDir, columnSpec, workerMode, column } =
-      ctx;
+    const { emitter, ticketId, projectPath, aeosDir, columnSpec, workerMode } = ctx;
 
     // ── Worker ───────────────────────────────────────────────────
     // On a retry the context is re-assembled rather than reusing the one taken
@@ -631,8 +654,6 @@ export class TicketRunUseCase implements TicketRunPort {
         feedback.content,
       );
     }
-    const prompt = this.buildPromptFn(workerContext, ctx.workerAgentSpec);
-
     // Baseline the repo before an agentic worker touches it, on the first
     // attempt only. Whatever is already uncommitted — a previous task's work,
     // or unrelated local edits — becomes its own commit, so `git diff HEAD`
@@ -647,128 +668,51 @@ export class TicketRunUseCase implements TicketRunPort {
       );
     }
 
-    const attemptLabel = attempt > 1 ? ` (attempt ${attempt})` : '';
-    this.emitStageEvent(
-      emitter,
-      'stage.started',
-      'worker',
-      `Running worker executor${attemptLabel}`,
-      {
-        role: 'worker',
-        agent: ctx.workerAgentSpec.name,
-        executor: ctx.workerExecutorType,
-        model: ctx.workerModel,
-        mode: workerMode,
-      },
-    );
+    // ── Bug track: the reproducing test comes first ──────────────
+    // Once it has been seen to fail and is committed, every later attempt and
+    // run is the fix alone.
+    let repro: ReproState | null = null;
+    if (ctx.bugTrack) {
+      const known = this.readRepro(ctx);
+      const reproduced = known ?? (await this.reproduce(ctx, attempt, workerContext));
+      if ('kind' in reproduced) return reproduced;
+      repro = reproduced;
+      workerContext = this.withExtraArtifact(
+        // Feedback that was answered by reproducing is not feedback on the fix.
+        known
+          ? workerContext
+          : {
+              ...workerContext,
+              priorArtifacts: workerContext.priorArtifacts.filter(
+                (artifact) => artifact.name !== feedback?.name,
+              ),
+            },
+        'reproduction.md',
+        reproductionBrief(repro),
+      );
+    }
 
-    const workerRun = {
-      role: 'worker',
-      agent: ctx.workerAgentSpec.name,
-      executor: ctx.workerExecutorType,
-      model: ctx.workerModel,
-      mode: workerMode,
-      attempt,
-      prompt,
-      startedAt: new Date(),
-    } as const;
+    const worker = await this.invokeWorker(ctx, attempt, workerContext, repro ? 'fix' : undefined);
+    if ('kind' in worker) return worker;
+    const { run, content } = worker;
 
-    // Taken after the baseline commit, or baselined files would look untouched.
-    const beforeWorker = this.changedPaths(ctx);
-    let executorResult: ExecutorResult;
-    try {
-      this.currentExecutor = ctx.workerExecutor;
-      this.interruptStage = 'worker';
-      executorResult = await ctx.workerExecutor.run({
-        prompt,
-        outputPath: ctx.artifactAbsPath,
-        ticketId,
-        column,
-        mode: workerMode,
-        workingDirectory: workerMode === 'agentic' ? projectPath : undefined,
-        onChunk: this.createChunkObserver(emitter, 'worker'),
-      });
-    } catch (err) {
-      const message = [
-        err instanceof Error ? err.message : String(err),
-        this.restoreProtected(ctx, beforeWorker),
-      ]
-        .filter(Boolean)
-        .join('\n');
-      this.emitStageEvent(emitter, 'stage.failed', 'worker', message, {
-        role: 'worker',
-        executor: ctx.workerExecutorType,
-        model: ctx.workerModel,
-        mode: workerMode,
-      });
-      this.recordRunAlone(ctx, {
-        ...workerRun,
-        result: { ok: false, reason: message },
-        endedAt: new Date(),
-      });
-      if (this.isInterruptedReason(message)) {
-        return { kind: 'interrupted', stage: 'worker', message };
+    // The fix may not weaken the test it has to pass.
+    if (repro) {
+      const now = this.fileHasher.sha256(projectPath, Object.keys(repro.files));
+      const modified = Object.keys(repro.files).filter((file) => now[file] !== repro.files[file]);
+      if (modified.length > 0) {
+        // shortcut: restored to HEAD, which is the [REPRO] commit unless a later
+        // run baselined over it; then the person restores it from that commit.
+        this.gitGateway.restoreFiles(projectPath, modified);
+        const error = `The reproducing test was modified: ${modified.join(', ')}. The fix must make the test pass without editing it; what was committed has been restored.`;
+        this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
+        this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+        this.recordRunAlone(ctx, { ...run, error });
+        return { kind: 'failed', error };
       }
-      return { kind: 'failed', error: this.formatExecutorFailure('worker', column, message) };
-    } finally {
-      this.currentExecutor = null;
-      this.interruptStage = undefined;
     }
-    const violation = this.restoreProtected(ctx, beforeWorker);
-    const run: InvokedRun = { ...workerRun, result: executorResult, endedAt: new Date() };
-
-    this.recordCost(
-      projectId,
-      ticketId,
-      column,
-      ctx.workerAgentSpec.name,
-      ctx.workerExecutorType,
-      ctx.workerModel,
-      executorResult,
-      'worker',
-    );
-    this.emitCostEvent(emitter, 'worker', executorResult);
-
-    // FAILED, not ESCALATED: the agent broke a rule.
-    if (violation) {
-      this.emitStageEvent(emitter, 'stage.failed', 'worker', violation, {
-        role: 'worker',
-        executor: ctx.workerExecutorType,
-        model: ctx.workerModel,
-        mode: workerMode,
-      });
-      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
-      this.recordRunAlone(ctx, { ...run, error: violation });
-      return { kind: 'failed', error: violation };
-    }
-
-    if (!executorResult.ok) {
-      this.emitStageEvent(emitter, 'stage.failed', 'worker', executorResult.reason, {
-        role: 'worker',
-        executor: ctx.workerExecutorType,
-        model: ctx.workerModel,
-        mode: workerMode,
-      });
-      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
-      this.recordRunAlone(ctx, run);
-      if (this.isInterruptedReason(executorResult.reason)) {
-        return { kind: 'interrupted', stage: 'worker', message: executorResult.reason };
-      }
-      return {
-        kind: 'failed',
-        error: this.formatExecutorFailure('worker', column, executorResult.reason),
-      };
-    }
-
-    this.emitStageEvent(emitter, 'stage.completed', 'worker', 'Worker completed', {
-      role: 'worker',
-      executor: ctx.workerExecutorType,
-      model: ctx.workerModel,
-      mode: workerMode,
-    });
 
     // ── Validation ───────────────────────────────────────────────
-    const content = executorResult.content ?? '';
     this.emitStageEvent(emitter, 'stage.started', 'validation', 'Validating worker output');
 
     // An agentic run must change the repo — unless the column opts out, because
@@ -804,15 +748,23 @@ export class TicketRunUseCase implements TicketRunPort {
 
     // ── Checks ───────────────────────────────────────────────────
     // Before the commit and the reviewer: a red build costs no model call.
-    const checks = columnSpec.runChecks ? this.checkRegistry.checksFor(projectPath) : [];
     let checksFiles: string[] = [];
+    if (repro) {
+      const proven = await this.proveFixed(ctx, attempt, repro);
+      if (!Array.isArray(proven)) {
+        this.recordRunAlone(ctx, run);
+        return proven;
+      }
+      checksFiles = proven;
+    }
+    const checks = columnSpec.runChecks ? this.checkRegistry.checksFor(projectPath) : [];
     if (checks.length > 0) {
       const stage = await this.runChecks(ctx, attempt, checks);
       if (!stage.passed) {
         this.recordRunAlone(ctx, run);
         return { kind: 'checks-failed', check: stage.check, output: stage.output };
       }
-      checksFiles = stage.files;
+      checksFiles = [...checksFiles, ...stage.files];
     }
 
     // ── Commit the artifact ──────────────────────────────────────
@@ -896,6 +848,276 @@ export class TicketRunUseCase implements TicketRunPort {
       `[${ticketId}][conformance.md][engine][build]`,
     );
     return judging;
+  }
+
+  /**
+   * One invocation of the column's worker: brief, run, protected paths, cost.
+   * Returns the run and what it wrote, or how the attempt ends. A bug's
+   * implementation calls it twice, once per phase, each with its instruction.
+   */
+  private async invokeWorker(
+    ctx: RunContext,
+    attempt: number,
+    context: AssembledContext,
+    bugPhase?: 'reproduce' | 'fix',
+  ): Promise<{ run: InvokedRun; content: string } | AttemptOutcome> {
+    const { emitter, ticketId, projectPath, projectId, workerMode, column } = ctx;
+    const prompt = this.buildPromptFn(
+      context,
+      bugPhase && ctx.bugTrack
+        ? { ...ctx.workerAgentSpec, taskInstruction: ctx.bugTrack[bugPhase] }
+        : ctx.workerAgentSpec,
+    );
+
+    const attemptLabel = `${bugPhase ? ` (${bugPhase})` : ''}${attempt > 1 ? ` (attempt ${attempt})` : ''}`;
+    this.emitStageEvent(
+      emitter,
+      'stage.started',
+      'worker',
+      `Running worker executor${attemptLabel}`,
+      {
+        role: 'worker',
+        agent: ctx.workerAgentSpec.name,
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: workerMode,
+      },
+    );
+
+    const workerRun = {
+      role: 'worker',
+      agent: ctx.workerAgentSpec.name,
+      executor: ctx.workerExecutorType,
+      model: ctx.workerModel,
+      mode: workerMode,
+      attempt,
+      prompt,
+      startedAt: new Date(),
+    } as const;
+
+    // Taken after the baseline commit, or baselined files would look untouched.
+    const beforeWorker = this.changedPaths(ctx);
+    let executorResult: ExecutorResult;
+    try {
+      this.currentExecutor = ctx.workerExecutor;
+      this.interruptStage = 'worker';
+      executorResult = await ctx.workerExecutor.run({
+        prompt,
+        outputPath: ctx.artifactAbsPath,
+        ticketId,
+        column,
+        mode: workerMode,
+        workingDirectory: workerMode === 'agentic' ? projectPath : undefined,
+        ...(bugPhase ? { bugPhase } : {}),
+        onChunk: this.createChunkObserver(emitter, 'worker'),
+      });
+    } catch (err) {
+      const message = [
+        err instanceof Error ? err.message : String(err),
+        this.restoreProtected(ctx, beforeWorker),
+      ]
+        .filter(Boolean)
+        .join('\n');
+      this.emitStageEvent(emitter, 'stage.failed', 'worker', message, {
+        role: 'worker',
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: workerMode,
+      });
+      this.recordRunAlone(ctx, {
+        ...workerRun,
+        result: { ok: false, reason: message },
+        endedAt: new Date(),
+      });
+      if (this.isInterruptedReason(message)) {
+        return { kind: 'interrupted', stage: 'worker', message };
+      }
+      return { kind: 'failed', error: this.formatExecutorFailure('worker', column, message) };
+    } finally {
+      this.currentExecutor = null;
+      this.interruptStage = undefined;
+    }
+    const violation = this.restoreProtected(ctx, beforeWorker);
+    const run: InvokedRun = { ...workerRun, result: executorResult, endedAt: new Date() };
+
+    this.recordCost(
+      projectId,
+      ticketId,
+      column,
+      ctx.workerAgentSpec.name,
+      ctx.workerExecutorType,
+      ctx.workerModel,
+      executorResult,
+      'worker',
+    );
+    this.emitCostEvent(emitter, 'worker', executorResult);
+
+    // FAILED, not ESCALATED: the agent broke a rule.
+    if (violation) {
+      this.emitStageEvent(emitter, 'stage.failed', 'worker', violation, {
+        role: 'worker',
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: workerMode,
+      });
+      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+      this.recordRunAlone(ctx, { ...run, error: violation });
+      return { kind: 'failed', error: violation };
+    }
+
+    if (!executorResult.ok) {
+      this.emitStageEvent(emitter, 'stage.failed', 'worker', executorResult.reason, {
+        role: 'worker',
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: workerMode,
+      });
+      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+      this.recordRunAlone(ctx, run);
+      if (this.isInterruptedReason(executorResult.reason)) {
+        return { kind: 'interrupted', stage: 'worker', message: executorResult.reason };
+      }
+      return {
+        kind: 'failed',
+        error: this.formatExecutorFailure('worker', column, executorResult.reason),
+      };
+    }
+
+    this.emitStageEvent(emitter, 'stage.completed', 'worker', 'Worker completed', {
+      role: 'worker',
+      executor: ctx.workerExecutorType,
+      model: ctx.workerModel,
+      mode: workerMode,
+    });
+
+    return { run, content: executorResult.content ?? '' };
+  }
+
+  /** The record of a reproduction this ticket already has, if any. */
+  private readRepro(ctx: RunContext): ReproState | null {
+    const filename = `${ctx.ticketId}-repro.json`;
+    return this.artifactStore.artifactExists(ctx.projectPath, ctx.ticketId, filename)
+      ? (JSON.parse(
+          this.artifactStore.readArtifact(ctx.projectPath, ctx.ticketId, filename),
+        ) as ReproState)
+      : null;
+  }
+
+  /**
+   * Phase A of a bug: the worker adds a failing test and names the command
+   * that runs it. The command must fail; then the test is committed as
+   * `[<id>][REPRO]` and its files' hashes are kept.
+   */
+  private async reproduce(
+    ctx: RunContext,
+    attempt: number,
+    context: AssembledContext,
+  ): Promise<ReproState | AttemptOutcome> {
+    const { emitter, ticketId, projectPath, aeosDir } = ctx;
+    const worker = await this.invokeWorker(ctx, attempt, context, 'reproduce');
+    if ('kind' in worker) return worker;
+
+    const parsed = parseRepro(worker.content);
+    if (!parsed.ok) {
+      this.emitStageEvent(emitter, 'stage.failed', 'validation', parsed.reason);
+      this.recordRunAlone(ctx, { ...worker.run, error: parsed.reason });
+      return {
+        kind: 'escalated',
+        escalation: {
+          reason: EscalationReason.UNPARSEABLE_REPRO,
+          message: parsed.reason,
+          attempt,
+          artifactPath: ctx.artifactAbsPath,
+        },
+      };
+    }
+
+    const red = this.checkRegistry.reproCheck(parsed.command, 'red');
+    const stage = await this.performChecks(ctx, attempt, [red], 'shell', () => null);
+    const outputTail = stage.results[0]!.outputTail;
+    this.recordRunAlone(ctx, worker.run);
+    if (stage.failed) {
+      const message = `The test does not reproduce the bug: \`${parsed.command}\` ${stage.failed.timedOut ? 'timed out' : 'exited 0'} before any fix.`;
+      this.emitStageEvent(emitter, 'stage.failed', 'checks', message);
+      this.gitGateway.commitFiles(
+        aeosDir,
+        stage.files,
+        `[${ticketId}][RUN][${stage.runId}][checks][${stage.record.exit}]`,
+      );
+      return {
+        kind: 'checks-failed',
+        check: red.name,
+        output: `# ${message}\n\nA reproducing test fails until the bug is fixed. Change the test so that it does, and do not fix the bug yet.\n\n\`\`\`\n${outputTail}\n\`\`\`\n`,
+      };
+    }
+    this.emitStageEvent(emitter, 'stage.completed', 'checks', 'The test fails: bug reproduced');
+
+    const files = this.gitGateway
+      .changedFiles(projectPath)
+      .filter((file) => !file.startsWith('.aeos/'));
+    const state: ReproState = {
+      command: parsed.command,
+      red: { exitCode: red.exitCode, outputTail },
+      files: this.fileHasher.sha256(projectPath, files),
+    };
+    this.gitGateway.commitFiles(
+      projectPath,
+      files.map((file) => path.join(projectPath, file)),
+      `[${ticketId}][REPRO] failing test that reproduces the bug`,
+    );
+    const stateFilename = `${ticketId}-repro.json`;
+    this.artifactStore.writeArtifact(
+      projectPath,
+      ticketId,
+      stateFilename,
+      `${JSON.stringify(state, null, 2)}\n`,
+    );
+    this.gitGateway.commitFiles(
+      aeosDir,
+      [path.join(aeosDir, 'tickets', ticketId, stateFilename), ...stage.files],
+      `[${ticketId}][RUN][${stage.runId}][checks][${stage.record.exit}]`,
+    );
+    return state;
+  }
+
+  /**
+   * After the fix: the same command must now pass. Writes `<id>-repro.md` and
+   * returns the files to commit with the artefact, or the rejection.
+   */
+  private async proveFixed(
+    ctx: RunContext,
+    attempt: number,
+    repro: ReproState,
+  ): Promise<string[] | AttemptOutcome> {
+    const { emitter, ticketId, projectPath, aeosDir } = ctx;
+    const evidenceFilename = `${ticketId}-repro.md`;
+    const green = this.checkRegistry.reproCheck(repro.command, 'green');
+    const stage = await this.performChecks(ctx, attempt, [green], 'shell', (failed) =>
+      failed ? null : evidenceFilename,
+    );
+    const outputTail = stage.results[0]!.outputTail;
+    if (stage.failed) {
+      const message = `The reproducing test still fails after the fix: \`${repro.command}\` ${stage.describe(stage.failed)}.`;
+      this.emitStageEvent(emitter, 'stage.failed', 'checks', message);
+      this.gitGateway.commitFiles(
+        aeosDir,
+        stage.files,
+        `[${ticketId}][RUN][${stage.runId}][checks][${stage.record.exit}]`,
+      );
+      return {
+        kind: 'checks-failed',
+        check: green.name,
+        output: `# ${message}\n\nFix this before anything else, without editing the test. The reviewer was not asked.\n\n\`\`\`\n${outputTail}\n\`\`\`\n`,
+      };
+    }
+    this.artifactStore.writeArtifact(
+      projectPath,
+      ticketId,
+      evidenceFilename,
+      linkToRun(renderReproEvidence(repro, { exitCode: green.exitCode, outputTail }), stage.runId),
+    );
+    this.emitStageEvent(emitter, 'stage.completed', 'checks', 'The test passes: bug fixed');
+    return [path.join(aeosDir, 'tickets', ticketId, evidenceFilename), ...stage.files];
   }
 
   /**
