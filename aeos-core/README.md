@@ -17,9 +17,9 @@ An AI-assisted development pipeline that takes a ticket from idea to code review
 ## Install
 
 ```bash
-# From source
+# From source (the npm package is `@lycha/aeos`; the command it installs is `aeos`)
 git clone https://github.com/lycha/aeos.git
-cd aeos
+cd aeos/aeos-core
 npm install
 npm run build
 npm link
