@@ -4,6 +4,9 @@ import * as path from 'node:path';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
+import type { ArtefactTree } from '../domain/ports/driven/artefact-tree.port.js';
+import type { DecisionsLint } from '../domain/ports/driven/decisions-lint.port.js';
+import type { SpecPin } from '../domain/model/spec-pin.js';
 import type {
   TicketCreatePort,
   TicketCreateInput,
@@ -16,10 +19,20 @@ export class TicketCreateUseCase implements TicketCreatePort {
     private readonly ticketRepo: TicketRepository,
     private readonly artifactStore: ArtifactStore,
     private readonly gitGateway: GitGateway,
+    private readonly artefactTree: ArtefactTree,
+    private readonly decisionsLint: DecisionsLint,
   ) {}
 
   execute(input: TicketCreateInput): TicketCreateResult {
     const { title, projectId, projectKey, projectPath, parentId, taskKey, body } = input;
+
+    if (input.spec !== undefined && parentId) {
+      throw new Error(
+        '--spec backs an epic with a spec; it cannot be combined with --parent. A task inherits the pin of its epic.',
+      );
+    }
+    const specPin =
+      input.spec === undefined ? null : this.pinSpec(projectKey, projectPath, input.spec);
 
     // A parent makes this a task; without one it is an epic.
     const kind = parentId ? TicketKind.TASK : TicketKind.EPIC;
@@ -81,6 +94,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
         kind,
         parentId: parentId ?? null,
         taskKey: resolvedTaskKey,
+        specPin,
         column: 'BACKLOG' as const,
         subState: null,
         createdAt: now,
@@ -120,6 +134,60 @@ export class TicketCreateUseCase implements TicketCreatePort {
       parentId: parentId ?? null,
       taskKey: resolvedTaskKey,
       alreadyExisted: false,
+      ...(specPin ? { specPin } : {}),
+    };
+  }
+
+  /** Checks the feature is fit to build from, in the order the errors are useful, and pins it. */
+  private pinSpec(projectKey: string, projectPath: string, feature: string): SpecPin {
+    // The name becomes a path and a git pathspec.
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(feature)) {
+      throw new Error(
+        `"${feature}" is not a feature name: use the directory name under features/.`,
+      );
+    }
+    const treeRoot = this.artefactTree.root(projectPath);
+    const featureDir = this.artefactTree.featureDir(projectPath, feature);
+    const featurePath = `features/${feature}`;
+
+    if (!this.artefactTree.exists(projectPath, feature)) {
+      throw new Error(`Feature "${feature}" not found: ${featureDir} does not exist.`);
+    }
+    const missing = this.decisionsLint.missingFiles(featureDir);
+    if (missing.length > 0) {
+      throw new Error(`Feature "${feature}" is missing ${missing.join(' and ')}.`);
+    }
+
+    const lint = this.decisionsLint.lint(treeRoot, feature);
+    if (lint.schemaErrors.length > 0) {
+      throw new Error(
+        `decisions.yaml of feature "${feature}" does not match its schema: ${lint.schemaErrors.join('; ')}`,
+      );
+    }
+    if (lint.lintErrors.length > 0) {
+      throw new Error(
+        `lint_decisions.py failed for feature "${feature}":\n${lint.lintErrors.map((error) => `  - ${error}`).join('\n')}`,
+      );
+    }
+    if (lint.escalated.length > 0) {
+      throw new Error(
+        `Feature "${feature}" has escalated decisions: ${lint.escalated.join(', ')}. An epic cannot be built on a decision nobody has made; resolve them in decisions.yaml first.`,
+      );
+    }
+
+    const uncommitted = this.gitGateway
+      .changedFiles(treeRoot)
+      .filter((file) => file.startsWith(`${featurePath}/`));
+    if (uncommitted.length > 0) {
+      throw new Error(
+        `Feature "${feature}" has uncommitted changes in ${treeRoot}: ${uncommitted.join(', ')}. Commit them first, so the epic is pinned to what you see.`,
+      );
+    }
+
+    return {
+      repo: `${projectKey}-aeos`,
+      commit: this.gitGateway.headCommit(treeRoot),
+      path: featurePath,
     };
   }
 }

@@ -6,6 +6,8 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { ArtefactTree } from '../domain/ports/driven/artefact-tree.port.js';
+import type { DecisionsLint } from '../domain/ports/driven/decisions-lint.port.js';
 
 function createMockTicketRepo(): TicketRepository {
   return {
@@ -58,7 +60,26 @@ function createMockGitGateway(): GitGateway {
     currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
     defaultBranch: vi.fn().mockReturnValue('main'),
     hasRemote: vi.fn().mockReturnValue(true),
+    headCommit: vi.fn().mockReturnValue('c0ffee1'),
+    showFile: vi.fn().mockReturnValue(''),
+    pathChangedSince: vi.fn().mockReturnValue(false),
     diff: vi.fn().mockReturnValue(''),
+  };
+}
+
+function createMockArtefactTree(): ArtefactTree {
+  return {
+    root: vi.fn().mockReturnValue('/project/.aeos'),
+    featureDir: vi.fn().mockReturnValue('/project/.aeos/features/checkout'),
+    exists: vi.fn().mockReturnValue(true),
+    listFeatures: vi.fn().mockReturnValue(['checkout']),
+  };
+}
+
+function createMockDecisionsLint(): DecisionsLint {
+  return {
+    missingFiles: vi.fn().mockReturnValue([]),
+    lint: vi.fn().mockReturnValue({ schemaErrors: [], lintErrors: [], escalated: [] }),
   };
 }
 
@@ -66,6 +87,8 @@ describe('TicketCreateUseCase', () => {
   let ticketRepo: ReturnType<typeof createMockTicketRepo>;
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let gitGateway: ReturnType<typeof createMockGitGateway>;
+  let artefactTree: ReturnType<typeof createMockArtefactTree>;
+  let decisionsLint: ReturnType<typeof createMockDecisionsLint>;
   let useCase: TicketCreateUseCase;
 
   const defaultInput = {
@@ -79,7 +102,127 @@ describe('TicketCreateUseCase', () => {
     ticketRepo = createMockTicketRepo();
     artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
-    useCase = new TicketCreateUseCase(ticketRepo, artifactStore, gitGateway);
+    artefactTree = createMockArtefactTree();
+    decisionsLint = createMockDecisionsLint();
+    useCase = new TicketCreateUseCase(
+      ticketRepo,
+      artifactStore,
+      gitGateway,
+      artefactTree,
+      decisionsLint,
+    );
+  });
+
+  describe('--spec', () => {
+    const withSpec = { ...defaultInput, spec: 'checkout' };
+
+    it('pins the epic to the HEAD commit of the artefact tree', () => {
+      const result = useCase.execute(withSpec);
+
+      const pin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+      expect(result.specPin).toEqual(pin);
+      expect(gitGateway.headCommit).toHaveBeenCalledWith('/project/.aeos');
+      const saved = (ticketRepo.createAtomic as ReturnType<typeof vi.fn>).mock.results[0]!
+        .value as Ticket;
+      expect(saved.specPin).toEqual(pin);
+      expect(decisionsLint.lint).toHaveBeenCalledWith('/project/.aeos', 'checkout');
+    });
+
+    it('is refused together with --parent', () => {
+      expect(() => useCase.execute({ ...withSpec, parentId: 'AEOS-9' })).toThrow(
+        /--spec.*--parent/,
+      );
+      expect(ticketRepo.createAtomic).not.toHaveBeenCalled();
+    });
+
+    it('is refused for a feature name that is not a plain directory name', () => {
+      expect(() => useCase.execute({ ...withSpec, spec: '../tickets' })).toThrow(/feature name/);
+    });
+
+    it('is refused when the feature directory does not exist', () => {
+      (artefactTree.exists as ReturnType<typeof vi.fn>).mockReturnValue(false);
+
+      expect(() => useCase.execute(withSpec)).toThrow(
+        'Feature "checkout" not found: /project/.aeos/features/checkout does not exist.',
+      );
+    });
+
+    it('is refused when spec.md or decisions.yaml is missing', () => {
+      (decisionsLint.missingFiles as ReturnType<typeof vi.fn>).mockReturnValue(['spec.md']);
+
+      expect(() => useCase.execute(withSpec)).toThrow('Feature "checkout" is missing spec.md.');
+      expect(decisionsLint.lint).not.toHaveBeenCalled();
+    });
+
+    it("is refused with the validator's message when decisions.yaml fails the schema", () => {
+      (decisionsLint.lint as ReturnType<typeof vi.fn>).mockReturnValue({
+        schemaErrors: ["decisions.schema.json: meta: 'feature' is a required property"],
+        lintErrors: ['ABS-2 (high) is unaddressed in decisions.yaml'],
+        escalated: ['ABS-3'],
+      });
+
+      expect(() => useCase.execute(withSpec)).toThrow(
+        'decisions.yaml of feature "checkout" does not match its schema: decisions.schema.json: meta: \'feature\' is a required property',
+      );
+    });
+
+    it('is refused when lint_decisions.py reports an error', () => {
+      (decisionsLint.lint as ReturnType<typeof vi.fn>).mockReturnValue({
+        schemaErrors: [],
+        lintErrors: ['ABS-2 (high) is unaddressed in decisions.yaml'],
+        escalated: ['ABS-3'],
+      });
+
+      expect(() => useCase.execute(withSpec)).toThrow(
+        /lint_decisions\.py.*ABS-2 \(high\) is unaddressed/s,
+      );
+    });
+
+    it('is refused, naming the decision, when one is ESCALATED', () => {
+      (decisionsLint.lint as ReturnType<typeof vi.fn>).mockReturnValue({
+        schemaErrors: [],
+        lintErrors: [],
+        escalated: ['ABS-3', 'CON-1'],
+      });
+
+      expect(() => useCase.execute(withSpec)).toThrow(/ABS-3, CON-1/);
+      expect(ticketRepo.createAtomic).not.toHaveBeenCalled();
+    });
+
+    it('is refused when the feature directory has uncommitted changes', () => {
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockReturnValue([
+        'tickets/AEOS-1/AEOS-1-ticket.md',
+        'features/checkout/spec.md',
+      ]);
+
+      expect(() => useCase.execute(withSpec)).toThrow(
+        /uncommitted changes.*features\/checkout\/spec\.md/s,
+      );
+      expect(gitGateway.changedFiles).toHaveBeenCalledWith('/project/.aeos');
+    });
+
+    it('ignores uncommitted changes outside the feature directory', () => {
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockReturnValue([
+        'features/checkout-v2/spec.md',
+      ]);
+
+      expect(useCase.execute(withSpec).specPin).toBeDefined();
+    });
+
+    it('lets a missing python3 surface as the error', () => {
+      (decisionsLint.lint as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        throw new Error('python3 is not on PATH.');
+      });
+
+      expect(() => useCase.execute(withSpec)).toThrow('python3 is not on PATH.');
+    });
+
+    it('creates an epic with no pin when --spec is not given', () => {
+      const result = useCase.execute(defaultInput);
+
+      expect(result.specPin).toBeUndefined();
+      expect(decisionsLint.lint).not.toHaveBeenCalled();
+    });
   });
 
   it('should return the generated ticket ID and title', () => {

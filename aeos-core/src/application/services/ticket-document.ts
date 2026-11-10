@@ -3,6 +3,7 @@
 import * as path from 'node:path';
 import type { Ticket } from '../../domain/model/ticket.js';
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
+import { formatSpecPin } from './spec-pin.js';
 
 const METADATA_START = '<!-- AEOS:METADATA START -->';
 const METADATA_END = '<!-- AEOS:METADATA END -->';
@@ -22,6 +23,9 @@ function renderMetadataBlock(ticket: Ticket): string {
   }
   if (ticket.taskKey) {
     lines.push(`- Task key: ${ticket.taskKey}`);
+  }
+  if (ticket.specPin) {
+    lines.push(`- Spec: ${formatSpecPin(ticket.specPin)} (${ticket.specPin.path})`);
   }
   lines.push(METADATA_END);
   return lines.join('\n');

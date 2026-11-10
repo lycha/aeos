@@ -9,7 +9,7 @@ import type { SubStateOrNull } from '../../domain/model/sub-state.js';
 import type { TicketKind } from '../../domain/model/ticket-kind.js';
 import type { TicketRepository } from '../../domain/ports/driven/ticket-repository.port.js';
 
-const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, escalation_reason, escalation_message, escalation_artifact, pr_url`;
+const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, escalation_reason, escalation_message, escalation_artifact, pr_url, spec_feature, spec_commit`;
 
 interface TicketRow {
   id: string;
@@ -26,7 +26,11 @@ interface TicketRow {
   escalation_message: string | null;
   escalation_artifact: string | null;
   pr_url: string | null;
+  spec_feature: string | null;
+  spec_commit: string | null;
 }
+
+const FEATURES_PREFIX = 'features/';
 
 export class SqliteTicketRepository implements TicketRepository {
   constructor(private readonly db: BetterSqlite3.Database) {}
@@ -52,6 +56,16 @@ export class SqliteTicketRepository implements TicketRepository {
           }
         : null,
       prUrl: row.pr_url ?? null,
+      // Only the feature and the commit are stored. The repository's identity
+      // is `<project key>-aeos`, and the key is the ticket id's prefix.
+      specPin:
+        row.spec_feature && row.spec_commit
+          ? {
+              repo: `${row.id.slice(0, row.id.lastIndexOf('-'))}-aeos`,
+              commit: row.spec_commit,
+              path: `${FEATURES_PREFIX}${row.spec_feature}`,
+            }
+          : null,
     };
   }
 
@@ -68,8 +82,8 @@ export class SqliteTicketRepository implements TicketRepository {
   save(ticket: Ticket): void {
     this.db
       .prepare(
-        `INSERT INTO tickets (id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, spec_feature, spec_commit)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         ticket.id,
@@ -82,6 +96,8 @@ export class SqliteTicketRepository implements TicketRepository {
         ticket.subState,
         ticket.createdAt,
         ticket.updatedAt,
+        ticket.specPin ? ticket.specPin.path.slice(FEATURES_PREFIX.length) : null,
+        ticket.specPin?.commit ?? null,
       );
   }
 

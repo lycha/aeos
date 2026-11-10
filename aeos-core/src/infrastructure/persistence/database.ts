@@ -187,6 +187,18 @@ CREATE TABLE IF NOT EXISTS orchestrator_state (
       }
     },
   },
+  {
+    version: 9,
+    description: 'Pin an epic to the spec revision it was created from',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'spec_feature')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN spec_feature TEXT DEFAULT NULL`);
+      }
+      if (!hasColumn(db, 'tickets', 'spec_commit')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN spec_commit TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

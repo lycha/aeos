@@ -1,0 +1,21 @@
+schema_version: 1
+meta:
+  feature: feature-sample
+  context: sample
+  artefact_tree:
+    repo: sample-aeos
+    branch: main
+  sources:
+    - id: SRC-1
+      kind: stories
+      repo: sample
+      commit: null
+      path: docs/stories.md
+  source_precedence: [SRC-1]
+  glossary: null
+  harvested_at: '2026-11-10T09:00:00Z'
+absences:
+  - id: ABS-1
+    category: empty-state
+    description: The stories do not say how a visitor with no saved name is greeted.
+    severity: high

@@ -86,4 +86,19 @@ export interface GitGateway {
 
   /** True when the repository at `dir` has at least one remote. */
   hasRemote(dir: string): boolean;
+
+  /** The full hash of `HEAD` in the repository at `dir`. */
+  headCommit(dir: string): string;
+
+  /**
+   * The content of `path` (relative to `dir`) as it was at `commit`. Throws
+   * when the commit or the file cannot be read; never reads the working tree.
+   */
+  showFile(dir: string, commit: string, path: string): string;
+
+  /**
+   * True when `path` (relative to `dir`) differs between `commit` and `HEAD`,
+   * or when `commit` cannot be read.
+   */
+  pathChangedSince(dir: string, commit: string, path: string): boolean;
 }

@@ -13,6 +13,7 @@ An AI-assisted development pipeline that takes a ticket from idea to code review
   - `opencode` — [install](https://opencode.ai/docs/cli/)
   - `ollama` — [install](https://docs.ollama.com/cli)
 - **GitHub CLI (`gh`)**, authenticated, and a git remote — for the pull requests AEOS opens. Not needed with `"pullRequests": { "enabled": false }` (see [Branches and pull requests](#branches-and-pull-requests)).
+- **Python 3 with `PyYAML` and `jsonschema`** — only for `aeos ticket create --spec`, which runs `lint_decisions.py` (see [Spec-backed epics](#spec-backed-epics)).
 - macOS or Linux
 
 ## Install
@@ -317,7 +318,7 @@ Notes:
 | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | `aeos install`                                               | One-time global setup (`~/.aeos/`, global gitignore)                       |
 | `aeos project init [--name] [--key]`                         | Initialise `.aeos/` in the current directory                               |
-| `aeos ticket create <title> [--parent <epicId>]`             | Create a ticket in BACKLOG — an epic by default, a task with `--parent`    |
+| `aeos ticket create <title> [--parent <epicId>] [--spec <feature>]` | Create a ticket in BACKLOG — an epic by default, a task with `--parent`; `--spec` backs an epic with a spec |
 | `aeos ticket list [--column]`                                | List tickets, optionally filtered by column                                |
 | `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, recorded executions, and run ids |
 | `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |
@@ -367,6 +368,26 @@ is unfinished reports which tasks are outstanding and refuses the transition.
 > Creating child tickets from `tasks.md` is a manual step today. Automating that
 > decomposition belongs with the orchestrator, which owns scheduling.
 
+## Spec-backed epics
+
+An epic can be created from a human-written spec in the artefact tree and pinned to the exact revision of it:
+
+```bash
+aeos ticket create "Checkout flow" --spec checkout     # reads .aeos/features/checkout/
+```
+
+The epic is refused, with the reason, unless all of this holds, checked in this order:
+
+1. `.aeos/features/<feature>/` exists and contains `spec.md` and `decisions.yaml`.
+2. `decisions.yaml` matches `.aeos/schemas/decisions.schema.json`.
+3. `.aeos/schemas/lint_decisions.py` exits clean. It needs `feature-inventory.yaml` in the feature too.
+4. No decision, conflict or question has the outcome `ESCALATED`.
+5. The feature directory has no uncommitted changes in the `.aeos` repository.
+
+Steps 2 and 3 are one run of the linter, which needs `python3` with the `PyYAML` and `jsonschema` modules; a missing one is named in the error. `--spec` cannot be combined with `--parent`.
+
+The pin is the triple `{ repo, commit, path }`: `<project key>-aeos`, the `HEAD` of the `.aeos` repository at creation, and `features/<feature>`. A task has no pin of its own; it uses its epic's. `aeos ticket show` prints the pin for both, and warns `spec has moved since this epic was pinned` once the feature has later commits. The pin is also written to every run record (`spec_pin`), to the pull request body, and to each task commit as a `Spec:` trailer.
+
 ## Branches and pull requests
 
 Nothing the engine writes goes onto the default branch.
@@ -384,7 +405,10 @@ A finished task becomes one commit, with trailers:
 
 Ticket: AEOS-12
 Epic: AEOS-10
+Spec: AEOS-aeos@4f9c1a2b7d3e5f60a1b2c3d4e5f60718293a4b5c
 ```
+
+`Spec:` is there only for a task of a [spec-backed epic](#spec-backed-epics).
 
 `aeos ticket approve` then opens the pull request against the default branch: for an epic when it is approved out of `INTEGRATION_REVIEW`, for a standalone task when it is approved to `DONE`. It pushes the `aeos/<id>` branch to `origin` and runs `gh pr create`; if the branch already has an open pull request, that one is used. The body carries the ticket, the path of the integration (or code) review with its verdict, the checks table and the total recorded cost; artifact paths are not links because `.aeos/` has no remote. The URL is stored on the ticket and shown by `aeos ticket show`. Merging stays yours.
 

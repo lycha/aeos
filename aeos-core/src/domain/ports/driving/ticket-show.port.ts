@@ -1,5 +1,6 @@
 // Driving port — TicketShow use case interface
 
+import type { SpecPin } from '../../model/spec-pin.js';
 import type { Ticket } from '../../model/ticket.js';
 
 export interface TicketShowInput {
@@ -30,6 +31,10 @@ export type TicketShowResult =
       children: Ticket[];
       /** Parent epic, when the ticket is a task. Null otherwise. */
       parent: Ticket | null;
+      /** The ticket's spec pin: its own, or its parent epic's. */
+      specPin: SpecPin | null;
+      /** True when the feature has commits after the pinned one. */
+      specMoved: boolean;
     }
   | { ok: false; reason: 'NOT_FOUND' };
 

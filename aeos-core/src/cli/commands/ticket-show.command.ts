@@ -76,6 +76,16 @@ export function registerTicketShowCommand(
       console.log(`Column: ${result.ticket.column}`);
       // eslint-disable-next-line no-console
       console.log(`State:  ${subState}`);
+      if (result.specPin) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `Spec:   ${result.specPin.repo}@${result.specPin.commit} (${result.specPin.path})`,
+        );
+        if (result.specMoved) {
+          // eslint-disable-next-line no-console
+          console.log('        Warning: spec has moved since this epic was pinned');
+        }
+      }
       if (result.ticket.prUrl) {
         // eslint-disable-next-line no-console
         console.log(`PR:     ${result.ticket.prUrl}`);

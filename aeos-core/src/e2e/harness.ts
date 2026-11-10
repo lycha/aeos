@@ -100,6 +100,28 @@ export function createTempProject(): TempProject {
   };
 }
 
+/**
+ * Copies the fixture feature (`fixtures/feature-sample/`) into the project's
+ * artefact tree and commits it there. Returns that commit of `.aeos`.
+ */
+export function addFixtureFeature(feature = 'feature-sample'): string {
+  const aeosDir = path.join(process.cwd(), '.aeos');
+  fs.cpSync(
+    path.join(import.meta.dirname, 'fixtures', 'feature-sample'),
+    path.join(aeosDir, 'features', feature),
+    { recursive: true },
+  );
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, {
+      cwd: aeosDir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  git('add', 'features');
+  git('commit', '-m', `spec(${feature}): fixture`);
+  return git('rev-parse', 'HEAD').trim();
+}
+
 /** Runs `aeos <args>` in-process through Commander, capturing its output. */
 export async function runCli(...args: string[]): Promise<CliResult> {
   const lines: string[] = [];

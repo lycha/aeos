@@ -46,6 +46,9 @@ function createMockGitGateway(): GitGateway {
     currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
     defaultBranch: vi.fn().mockReturnValue('main'),
     hasRemote: vi.fn().mockReturnValue(true),
+    headCommit: vi.fn().mockReturnValue('c0ffee1'),
+    showFile: vi.fn().mockReturnValue(''),
+    pathChangedSince: vi.fn().mockReturnValue(false),
     diff: vi.fn().mockReturnValue(''),
   };
 }
@@ -366,6 +369,24 @@ describe('TicketApproveUseCase — per-task commit', () => {
     );
   });
 
+  it("adds a Spec trailer from the parent epic's pin", () => {
+    const epic = {
+      ...signedOffTicket('TASK_BREAKDOWN'),
+      id: 'AEOS-9',
+      specPin: { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' },
+    };
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockImplementation(
+      (_project: string, id: string) => (id === 'AEOS-9' ? epic : task('QA')),
+    );
+
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(gitGateway.commitAll).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      '[AEOS-1] Test ticket\n\nTicket: AEOS-1\nEpic: AEOS-9\nSpec: AEOS-aeos@c0ffee1',
+    );
+  });
+
   it('does not commit on a mid-pipeline advance — CODE_REVIEW still needs the diff', () => {
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(task('IMPLEMENTATION'));
 
@@ -470,6 +491,23 @@ describe('TicketApproveUseCase — pull requests', () => {
     expect(body).not.toContain('AEOS-RUN');
     // 1 (epic) + 0.5 (child); the epic's unknown run is counted, not summed.
     expect(body).toContain('Total cost: $1.5000 (1 run with unknown cost not included)');
+  });
+
+  it('names the pinned spec in the body of a spec-backed epic', () => {
+    approving({
+      ...epicAtIntegrationReview(),
+      specPin: { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' },
+    });
+
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    const { body } = (pr.prGateway.create as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      body: string;
+    };
+    expect(body).toContain(
+      '<!-- aeos:spec-pin -->\nSpec: `AEOS-aeos@c0ffee1`, `features/checkout`',
+    );
+    expect(body).not.toContain('Spec pin: not recorded yet');
   });
 
   it('opens the pull request without pushing when the repository has no remote', () => {

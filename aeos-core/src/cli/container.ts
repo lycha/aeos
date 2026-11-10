@@ -24,6 +24,8 @@ import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js'
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import { FsConfigStore } from '../infrastructure/filesystem/fs-config.adapter.js';
 import { FsProjectRepository } from '../infrastructure/filesystem/fs-project.repository.js';
+import { FsArtefactTree } from '../infrastructure/filesystem/fs-artefact-tree.adapter.js';
+import { PythonDecisionsLint } from '../infrastructure/spec/decisions-lint.adapter.js';
 import { FsArtifactStore } from '../infrastructure/filesystem/fs-artifact-store.adapter.js';
 import { FsRunRecordStore } from '../infrastructure/filesystem/fs-run-record-store.adapter.js';
 import { SimpleGitGateway } from '../infrastructure/git/simple-git-gateway.adapter.js';
@@ -91,6 +93,7 @@ export interface Container {
 export function createContainer(): Container {
   const configStore = new FsConfigStore();
   const projectRepo = new FsProjectRepository();
+  const artefactTree = new FsArtefactTree();
   const gitGateway = new SimpleGitGateway();
   const artifactStore = new FsArtifactStore();
   const runRecordStore = new FsRunRecordStore();
@@ -157,13 +160,26 @@ export function createContainer(): Container {
     projectInit: new ProjectInitUseCase(projectRepo, configStore, gitGateway),
     projectSync: new ProjectSyncUseCase(new FsTemplateCatalog()),
     get ticketCreate() {
-      return new TicketCreateUseCase(getTicketRepo(), artifactStore, gitGateway);
+      return new TicketCreateUseCase(
+        getTicketRepo(),
+        artifactStore,
+        gitGateway,
+        artefactTree,
+        new PythonDecisionsLint(),
+      );
     },
     get ticketList() {
       return new TicketListUseCase(getTicketRepo());
     },
     get ticketShow() {
-      return new TicketShowUseCase(getTicketRepo(), artifactStore, getCostRepo(), runRecordStore);
+      return new TicketShowUseCase(
+        getTicketRepo(),
+        artifactStore,
+        getCostRepo(),
+        runRecordStore,
+        gitGateway,
+        artefactTree,
+      );
     },
     get ticketAnswer() {
       return new TicketAnswerUseCase(

@@ -111,3 +111,19 @@ describe('SqliteTicketRepository — pull request URL', () => {
     expect(repo.findByProject('p')[0]?.prUrl).toBe('https://github.com/o/r/pull/7');
   });
 });
+
+describe('SqliteTicketRepository — spec pin', () => {
+  it('is null for a ticket saved without one', () => {
+    repo.save(ticket());
+
+    expect(repo.findById('p', 'AEOS-1')?.specPin).toBeNull();
+  });
+
+  it('round-trips the pin as a { repo, commit, path } triple', () => {
+    const specPin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    repo.save(ticket({ specPin }));
+
+    expect(repo.findById('p', 'AEOS-1')?.specPin).toEqual(specPin);
+    expect(repo.findByProject('p')[0]?.specPin).toEqual(specPin);
+  });
+});

@@ -273,6 +273,40 @@ describe('SimpleGitGateway branches and remotes', () => {
     fs.rmSync(repo, { recursive: true, force: true });
   });
 
+  it('reads HEAD, and a file as it was at a commit', () => {
+    const pinned = gateway.headCommit(repo);
+    expect(pinned).toBe(
+      execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf-8' }).trim(),
+    );
+
+    fs.writeFileSync(path.join(repo, 'a.md'), 'edited\n');
+    git('commit', '-am', 'edit');
+
+    expect(gateway.showFile(repo, pinned, 'a.md')).toBe('a\n');
+    expect(gateway.showFile(repo, gateway.headCommit(repo), 'a.md')).toBe('edited\n');
+  });
+
+  it('throws when the commit or the file cannot be read', () => {
+    expect(() => gateway.showFile(repo, 'deadbeef', 'a.md')).toThrow();
+    expect(() => gateway.showFile(repo, gateway.headCommit(repo), 'missing.md')).toThrow();
+  });
+
+  it('says whether a path changed after a commit, ignoring other paths', () => {
+    fs.mkdirSync(path.join(repo, 'features', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'spec.md'), 'v1\n');
+    git('add', '.');
+    git('commit', '-m', 'spec');
+    const pinned = gateway.headCommit(repo);
+
+    fs.writeFileSync(path.join(repo, 'a.md'), 'elsewhere\n');
+    git('commit', '-am', 'elsewhere');
+    expect(gateway.pathChangedSince(repo, pinned, 'features/x')).toBe(false);
+
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'spec.md'), 'v2\n');
+    git('commit', '-am', 'spec moved');
+    expect(gateway.pathChangedSince(repo, pinned, 'features/x')).toBe(true);
+  });
+
   it('reports the current branch', () => {
     expect(gateway.currentBranch(repo)).toBe('master');
     git('checkout', '-b', 'aeos/AEOS-1');

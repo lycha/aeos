@@ -39,6 +39,25 @@ describe('buildInitialTicketDocument — lineage metadata', () => {
   });
 });
 
+describe('buildInitialTicketDocument — spec pin', () => {
+  it('records the pin of a spec-backed epic', () => {
+    const doc = buildInitialTicketDocument(
+      ticket({
+        kind: TicketKind.EPIC,
+        parentId: null,
+        taskKey: null,
+        specPin: { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' },
+      }),
+    );
+
+    expect(doc).toContain('- Spec: AEOS-aeos@c0ffee1 (features/checkout)');
+  });
+
+  it('has no spec line without a pin', () => {
+    expect(buildInitialTicketDocument(ticket())).not.toContain('- Spec:');
+  });
+});
+
 describe('buildInitialTicketDocument — body', () => {
   it('uses the provided body as the Description, verbatim', () => {
     const body = [

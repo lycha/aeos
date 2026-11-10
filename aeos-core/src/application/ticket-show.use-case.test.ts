@@ -4,6 +4,7 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
 
 function createMockTicketRepo(): TicketRepository {
@@ -62,6 +63,7 @@ describe('TicketShowUseCase', () => {
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let costRepo: ReturnType<typeof createMockCostRepo>;
   let runRecordStore: RunRecordStore;
+  let gitGateway: { pathChangedSince: ReturnType<typeof vi.fn> };
   let useCase: TicketShowUseCase;
 
   const defaultInput = {
@@ -75,7 +77,55 @@ describe('TicketShowUseCase', () => {
     artifactStore = createMockArtifactStore();
     costRepo = createMockCostRepo();
     runRecordStore = { write: vi.fn(), list: vi.fn().mockReturnValue([]) };
-    useCase = new TicketShowUseCase(ticketRepo, artifactStore, costRepo, runRecordStore);
+    gitGateway = { pathChangedSince: vi.fn().mockReturnValue(false) };
+    useCase = new TicketShowUseCase(
+      ticketRepo,
+      artifactStore,
+      costRepo,
+      runRecordStore,
+      gitGateway as unknown as GitGateway,
+      {
+        root: () => '/test/project/.aeos',
+        featureDir: () => '',
+        exists: () => true,
+        listFeatures: () => [],
+      },
+    );
+  });
+
+  describe('spec pin', () => {
+    const pin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+
+    it('has no pin for a ticket without a spec', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
+
+      expect(useCase.execute(defaultInput)).toMatchObject({ specPin: null, specMoved: false });
+      expect(gitGateway.pathChangedSince).not.toHaveBeenCalled();
+    });
+
+    it("shows the parent epic's pin on a child task", () => {
+      const epic = makeTicket({ id: 'AEOS-9', specPin: pin });
+      const task = makeTicket({ kind: 'TASK', parentId: 'AEOS-9' });
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockImplementation(
+        (_project: string, id: string) => (id === 'AEOS-9' ? epic : task),
+      );
+
+      expect(useCase.execute(defaultInput)).toMatchObject({ specPin: pin, specMoved: false });
+    });
+
+    it('reports that the spec has moved when the feature changed after the pinned commit', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        makeTicket({ specPin: pin }),
+      );
+      gitGateway.pathChangedSince.mockReturnValue(true);
+
+      expect(useCase.execute(defaultInput)).toMatchObject({ specPin: pin, specMoved: true });
+      expect(gitGateway.pathChangedSince).toHaveBeenCalledWith(
+        '/test/project/.aeos',
+        'c0ffee1',
+        'features/checkout',
+      );
+    });
   });
 
   it('should return ticket and artifacts when ticket exists', () => {

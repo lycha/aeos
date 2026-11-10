@@ -77,6 +77,9 @@ function createMockGitGateway(): GitGateway {
     currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
     defaultBranch: vi.fn().mockReturnValue('main'),
     hasRemote: vi.fn().mockReturnValue(true),
+    headCommit: vi.fn().mockReturnValue('c0ffee1'),
+    showFile: vi.fn().mockReturnValue(''),
+    pathChangedSince: vi.fn().mockReturnValue(false),
     diff: vi.fn().mockReturnValue('diff --git a/src/file.ts b/src/file.ts'),
   };
 }
@@ -1309,6 +1312,23 @@ describe('TicketRunUseCase', () => {
   // --- Run records (I1-M1-003) ---
 
   describe('run records', () => {
+    it('fills spec_pin on every record of a spec-backed ticket', async () => {
+      const specPin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ specPin }),
+      );
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        artifactPath: '/tmp/artifact',
+        content: `${'A '.repeat(60)}\n\n${reviewWith('APPROVED')}`,
+      });
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(writtenRuns().length).toBeGreaterThan(0);
+      for (const run of writtenRuns()) expect(run.record.spec_pin).toEqual(specPin);
+    });
+
     it('writes a record with the brief and the log for the worker and the reviewer', async () => {
       (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: true,

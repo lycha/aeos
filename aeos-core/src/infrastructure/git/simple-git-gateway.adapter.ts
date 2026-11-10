@@ -118,6 +118,35 @@ export class SimpleGitGateway implements GitGateway {
     }
   }
 
+  headCommit(dir: string): string {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  }
+
+  showFile(dir: string, commit: string, filePath: string): string {
+    // `./` makes the path relative to `dir`, not to the repository root.
+    return execFileSync('git', ['show', `${commit}:./${filePath}`], {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  }
+
+  pathChangedSince(dir: string, commit: string, filePath: string): boolean {
+    try {
+      execFileSync('git', ['diff', '--quiet', commit, 'HEAD', '--', filePath], {
+        cwd: dir,
+        stdio: 'ignore',
+      });
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
   changedFiles(dir: string): string[] {
     const git = (...args: string[]): string =>
       execFileSync('git', args, {

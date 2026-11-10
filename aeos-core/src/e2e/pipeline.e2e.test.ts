@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunRecord } from '../domain/model/run-record.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
 import {
+  addFixtureFeature,
   createStandaloneTask,
   createTempProject,
   dodApprove,
@@ -308,6 +309,85 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(aeosGit('status', '--porcelain', '--', 'tickets/*/runs')).toBe('');
     expect(aeosGit('ls-files', `tickets/${green}/${green}-checks.md`)).not.toBe('');
   });
+
+  // `ticket create --spec` runs lint_decisions.py, which needs python3 with PyYAML and jsonschema.
+  const pythonReady =
+    spawnSync('python3', ['-c', 'import yaml, jsonschema'], { stdio: 'ignore' }).status === 0;
+  // The harness moves HOME, and with it python's per-user packages.
+  const pythonUserSite = spawnSync('python3', ['-m', 'site', '--user-site'], {
+    encoding: 'utf-8',
+  }).stdout?.trim();
+
+  it.skipIf(!pythonReady)(
+    'pins a spec-backed epic, shows the pin on its task, and warns once the spec moves',
+    async () => {
+      if (pythonUserSite) vi.stubEnv('PYTHONPATH', pythonUserSite);
+      await runCli('install');
+      await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+      const aeosDir = path.join(project.projectPath, '.aeos');
+      const specFile = path.join(aeosDir, 'features', 'feature-sample', 'spec.md');
+      const aeosGit = (...args: string[]): string =>
+        execFileSync('git', args, { cwd: aeosDir, encoding: 'utf-8' });
+      const pinned = addFixtureFeature();
+
+      const refused = await runCli(
+        'ticket',
+        'create',
+        'Greeting',
+        '--spec',
+        'feature-sample',
+        '--parent',
+        'EE-1',
+      );
+      expect(refused.exitCode).toBe(1);
+      expect(refused.output).toContain('--parent');
+
+      fs.appendFileSync(specFile, '\nAn uncommitted thought.\n');
+      const dirty = await runCli('ticket', 'create', 'Greeting', '--spec', 'feature-sample');
+      expect(dirty.exitCode).toBe(1);
+      expect(dirty.output).toContain('uncommitted changes');
+      aeosGit('checkout', '--', 'features');
+
+      const created = await runCli('ticket', 'create', 'Greeting', '--spec', 'feature-sample');
+      expect(created.output).toContain(`Spec: EE-aeos@${pinned} (features/feature-sample)`);
+      const epic = /Created \w+ (\S+):/.exec(created.output)![1]!;
+      const task = await createTicket('Say hello', '--parent', epic, '--key', 'T-001');
+
+      const pinLine = `Spec:   EE-aeos@${pinned} (features/feature-sample)`;
+      const shownEpic = await runCli('ticket', 'show', epic);
+      expect(shownEpic.output).toContain(pinLine);
+      expect(shownEpic.output).not.toContain('spec has moved');
+      expect((await runCli('ticket', 'show', task)).output).toContain(pinLine);
+      expect(
+        fs.readFileSync(path.join(aeosDir, 'tickets', epic, `${epic}-ticket.md`), 'utf-8'),
+      ).toContain(`- Spec: EE-aeos@${pinned} (features/feature-sample)`);
+
+      // Every run of the epic records the pin, and the record still fits the schema.
+      await runCli('ticket', 'approve', epic);
+      await runCli('ticket', 'run', epic);
+      const runsDir = path.join(aeosDir, 'tickets', epic, 'runs');
+      const records = fs
+        .readdirSync(runsDir)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => JSON.parse(fs.readFileSync(path.join(runsDir, file), 'utf-8')) as RunRecord);
+      expect(records.length).toBeGreaterThan(0);
+      for (const record of records) {
+        expect(record.spec_pin).toEqual({
+          repo: 'EE-aeos',
+          commit: pinned,
+          path: 'features/feature-sample',
+        });
+        expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
+      }
+
+      fs.appendFileSync(specFile, '\nA later amendment.\n');
+      aeosGit('commit', '-am', 'spec(feature-sample): amend');
+
+      const moved = await runCli('ticket', 'show', epic);
+      expect(moved.output).toContain(pinLine);
+      expect(moved.output).toContain('spec has moved since this epic was pinned');
+    },
+  );
 
   it('fails a run that touches a protected path, in either repository, and restores it', async () => {
     await runCli('install');

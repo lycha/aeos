@@ -1,0 +1,22 @@
+schema_version: 1
+meta:
+  feature: feature-sample
+  session: '2026-11-10'
+  mode: paired-live
+  participants: [owner]
+  artefact_tree:
+    repo: sample-aeos
+    branch: main
+  inventory:
+    repo: sample-aeos
+    commit: abc1234
+    path: features/feature-sample/feature-inventory.yaml
+decisions:
+  - absence: ABS-1
+    outcome: DECIDED
+    resolution: A visitor with no saved name is greeted as "there".
+    becomes: AC-1
+    decided_by: human
+summary:
+  stories_ready: [greeting]
+  stories_blocked: []

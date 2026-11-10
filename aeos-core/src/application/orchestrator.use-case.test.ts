@@ -134,6 +134,9 @@ describe('OrchestratorUseCase', () => {
       currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
       defaultBranch: vi.fn().mockReturnValue('main'),
       hasRemote: vi.fn().mockReturnValue(true),
+      headCommit: vi.fn().mockReturnValue('c0ffee1'),
+      showFile: vi.fn().mockReturnValue(''),
+      pathChangedSince: vi.fn().mockReturnValue(false),
     };
 
     useCase = new OrchestratorUseCase(

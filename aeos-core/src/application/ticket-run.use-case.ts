@@ -46,6 +46,8 @@ import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { SpecPin } from '../domain/model/spec-pin.js';
+import { resolveSpecPin } from './services/spec-pin.js';
 import type {
   TicketRunPort,
   TicketRunResult,
@@ -101,6 +103,8 @@ interface RunContext {
   readonly reviewAbsPath: string;
   /** Globs no executor invocation of this run may touch. */
   readonly protectedGlobs: readonly string[];
+  /** The ticket's spec pin (its own or its epic's), written into every run record. */
+  readonly specPin: SpecPin | null;
 }
 
 /** One executor invocation, as much as the call site knows about it. */
@@ -285,6 +289,7 @@ export class TicketRunUseCase implements TicketRunPort {
         protectedGlobs: protectedGlobs(
           this.projectRepo.readExecutorConfig(projectPath)?.protectedPaths,
         ),
+        specPin: resolveSpecPin(this.ticketRepo, mirroredTicket),
       };
 
       // ── Preflight ────────────────────────────────────────────────
@@ -837,7 +842,7 @@ export class TicketRunUseCase implements TicketRunPort {
       usage: null,
       cost_usd: 0,
       cost_basis: 'none',
-      spec_pin: null,
+      spec_pin: ctx.specPin,
       error: failed ? `Check '${failed.name}' ${describe(failed)}` : null,
     };
     const files = this.runRecordStore.write(projectPath, record, {
@@ -1510,7 +1515,7 @@ export class TicketRunUseCase implements TicketRunPort {
       cost_usd: costUsd,
       cost_basis:
         costUsd === null ? 'unknown' : run.executor === 'stub' ? 'none' : 'executor-estimate',
-      spec_pin: null,
+      spec_pin: ctx.specPin,
       error,
     };
 

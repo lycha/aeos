@@ -19,6 +19,7 @@ import type {
 } from '../domain/ports/driving/ticket-approve.port.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import { buildPullRequestBody, buildTaskCommitMessage } from './services/pull-request-text.js';
+import { formatSpecPin, resolveSpecPin } from './services/spec-pin.js';
 
 export class TicketApproveUseCase implements TicketApprovePort {
   constructor(
@@ -91,7 +92,11 @@ export class TicketApproveUseCase implements TicketApprovePort {
     // changes. Epics are skipped — they produce artifacts, not code.
     const taskFinished = nextColumn === Column.DONE && ticket.kind === TicketKind.TASK;
     if (taskFinished) {
-      this.gitGateway.commitAll(projectPath, buildTaskCommitMessage(ticket));
+      const specPin = resolveSpecPin(this.ticketRepo, ticket);
+      this.gitGateway.commitAll(
+        projectPath,
+        buildTaskCommitMessage(ticket, specPin ? [['Spec', formatSpecPin(specPin)]] : []),
+      );
     }
 
     // Before the transition, so a pull request that cannot be opened leaves the
@@ -194,6 +199,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
       costs: ticketIds.flatMap((id) =>
         this.costRepo.findByTicket(projectId, id).map((record) => record.costUsd),
       ),
+      specPin: resolveSpecPin(this.ticketRepo, ticket),
     });
   }
 }
