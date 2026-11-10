@@ -6,12 +6,19 @@ import { TicketKind } from '../domain/model/ticket-kind.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
+import type { PullRequestGateway } from '../domain/ports/driven/pull-request-gateway.port.js';
+import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
+import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
+import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
+import type { Ticket } from '../domain/model/ticket.js';
+import { parseVerdict } from '../domain/services/verdict-parser.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type {
   TicketApprovePort,
   TicketApproveResult,
 } from '../domain/ports/driving/ticket-approve.port.js';
 import { syncTicketDocument } from './services/ticket-document.js';
+import { buildPullRequestBody, buildTaskCommitMessage } from './services/pull-request-text.js';
 
 export class TicketApproveUseCase implements TicketApprovePort {
   constructor(
@@ -19,6 +26,10 @@ export class TicketApproveUseCase implements TicketApprovePort {
     private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
     private readonly gitGateway: GitGateway,
+    private readonly pullRequestGateway: PullRequestGateway,
+    private readonly costRepo: CostRepository,
+    private readonly columnSpecLoader: ColumnSpecLoader,
+    private readonly projectRepo: ProjectRepository,
   ) {}
 
   execute(projectId: string, projectPath: string, ticketId: string): TicketApproveResult {
@@ -73,6 +84,29 @@ export class TicketApproveUseCase implements TicketApprovePort {
       };
     }
 
+    // A finished task's work becomes one commit in the source repo. This is the
+    // only point it is safe to commit: CODE_REVIEW reads `git diff HEAD`, so
+    // committing any earlier would leave the reviewer with nothing to review.
+    // One commit per task also keeps the next task's diff free of this one's
+    // changes. Epics are skipped — they produce artifacts, not code.
+    const taskFinished = nextColumn === Column.DONE && ticket.kind === TicketKind.TASK;
+    if (taskFinished) {
+      this.gitGateway.commitAll(projectPath, buildTaskCommitMessage(ticket));
+    }
+
+    // Before the transition, so a pull request that cannot be opened leaves the
+    // ticket SIGNED_OFF and re-running approve retries it.
+    const opensPullRequest =
+      (ticket.kind === TicketKind.EPIC && currentColumn === Column.INTEGRATION_REVIEW) ||
+      (taskFinished && ticket.parentId === null);
+    if (
+      opensPullRequest &&
+      this.projectRepo.readExecutorConfig(projectPath)?.pullRequests?.enabled !== false
+    ) {
+      const error = this.openPullRequest(projectId, projectPath, ticket);
+      if (error) return { status: 'error', ticketId, error };
+    }
+
     const transitionResult = this.stateMachine.transition(projectId, ticketId, nextColumn);
     if (!transitionResult.ok) {
       return { status: 'error', ticketId, error: transitionResult.reason };
@@ -96,15 +130,70 @@ export class TicketApproveUseCase implements TicketApprovePort {
       subState: SubState.READY,
     });
 
-    // A finished task's work becomes one commit in the source repo. This is the
-    // only point it is safe to commit: CODE_REVIEW reads `git diff HEAD`, so
-    // committing any earlier would leave the reviewer with nothing to review.
-    // One commit per task also keeps the next task's diff free of this one's
-    // changes. Epics are skipped — they produce artifacts, not code.
-    if (nextColumn === Column.DONE && ticket.kind === TicketKind.TASK) {
-      this.gitGateway.commitAll(projectPath, `[${ticketId}] ${ticket.title}`);
-    }
-
     return { status: 'advanced', ticketId, fromColumn: currentColumn, toColumn: nextColumn };
+  }
+
+  /**
+   * Pushes the ticket's `aeos/<id>` branch and opens its pull request against
+   * the default branch. Returns the needs-human message when it cannot.
+   */
+  private openPullRequest(projectId: string, projectPath: string, ticket: Ticket): string | null {
+    const needsHuman = (cause: string): string =>
+      `Cannot open a pull request for ${ticket.id}: ${cause} The ticket stays SIGNED_OFF; once that is fixed, re-run \`aeos ticket approve ${ticket.id}\`. For a project without pull requests, set "pullRequests": { "enabled": false } in .aeos/project.json.`;
+
+    const availability = this.pullRequestGateway.isAvailable(projectPath);
+    if (!availability.ok) return needsHuman(availability.reason ?? 'no reason given.');
+
+    const head = `aeos/${ticket.id}`;
+    try {
+      // No remote only gets this far with a gateway that needs none (the stub).
+      if (this.gitGateway.hasRemote(projectPath)) this.gitGateway.push(projectPath, head);
+      const { url } = this.pullRequestGateway.create({
+        cwd: projectPath,
+        base: this.gitGateway.defaultBranch(projectPath),
+        head,
+        title: `[${ticket.id}] ${ticket.title}`,
+        body: this.pullRequestBody(projectId, projectPath, ticket),
+      });
+      this.ticketRepo.setPrUrl(projectId, ticket.id, url);
+      return null;
+    } catch (err) {
+      return needsHuman(`${err instanceof Error ? err.message : String(err)}.`);
+    }
+  }
+
+  private pullRequestBody(projectId: string, projectPath: string, ticket: Ticket): string {
+    const isEpic = ticket.kind === TicketKind.EPIC;
+    const read = (filename: string): string | null =>
+      this.artifactStore.artifactExists(projectPath, ticket.id, filename)
+        ? this.artifactStore.readArtifact(projectPath, ticket.id, filename)
+        : null;
+
+    const reviewColumn = isEpic ? Column.INTEGRATION_REVIEW : Column.CODE_REVIEW;
+    const reviewArtifact = `${ticket.id}-${this.columnSpecLoader.load(reviewColumn, projectPath).outputArtifact}`;
+    const reviewersVerdict = parseVerdict(read(reviewArtifact.replace('.md', '-review.md')) ?? '');
+    const checksTable = (read(`${ticket.id}-checks.md`) ?? '')
+      .split('\n')
+      .filter((line) => line.startsWith('|'))
+      .join('\n');
+
+    const ticketIds = [
+      ticket.id,
+      ...this.ticketRepo.findChildren(projectId, ticket.id).map((child) => child.id),
+    ];
+    return buildPullRequestBody({
+      ticketId: ticket.id,
+      title: ticket.title,
+      reviewLabel: isEpic ? 'Integration review' : 'Code review',
+      reviewPath:
+        read(reviewArtifact) === null ? null : `.aeos/tickets/${ticket.id}/${reviewArtifact}`,
+      reviewSummary: reviewersVerdict.ok
+        ? `${reviewersVerdict.verdict.verdict}, ${reviewersVerdict.verdict.blockers} blockers, ${reviewersVerdict.verdict.warnings} warnings`
+        : null,
+      checksTable: checksTable || null,
+      costs: ticketIds.flatMap((id) =>
+        this.costRepo.findByTicket(projectId, id).map((record) => record.costUsd),
+      ),
+    });
   }
 }

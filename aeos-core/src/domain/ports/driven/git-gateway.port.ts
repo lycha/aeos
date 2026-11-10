@@ -71,4 +71,19 @@ export interface GitGateway {
    * are checked out, paths HEAD does not have are deleted.
    */
   restoreFiles(dir: string, paths: string[]): void;
+
+  /** Pushes `branch` to the `origin` remote and sets it as upstream. Throws on failure. */
+  push(dir: string, branch: string): void;
+
+  /** The checked-out branch, or '' when HEAD is detached or `dir` is not a repository. */
+  currentBranch(dir: string): string;
+
+  /**
+   * The branch pull requests target: the remote's HEAD when known, otherwise
+   * a local `main`, then `master`. Falls back to 'main'.
+   */
+  defaultBranch(dir: string): string;
+
+  /** True when the repository at `dir` has at least one remote. */
+  hasRemote(dir: string): boolean;
 }

@@ -51,4 +51,6 @@ export interface Ticket {
    * Cleared automatically once the ticket returns to any other sub-state.
    */
   escalation?: TicketEscalation | null;
+  /** The pull request the engine opened for this ticket, once there is one. */
+  prUrl?: string | null;
 }

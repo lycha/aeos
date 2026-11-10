@@ -192,7 +192,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
         // stage this step drove.
         const actingColumn = this.ticketRepo.findById(projectId, action.ticketId)?.column ?? '—';
 
-        const outcome = await this.perform(
+        const { outcome, approveError } = await this.perform(
           action,
           projectId,
           projectPath,
@@ -208,6 +208,21 @@ export class OrchestratorUseCase implements OrchestratorPort {
         steps.push(recorded);
         observer?.onStep?.(recorded);
         this.heartbeat(projectId, epicId, true);
+
+        // An approval that fails will fail again on the next tick (a pull
+        // request that cannot be opened, say), so it is the operator's turn.
+        if (approveError !== undefined) {
+          settled = true;
+          return this.haltWith(
+            projectId,
+            epicId,
+            HaltReason.NEEDS_HUMAN,
+            approveError,
+            steps,
+            this.spendFor(projectId, epicId),
+            OrchestratorStatus.IDLE,
+          );
+        }
 
         // The action just finished — if the operator interrupted during it, the
         // in-flight ticket was already stopped; halt now rather than scheduling
@@ -307,14 +322,14 @@ export class OrchestratorUseCase implements OrchestratorPort {
     projectPath: string,
     onProgress: () => void,
     ticketRunObserver: TicketRunObserver | undefined,
-  ): Promise<string> {
+  ): Promise<{ outcome: string; approveError?: string }> {
     if (action.kind === 'advance') {
       const result = this.ticketApprove.execute(projectId, projectPath, action.ticketId);
       if (result.status === 'advanced') {
-        return `advanced ${result.fromColumn} → ${result.toColumn}`;
+        return { outcome: `advanced ${result.fromColumn} → ${result.toColumn}` };
       }
-      if (result.status === 'already_done') return 'already DONE';
-      return `approve failed: ${result.error}`;
+      if (result.status === 'already_done') return { outcome: 'already DONE' };
+      return { outcome: `approve failed: ${result.error}`, approveError: result.error };
     }
 
     // A single agentic run can exceed 30 minutes. Riding the run's own event
@@ -335,13 +350,13 @@ export class OrchestratorUseCase implements OrchestratorPort {
     );
     switch (result.status) {
       case 'success':
-        return `run succeeded in ${result.attempts} attempt(s)`;
+        return { outcome: `run succeeded in ${result.attempts} attempt(s)` };
       case 'escalated':
-        return `escalated: ${result.reason}`;
+        return { outcome: `escalated: ${result.reason}` };
       case 'blocked':
-        return `blocked: ${result.blockers.join('; ')}`;
+        return { outcome: `blocked: ${result.blockers.join('; ')}` };
       case 'failed':
-        return `failed: ${result.error}`;
+        return { outcome: `failed: ${result.error}` };
     }
   }
 

@@ -9,7 +9,7 @@ import type { SubStateOrNull } from '../../domain/model/sub-state.js';
 import type { TicketKind } from '../../domain/model/ticket-kind.js';
 import type { TicketRepository } from '../../domain/ports/driven/ticket-repository.port.js';
 
-const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, escalation_reason, escalation_message, escalation_artifact`;
+const TICKET_COLUMNS = `id, project_id, title, kind, parent_id, task_key, "column", sub_state, created_at, updated_at, escalation_reason, escalation_message, escalation_artifact, pr_url`;
 
 interface TicketRow {
   id: string;
@@ -25,6 +25,7 @@ interface TicketRow {
   escalation_reason: string | null;
   escalation_message: string | null;
   escalation_artifact: string | null;
+  pr_url: string | null;
 }
 
 export class SqliteTicketRepository implements TicketRepository {
@@ -50,6 +51,7 @@ export class SqliteTicketRepository implements TicketRepository {
             artifactPath: row.escalation_artifact,
           }
         : null,
+      prUrl: row.pr_url ?? null,
     };
   }
 
@@ -182,5 +184,11 @@ export class SqliteTicketRepository implements TicketRepository {
         projectId,
         ticketId,
       );
+  }
+
+  setPrUrl(projectId: string, ticketId: string, prUrl: string): void {
+    this.db
+      .prepare(`UPDATE tickets SET pr_url = ?, updated_at = ? WHERE project_id = ? AND id = ?`)
+      .run(prUrl, new Date().toISOString(), projectId, ticketId);
   }
 }

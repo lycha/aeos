@@ -104,6 +104,24 @@ describe('registerTicketShowCommand', () => {
     expect(consoleSpy).toHaveBeenCalledWith('  • AEOS-1-prd.md');
   });
 
+  it('shows the pull request URL once one is recorded, and no line before that', () => {
+    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+    expect(consoleSpy.mock.calls.flat().join('\n')).not.toContain('PR:');
+
+    const shown = createMockTicketShowUseCase().execute({
+      projectId: 'proj-1',
+      ticketId: 'AEOS-1',
+      projectPath: '/test',
+    }) as unknown as { ticket: Record<string, unknown> };
+    (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...shown,
+      ticket: { ...shown.ticket, prUrl: 'https://github.com/o/r/pull/7' },
+    });
+    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+
+    expect(consoleSpy).toHaveBeenCalledWith('PR:     https://github.com/o/r/pull/7');
+  });
+
   it('shows the cost of each execution, and unknown when it is null', () => {
     program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 

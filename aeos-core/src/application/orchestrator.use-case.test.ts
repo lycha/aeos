@@ -62,6 +62,7 @@ describe('OrchestratorUseCase', () => {
       updateColumn: vi.fn(),
       updateSubState: vi.fn(),
       setEscalation: vi.fn(),
+      setPrUrl: vi.fn(),
     };
     costRepo = {
       record: vi.fn(),
@@ -129,6 +130,10 @@ describe('OrchestratorUseCase', () => {
       refExists: vi.fn().mockReturnValue(false),
       changedFiles: vi.fn().mockReturnValue([]),
       restoreFiles: vi.fn(),
+      push: vi.fn(),
+      currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
+      defaultBranch: vi.fn().mockReturnValue('main'),
+      hasRemote: vi.fn().mockReturnValue(true),
     };
 
     useCase = new OrchestratorUseCase(
@@ -183,6 +188,24 @@ describe('OrchestratorUseCase', () => {
     expect(result.haltReason).toBe(HaltReason.HUMAN_GATE);
     expect(result.steps.map((s) => s.action)).toEqual(['run', 'advance']);
     expect(result.message).toContain('dod-approve');
+  });
+
+  it('halts for a human when an approval fails, instead of retrying it', async () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      epic({ column: Column.INTEGRATION_REVIEW, subState: SubState.SIGNED_OFF }),
+    );
+    (ticketApprove.execute as ReturnType<typeof vi.fn>).mockReturnValue({
+      status: 'error',
+      ticketId: EPIC_ID,
+      error: 'Cannot open a pull request for AEOS-1: `gh` is not authenticated.',
+    });
+
+    const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+    expect(result.haltReason).toBe(HaltReason.NEEDS_HUMAN);
+    expect(result.message).toContain('`gh` is not authenticated');
+    expect(ticketApprove.execute).toHaveBeenCalledTimes(1);
+    expect(result.steps).toHaveLength(1);
   });
 
   it('halts immediately when the budget is already spent', async () => {

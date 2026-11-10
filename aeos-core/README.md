@@ -12,6 +12,7 @@ An AI-assisted development pipeline that takes a ticket from idea to code review
   - `auggie` — [install](https://docs.augmentcode.com/cli/reference)
   - `opencode` — [install](https://opencode.ai/docs/cli/)
   - `ollama` — [install](https://docs.ollama.com/cli)
+- **GitHub CLI (`gh`)**, authenticated, and a git remote — for the pull requests AEOS opens. Not needed with `"pullRequests": { "enabled": false }` (see [Branches and pull requests](#branches-and-pull-requests)).
 - macOS or Linux
 
 ## Install
@@ -338,14 +339,15 @@ aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tasks.md
 aeos ticket create "Add password hashing" --parent AEOS-1   # → AEOS-2 (TASK)
 aeos ticket create "Add session middleware" --parent AEOS-1 # → AEOS-3 (TASK)
 
-# 4. Each task runs its own build pipeline
+# 4. Each task runs its own build pipeline, on the epic's branch
+git checkout -b aeos/AEOS-1                            # `orchestrator run` does this for you
 aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation
 ...
 
 # 5. Only once every task is DONE can the epic advance
 aeos ticket approve AEOS-1                             # → INTEGRATION_REVIEW
 aeos ticket run AEOS-1                                 # reviews the whole feature vs PRD/spec
-aeos ticket approve AEOS-1                             # → DOD_GATE (after human reads the verdict)
+aeos ticket approve AEOS-1                             # → DOD_GATE, and opens the pull request
 ```
 
 Nesting is one level deep: tasks hang off epics, and a task cannot itself have
@@ -354,6 +356,35 @@ is unfinished reports which tasks are outstanding and refuses the transition.
 
 > Creating child tickets from `tasks.md` is a manual step today. Automating that
 > decomposition belongs with the orchestrator, which owns scheduling.
+
+## Branches and pull requests
+
+Nothing the engine writes goes onto the default branch.
+
+- **Epic** — `aeos orchestrator run` puts the epic on `aeos/<epicId>` and tags its base `aeos-base/<epicId>`. Its tasks commit there.
+- **Child task** — runs on its epic's branch. `aeos ticket run` refuses a child task while `HEAD` is the default branch.
+- **Standalone task** (no parent) — `aeos ticket run` switches to `aeos/<taskId>`, creating it and the tag `aeos-base/<taskId>` on the first run.
+
+The default branch is the remote's `HEAD` when there is one, otherwise a local `main`, then `master`. `AEOS_GIT_ISOLATION=none` turns the branch handling off.
+
+A finished task becomes one commit, with trailers:
+
+```
+[AEOS-12] Add password hashing
+
+Ticket: AEOS-12
+Epic: AEOS-10
+```
+
+`aeos ticket approve` then opens the pull request against the default branch: for an epic when it is approved out of `INTEGRATION_REVIEW`, for a standalone task when it is approved to `DONE`. It pushes the `aeos/<id>` branch to `origin` and runs `gh pr create`; if the branch already has an open pull request, that one is used. The body carries the ticket, the path of the integration (or code) review with its verdict, the checks table and the total recorded cost; artifact paths are not links because `.aeos/` has no remote. The URL is stored on the ticket and shown by `aeos ticket show`. Merging stays yours.
+
+If the pull request cannot be opened (`gh` not on `PATH`, not authenticated, no remote, or the host refuses), `approve` stops with the cause and the fix and the ticket stays `SIGNED_OFF`, so running `approve` again retries. Under `aeos orchestrator run` this halts the epic as needing a human. For a project with no code host:
+
+```json
+{ "pullRequests": { "enabled": false } }
+```
+
+in `.aeos/project.json` skips the push and the pull request; branches and trailers stay. With `AEOS_EXECUTOR=stub` no `gh` call is made and a placeholder URL is stored, but the branch is still pushed if the repository has a remote.
 
 ## Orchestrator
 
@@ -505,6 +536,7 @@ is a hard escalation, never silently treated as approval.
 | --------------- | --------- | ------------------------------------------------------------------------------- |
 | `AEOS_EXECUTOR` | unset     | Set to `stub` to force the stub executor for testing without real LLM/CLI calls |
 | `AEOS_HOME`     | `~/.aeos` | Override the global state directory (config, registry, `state.db`)              |
+| `AEOS_GIT_ISOLATION` | unset | Set to `none` to stop AEOS switching branches (epic and task branches)         |
 
 `AEOS_EXECUTOR=stub` drives the full pipeline offline: the stub clears preflight,
 satisfies structural validation, and emits an APPROVED verdict when standing in for

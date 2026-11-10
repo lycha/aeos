@@ -44,6 +44,7 @@ function createMockTicketRepo(): TicketRepository {
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
     setEscalation: vi.fn(),
+    setPrUrl: vi.fn(),
   };
 }
 
@@ -72,6 +73,10 @@ function createMockGitGateway(): GitGateway {
     refExists: vi.fn().mockReturnValue(false),
     changedFiles: vi.fn().mockReturnValue([]),
     restoreFiles: vi.fn(),
+    push: vi.fn(),
+    currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
+    defaultBranch: vi.fn().mockReturnValue('main'),
+    hasRemote: vi.fn().mockReturnValue(true),
     diff: vi.fn().mockReturnValue('diff --git a/src/file.ts b/src/file.ts'),
   };
 }
@@ -971,6 +976,84 @@ describe('TicketRunUseCase', () => {
       status: 'failed',
       ticketId: TICKET_ID,
       error: 'DoD gate is human-only',
+    });
+  });
+
+  describe('task branches', () => {
+    const order = (mock: unknown): number =>
+      (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+    const running = (overrides: Partial<Ticket>): void => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ kind: 'TASK', ...overrides }),
+      );
+    };
+    const onDefaultBranch = (): void => {
+      (gitGateway.currentBranch as ReturnType<typeof vi.fn>).mockReturnValue('main');
+    };
+
+    it('puts a standalone task on its own tagged branch before any executor runs', async () => {
+      running({ parentId: null });
+      onDefaultBranch();
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(gitGateway.ensureOnBranch).toHaveBeenCalledWith(PROJECT_PATH, 'aeos/AEOS-1');
+      expect(gitGateway.tagHere).toHaveBeenCalledWith(PROJECT_PATH, 'aeos-base/AEOS-1');
+      expect(order(gitGateway.ensureOnBranch)).toBeLessThan(order(gitGateway.tagHere));
+      expect(order(gitGateway.tagHere)).toBeLessThan(order(preflight.run));
+      expect(order(gitGateway.tagHere)).toBeLessThan(order(executor.run));
+    });
+
+    it('refuses to run a child task while HEAD is the default branch', async () => {
+      running({ parentId: 'AEOS-9' });
+      onDefaultBranch();
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      const { error } = result as { error: string };
+      expect(error).toContain("default branch 'main'");
+      expect(error).toContain('aeos/AEOS-9');
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(preflight.run).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
+      expect(gitGateway.ensureOnBranch).not.toHaveBeenCalled();
+    });
+
+    it("runs a child task on its epic's branch without switching", async () => {
+      running({ parentId: 'AEOS-9' });
+      (gitGateway.currentBranch as ReturnType<typeof vi.fn>).mockReturnValue('aeos/AEOS-9');
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(gitGateway.ensureOnBranch).not.toHaveBeenCalled();
+    });
+
+    it('leaves an epic where it is', async () => {
+      onDefaultBranch();
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(gitGateway.ensureOnBranch).not.toHaveBeenCalled();
+    });
+
+    it('does nothing outside a git repository, or with AEOS_GIT_ISOLATION=none', async () => {
+      running({ parentId: 'AEOS-9' });
+      onDefaultBranch();
+      (gitGateway.isRepo as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
+      expect((await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID)).status).toBe('success');
+
+      vi.stubEnv('AEOS_GIT_ISOLATION', 'none');
+      try {
+        running({ parentId: null });
+        expect((await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID)).status).toBe('success');
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      expect(gitGateway.ensureOnBranch).not.toHaveBeenCalled();
     });
   });
 

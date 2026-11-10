@@ -251,3 +251,52 @@ describe('SimpleGitGateway changed and restored files', () => {
     expect(gateway.changedFiles(repo)).toEqual(['keep.md']);
   });
 });
+
+describe('SimpleGitGateway branches and remotes', () => {
+  let repo: string;
+  const gateway = new SimpleGitGateway();
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  };
+
+  beforeEach(() => {
+    repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-git-test-')));
+    git('init', '--initial-branch=master');
+    git('config', 'user.email', 'test@test.com');
+    git('config', 'user.name', 'Test');
+    fs.writeFileSync(path.join(repo, 'a.md'), 'a\n');
+    git('add', '.');
+    git('commit', '-m', 'initial');
+  });
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('reports the current branch', () => {
+    expect(gateway.currentBranch(repo)).toBe('master');
+    git('checkout', '-b', 'aeos/AEOS-1');
+    expect(gateway.currentBranch(repo)).toBe('aeos/AEOS-1');
+  });
+
+  it('takes the default branch from the local branches when there is no remote', () => {
+    expect(gateway.defaultBranch(repo)).toBe('master');
+    git('branch', 'main');
+    expect(gateway.defaultBranch(repo)).toBe('main');
+  });
+
+  it("prefers the remote's HEAD for the default branch", () => {
+    // Set by hand: nothing is fetched from or pushed to anywhere.
+    git('update-ref', 'refs/remotes/origin/trunk', 'HEAD');
+    git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
+
+    expect(gateway.defaultBranch(repo)).toBe('trunk');
+  });
+
+  it('knows whether a remote is configured, and is false outside a repository', () => {
+    expect(gateway.hasRemote(repo)).toBe(false);
+    git('remote', 'add', 'origin', 'https://example.invalid/nowhere.git');
+    expect(gateway.hasRemote(repo)).toBe(true);
+    expect(gateway.hasRemote(os.tmpdir())).toBe(false);
+  });
+});

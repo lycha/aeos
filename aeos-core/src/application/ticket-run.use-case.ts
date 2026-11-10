@@ -60,6 +60,7 @@ import { EscalationReason } from '../domain/model/escalation.js';
 import { buildEscalationDocument, escalationFilename } from './services/escalation-document.js';
 import { Column } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
+import { TicketKind } from '../domain/model/ticket-kind.js';
 import { validateOutput } from '../domain/services/output-validation.js';
 import { isValidColumn } from '../domain/model/column.js';
 import { parseVerdict } from '../domain/services/verdict-parser.js';
@@ -178,6 +179,9 @@ export class TicketRunUseCase implements TicketRunPort {
       const eligibility = this.checkEligibility(projectId, ticketId);
       if (!eligibility.ok) return eligibility.result;
       let mirroredTicket = eligibility.ticket;
+
+      const branchError = this.isolateTask(projectPath, mirroredTicket);
+      if (branchError) return { status: 'failed', ticketId, error: branchError };
 
       const columnSpec = this.columnSpecLoader.load(mirroredTicket.column, projectPath);
       const workerAgentSpec = this.agentSpecLoader.load(columnSpec.workerAgentFile, projectPath);
@@ -1271,6 +1275,30 @@ export class TicketRunUseCase implements TicketRunPort {
       };
     }
     return { ok: true, ticket };
+  }
+
+  /**
+   * Keeps a task's commits off the default branch. A standalone task gets its
+   * own `aeos/<taskId>` branch and base tag, as the orchestrator gives an
+   * epic; a child task belongs on its epic's branch, which the orchestrator
+   * set up, so one found on the default branch is refused. Returns the refusal.
+   */
+  private isolateTask(projectPath: string, ticket: Ticket): string | null {
+    if (
+      ticket.kind !== TicketKind.TASK ||
+      process.env.AEOS_GIT_ISOLATION === 'none' ||
+      !this.gitGateway.isRepo(projectPath)
+    ) {
+      return null;
+    }
+    if (ticket.parentId === null) {
+      this.gitGateway.ensureOnBranch(projectPath, `aeos/${ticket.id}`);
+      this.gitGateway.tagHere(projectPath, `aeos-base/${ticket.id}`);
+      return null;
+    }
+    const defaultBranch = this.gitGateway.defaultBranch(projectPath);
+    if (this.gitGateway.currentBranch(projectPath) !== defaultBranch) return null;
+    return `Refusing to run task ${ticket.id} on the default branch '${defaultBranch}'. Drive it with \`aeos orchestrator run ${ticket.parentId}\`, or check out \`aeos/${ticket.parentId}\` first.`;
   }
 
   /**

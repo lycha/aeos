@@ -14,6 +14,8 @@ export interface ProjectExecutorConfig extends Project {
   readonly checks?: readonly CheckConfig[];
   /** Globs no agent may touch, added to the built-in protected paths. */
   readonly protectedPaths?: readonly string[];
+  /** `enabled: false` turns off pushing and pull requests, for a local project. */
+  readonly pullRequests?: { readonly enabled?: boolean };
   readonly executor?: {
     readonly type?: 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli';
     readonly model?: string;

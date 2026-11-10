@@ -75,9 +75,14 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     // Commit what init scaffolded (skill symlinks), as a user would, so the
     // first task's baseline has nothing to pick up.
     const git = (...args: string[]): string =>
-      execFileSync('git', args, { cwd: project.projectPath, encoding: 'utf-8' });
+      execFileSync('git', args, {
+        cwd: project.projectPath,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
     git('add', '-A');
     git('commit', '-m', 'aeos project init');
+    const defaultBranch = git('branch', '--show-current').trim();
 
     // Epic: BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN
     const epic = await createTicket('An epic');
@@ -93,7 +98,15 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       await createTicket('First task', '--parent', epic, '--key', 'T-001'),
       await createTicket('Second task', '--parent', epic, '--key', 'T-002'),
     ];
-    for (const task of tasks) await driveTaskToDone(task);
+    // A child task is refused on the default branch. `orchestrator run` would
+    // have put the epic on its own branch; the test plays that part too.
+    await runCli('ticket', 'approve', tasks[0]!);
+    const refused = await runCli('ticket', 'run', tasks[0]!);
+    expect(refused.output).toContain(`on the default branch '${defaultBranch}'`);
+    expect(ticketState(tasks[0]!)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'READY' });
+    git('checkout', '-b', `aeos/${epic}`);
+    for (let i = 0; i < 3; i++) await driveColumn(tasks[0]!);
+    await driveTaskToDone(tasks[1]!);
 
     // Epic: TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE
     expect((await runCli('ticket', 'approve', epic)).exitCode).toBe(0);
@@ -102,8 +115,20 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     // DOD_GATE is human-only: no run, just the approval.
     dodApprove(epic);
 
+    // Approved out of INTEGRATION_REVIEW: the (stub) pull request is recorded.
+    expect((await runCli('ticket', 'show', epic)).output).toContain(
+      `PR:     https://stub.invalid/pull/aeos/${epic}`,
+    );
+
+    // A standalone task started from the default branch moves to its own.
+    git('checkout', defaultBranch);
     const standalone = createStandaloneTask('A standalone task');
     await driveTaskToDone(standalone);
+    expect(git('branch', '--show-current').trim()).toBe(`aeos/${standalone}`);
+    expect(git('tag', '--list', `aeos-base/${standalone}`).trim()).toBe(`aeos-base/${standalone}`);
+    expect((await runCli('ticket', 'show', standalone)).output).toContain(
+      `PR:     https://stub.invalid/pull/aeos/${standalone}`,
+    );
 
     for (const id of [epic, ...tasks, standalone]) {
       expect(ticketState(id).column, id).toBe('DONE');
@@ -165,14 +190,19 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(costs).not.toContain(standalone);
     for (const role of ['preflight', 'worker', 'reviewer']) expect(costs).toContain(role);
 
-    // One git spawn for all commit assertions.
-    const subjects = git('log', '--format=%s').split('\n');
-    for (const id of [...tasks, standalone]) {
-      expect(
-        subjects.filter((s) => s.startsWith(`[${id}]`)),
-        id,
-      ).toHaveLength(1);
-    }
+    // One commit per task, on a task or epic branch, with its trailers.
+    const messages = git('log', '--all', '--format=%B%x00').split('\0');
+    const commitOf = (id: string): string[] =>
+      messages.map((message) => message.trim()).filter((m) => m.startsWith(`[${id}]`));
+    for (const id of [...tasks, standalone]) expect(commitOf(id), id).toHaveLength(1);
+    for (const id of tasks) expect(commitOf(id)[0]).toContain(`\n\nTicket: ${id}\nEpic: ${epic}`);
+    expect(commitOf(standalone)[0]).toMatch(new RegExp(`\\n\\nTicket: ${standalone}$`));
+
+    // The engine committed nothing on the default branch: only the test's own two commits.
+    expect(git('log', defaultBranch, '--format=%s').trim().split('\n')).toEqual([
+      'aeos project init',
+      'initial',
+    ]);
   });
 
   it('accepts a budget on a stub run and completes it', async () => {

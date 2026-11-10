@@ -5,3 +5,5 @@ export * from './git/index.js';
 export * from './executor/index.js';
 export * from './spec-loader/index.js';
 export * from './checks/shell-checks-runner.adapter.js';
+export * from './pull-request/gh-pull-request.adapter.js';
+export * from './pull-request/stub-pull-request.adapter.js';

@@ -203,6 +203,24 @@ describe('FsProjectRepository.readExecutorConfig()', () => {
     );
   });
 
+  it('throws on a pullRequests setting that is not { enabled: boolean }', () => {
+    fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+    const write = (pullRequests: unknown): void =>
+      fs.writeFileSync(
+        path.join(tmpDir, '.aeos', 'project.json'),
+        JSON.stringify({ id: 'my-project', pullRequests }),
+        'utf-8',
+      );
+
+    write({ enabled: false });
+    expect(repo.readExecutorConfig(tmpDir)?.pullRequests).toEqual({ enabled: false });
+
+    write({ enabled: 'no' });
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "pullRequests" in .aeos\/project.json/,
+    );
+  });
+
   it('throws on an invalid checks list rather than reading it as no checks', () => {
     writeChecks([{ name: 'test' }]);
 

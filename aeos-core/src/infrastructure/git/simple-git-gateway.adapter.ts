@@ -160,4 +160,40 @@ export class SimpleGitGateway implements GitGateway {
       }
     }
   }
+
+  push(dir: string, branch: string): void {
+    // stderr is piped so a refused push says why in the thrown error.
+    execFileSync('git', ['push', '--set-upstream', 'origin', branch], {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+
+  currentBranch(dir: string): string {
+    return this.read(dir, ['branch', '--show-current']);
+  }
+
+  defaultBranch(dir: string): string {
+    const remoteHead = this.read(dir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
+    if (remoteHead) return remoteHead.replace(/^origin\//, '');
+    return ['main', 'master'].find((name) => this.refExists(dir, `refs/heads/${name}`)) ?? 'main';
+  }
+
+  hasRemote(dir: string): boolean {
+    return this.read(dir, ['remote']) !== '';
+  }
+
+  /** Trimmed stdout of a git query, or '' when it fails. */
+  private read(dir: string, args: string[]): string {
+    try {
+      return execFileSync('git', args, {
+        cwd: dir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      return '';
+    }
+  }
 }

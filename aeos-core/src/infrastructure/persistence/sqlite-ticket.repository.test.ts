@@ -99,3 +99,15 @@ describe('SqliteTicketRepository — escalation', () => {
     expect(repo.findById('p', 'AEOS-1')?.escalation).toBeNull();
   });
 });
+
+describe('SqliteTicketRepository — pull request URL', () => {
+  it('is null until set, then reads back from every finder', () => {
+    repo.save(ticket());
+    expect(repo.findById('p', 'AEOS-1')?.prUrl).toBeNull();
+
+    repo.setPrUrl('p', 'AEOS-1', 'https://github.com/o/r/pull/7');
+
+    expect(repo.findById('p', 'AEOS-1')?.prUrl).toBe('https://github.com/o/r/pull/7');
+    expect(repo.findByProject('p')[0]?.prUrl).toBe('https://github.com/o/r/pull/7');
+  });
+});

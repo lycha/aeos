@@ -52,3 +52,6 @@ export const ProjectChecksSchema = z.array(
 
 /** The `protectedPaths` list of `.aeos/project.json`. */
 export const ProjectProtectedPathsSchema = z.array(z.string().min(1));
+
+/** The `pullRequests` object of `.aeos/project.json`. */
+export const ProjectPullRequestsSchema = z.object({ enabled: z.boolean().optional() });

@@ -62,6 +62,8 @@ import { PreflightService } from '../application/services/preflight.js';
 import { SqliteCostRepository } from '../infrastructure/persistence/sqlite-cost.repository.js';
 import { DecisionPromotionService } from '../application/services/decision-promotion.service.js';
 import { ExecutorConfigResolver } from '../application/services/executor-config-resolver.js';
+import { GhPullRequestGateway } from '../infrastructure/pull-request/gh-pull-request.adapter.js';
+import { StubPullRequestGateway } from '../infrastructure/pull-request/stub-pull-request.adapter.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
 
 export interface Container {
@@ -213,6 +215,13 @@ export function createContainer(): Container {
         artifactStore,
         getStateMachine(),
         gitGateway,
+        // A stub run must never reach the real code host.
+        process.env.AEOS_EXECUTOR === 'stub'
+          ? new StubPullRequestGateway()
+          : new GhPullRequestGateway(),
+        getCostRepo(),
+        new YamlColumnSpecLoader(),
+        projectRepo,
       );
     },
     get ticketSignOff() {

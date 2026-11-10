@@ -1,0 +1,72 @@
+import { describe, expect, it } from 'vitest';
+
+import { buildPullRequestBody, buildTaskCommitMessage } from './pull-request-text.js';
+
+describe('buildTaskCommitMessage', () => {
+  it('carries a Ticket trailer for a standalone task', () => {
+    expect(buildTaskCommitMessage({ id: 'AEOS-12', title: 'Title', parentId: null })).toBe(
+      '[AEOS-12] Title\n\nTicket: AEOS-12',
+    );
+  });
+
+  it('adds the Epic trailer for a child task', () => {
+    expect(buildTaskCommitMessage({ id: 'AEOS-12', title: 'Title', parentId: 'AEOS-10' })).toBe(
+      '[AEOS-12] Title\n\nTicket: AEOS-12\nEpic: AEOS-10',
+    );
+  });
+
+  it('appends extra trailers after its own', () => {
+    expect(
+      buildTaskCommitMessage({ id: 'AEOS-12', title: 'Title', parentId: 'AEOS-10' }, [
+        ['Spec', 'abc123'],
+        ['Implements', 'AC-1'],
+      ]),
+    ).toBe('[AEOS-12] Title\n\nTicket: AEOS-12\nEpic: AEOS-10\nSpec: abc123\nImplements: AC-1');
+  });
+});
+
+describe('buildPullRequestBody', () => {
+  const base = {
+    ticketId: 'AEOS-10',
+    title: 'Checkout flow',
+    reviewLabel: 'Integration review',
+    reviewPath: '.aeos/tickets/AEOS-10/AEOS-10-integration-review.md',
+    reviewSummary: 'APPROVED, 0 blockers, 1 warnings',
+    checksTable: '| Check | Result | Duration |\n| --- | --- | --- |\n| test | passed | 1.2s |',
+    costs: [0.5, 0.25, null],
+  };
+
+  it('names the ticket, the review, the checks and the known cost', () => {
+    const body = buildPullRequestBody(base);
+
+    expect(body).toContain('AEOS-10');
+    expect(body).toContain('Checkout flow');
+    expect(body).toContain(
+      'Integration review: `.aeos/tickets/AEOS-10/AEOS-10-integration-review.md` (APPROVED, 0 blockers, 1 warnings)',
+    );
+    expect(body).toContain('| test | passed | 1.2s |');
+    expect(body).toContain('$0.7500');
+    expect(body).toContain('1 run with unknown cost not included');
+  });
+
+  it('leaves marked placeholders for the spec pin and the conformance summary', () => {
+    const body = buildPullRequestBody(base);
+
+    expect(body).toContain('<!-- aeos:spec-pin -->');
+    expect(body).toContain('<!-- aeos:conformance -->');
+  });
+
+  it('says so when there is no review, no checks table and no known cost', () => {
+    const body = buildPullRequestBody({
+      ...base,
+      reviewPath: null,
+      reviewSummary: null,
+      checksTable: null,
+      costs: [null],
+    });
+
+    expect(body).toContain('Integration review: not found');
+    expect(body).toContain('No checks were recorded');
+    expect(body).toContain('Total cost: unknown');
+  });
+});

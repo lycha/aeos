@@ -15,6 +15,7 @@ function createMockTicketRepo(): TicketRepository {
     updateColumn: vi.fn(),
     updateSubState: vi.fn(),
     setEscalation: vi.fn(),
+    setPrUrl: vi.fn(),
   };
 }
 
