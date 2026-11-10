@@ -332,6 +332,26 @@ When a spec-backed epic runs `INTEGRATION_REVIEW`, a built-in check traces the p
 
 A failure sets the epic `ESCALATED` (`PRE_WORKER_CHECK_FAILED`) with the report as the artifact to read. No worker or reviewer is invoked and no attempt is used: an unclaimed criterion needs a new task or a spec amendment, which is a person's call. Fix it, then `aeos ticket resolve <epic>` and run again. The reviewer of `TASK_BREAKDOWN` is given the unclaimed list too, so a breakdown that leaves a criterion unowned is rejected early. Whether a tagged test passes is not checked here. An epic with no spec is not traced.
 
+### Conformance report (builder)
+
+The engine can build a verdict per criterion from deterministic sources: the criteria trace, and the results of the project's own test run. Say how to get those results in `.aeos/project.json`:
+
+```json
+{
+  "criteria": {
+    "testReport": {
+      "command": "npx vitest run --reporter=json --outputFile=.aeos/tmp/test-report.json",
+      "path": ".aeos/tmp/test-report.json",
+      "format": "vitest-json"
+    }
+  }
+}
+```
+
+`vitest-json` is the only format read today. The command runs like a check (a red suite is a result, not an error) and the report is read from `path`. A test is an instrument of a criterion when its full name contains the id, or when its file carries an `@AC-n` comment; a tagged scenario is one when the test run reports a result whose name contains the scenario's name. A skipped test is not an instrument. The verdict is `fail` if any instrument failed, `pass` if at least one passed and none failed, and `unverified` when nothing answered. The report follows `schemas/conformance.schema.json` and is serialised as YAML and as a Markdown table. With no `testReport` configured every criterion is `unverified`.
+
+No command builds or shows the report yet: that, the QA agent's and a person's verdicts, and the definition-of-done gate come with I1-M4-002b. `aeos project init` writes `.aeos/.gitignore` with `tmp/`, so the test report is never committed to the `.aeos` repository; an existing `.gitignore` is left alone (add `tmp/` yourself in a project initialised earlier).
+
 ### Protected paths
 
 An agent must not be able to weaken what it is judged against. Around every executor invocation (preflight, worker and reviewer, artifact and agentic) AEOS compares the changed files of the project repository and of `.aeos/` (its own repository) before and after. If the run changed a protected path, the path is restored (a tracked file is checked out, a new file is deleted), the run record carries the violation in `error`, and the attempt ends `FAILED`, not `ESCALATED`: the agent broke a rule.

@@ -58,6 +58,13 @@ export const ProjectProtectedPathsSchema = z.array(z.string().min(1));
 /** The `criteria` object of `.aeos/project.json`. */
 export const ProjectCriteriaSchema = z.looseObject({
   testGlobs: z.array(z.string().min(1)).optional(),
+  testReport: z
+    .object({
+      command: z.string().min(1),
+      path: z.string().min(1),
+      format: z.enum(['vitest-json']),
+    })
+    .optional(),
 });
 
 /** The `pullRequests` object of `.aeos/project.json`. */
