@@ -1,6 +1,6 @@
 # Artefact Tree Conventions
 
-All specification artefacts are versioned in a **separate git tree** from the code. Every skill in the spec pipeline reads from and writes to that tree, never to the code repository.
+All specification artefacts are versioned in a **separate git tree** from the code. Every skill in the spec pipeline reads from and writes to that tree, never to the code repository. In an AEOS project the tree is `<project>/.aeos`: it sits inside the project directory, but it is its own git repository and the code repository ignores it.
 
 This is not a filing preference. It gives the specification its own history, uncontaminated by code churn — which is what makes "the spec is the system, the code is a build artefact" mechanically true rather than aspirational, and what makes divergence detection a diff rather than an opinion.
 
@@ -10,6 +10,7 @@ This is not a filing preference. It gives the specification its own history, unc
 
 ```
 <artefact-tree>/
+├── schemas/                              # seeded from the plugin, with a .source stamp
 ├── assumption-register.yaml              # project-wide, persists across features
 ├── source-precedence.yaml                # project-wide, declared once
 ├── contexts/
@@ -26,7 +27,7 @@ This is not a filing preference. It gives the specification its own history, unc
         └── contracts/openapi.yaml        # generated
 ```
 
-**Never write specification artefacts into the code repo.** If a skill cannot locate the artefact tree, it stops and asks — it does not fall back to the working directory.
+**Never commit specification artefacts to the code repository.** `<project>/.aeos` keeps this true: it is its own git repository, and the code repository ignores it. If a skill cannot locate the artefact tree, it stops and asks — it does not fall back to the working directory.
 
 ---
 
@@ -34,10 +35,12 @@ This is not a filing preference. It gives the specification its own history, unc
 
 Resolve in this order:
 
-1. `AEOS_ARTEFACT_TREE` environment variable
-2. `artefactTree` in project config
-3. A sibling directory matching `*-specs` or `*-artefacts`
-4. **Ask the user.** Do not guess.
+1. `$AEOS_ARTEFACT_TREE`
+2. `artefactTree` in `.aeos/project.json`
+3. `<project>/.aeos` when it exists
+4. A sibling `*-specs` directory
+5. An existing in-repo `docs/artefact-tree/`
+6. **Ask the user.** Do not guess.
 
 Record the resolved root and its branch in every output's `meta`.
 

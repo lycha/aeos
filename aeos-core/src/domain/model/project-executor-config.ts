@@ -16,6 +16,8 @@ export interface ProjectExecutorConfig extends Project {
   readonly protectedPaths?: readonly string[];
   /** `enabled: false` turns off pushing and pull requests, for a local project. */
   readonly pullRequests?: { readonly enabled?: boolean };
+  /** Root of the artefact tree, relative to the project root. Default `.aeos`. */
+  readonly artefactTree?: string;
   readonly executor?: {
     readonly type?: 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli';
     readonly model?: string;

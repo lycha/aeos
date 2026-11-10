@@ -4,3 +4,4 @@ export * from './fs-project.repository.js';
 export * from './fs-config.adapter.js';
 export * from './fs-rubric-loader.adapter.js';
 export * from './fs-run-record-store.adapter.js';
+export * from './fs-artefact-tree.adapter.js';

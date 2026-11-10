@@ -11,16 +11,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "id",
-          "from",
-          "feature",
-          "registered",
-          "assumption",
-          "revisit_when",
-          "risk",
-          "status"
-        ],
+        "required": ["id", "from", "feature", "registered", "assumption", "revisit_when", "risk", "status"],
         "properties": {
           "id": { "type": "string", "pattern": "^ASM-[0-9]+$" },
           "from": {

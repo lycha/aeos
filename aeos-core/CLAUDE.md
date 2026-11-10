@@ -16,13 +16,13 @@ AEOS dogfoods itself: `.aeos/` in this repo is a live project directory (key `AE
 ## Commands
 
 ```bash
-npm run build          # tsc → dist/
+npm run build          # refresh templates/schemas, then tsc → dist/
 npm run dev            # tsc --watch
 npm test               # vitest run
 npm run test:watch
 npm run test:coverage  # V8 coverage
 npm run typecheck      # tsc --noEmit (strict)
-npm run lint           # eslint + prettier --check
+npm run lint           # schemas:check + eslint + prettier --check
 npm run lint:fix
 ```
 
@@ -105,6 +105,8 @@ Column behaviour lives in YAML under a project's `.aeos/`:
 Changing pipeline behaviour usually means editing YAML, not TypeScript. Loaders validate with Zod (`infrastructure/spec-loader/`).
 
 `templates/` at the package root holds the starter copies of `column-specs/`, `agents/`, and `rubrics/` that `aeos project init` scaffolds into a new project (`infrastructure/filesystem/template-source.ts`). They are plain YAML/Markdown rather than embedded strings, and ship via the `files` field in `package.json`. **Adding a column means adding its template spec too** — otherwise a fresh project fails on its first `ticket run` when a ticket reaches that column. `template-source.test.ts` guards this by scaffolding a temp project and asserting every column spec loads and its agents and rubrics resolve.
+
+`.aeos/` is also the project's **artefact tree** (decision D1): `features/<feature>/` holds a human-written spec, `contexts/<context>/` a glossary and constraints, `schemas/` the artefact schemas. `ArtefactTree` (`domain/ports/driven/artefact-tree.port.ts`) resolves its root: `artefactTree` in `project.json`, default `.aeos`. The schemas have one authored copy, `plugins/artefact-tree-pipeline/schemas/`. `templates/schemas/` is a generated copy made by `npm run build` (it runs the plugin's `seed-schemas.mjs`, which also writes the `.source` stamp); `npm run lint` fails when it is stale. Because it sits under `templates/`, `project init` seeds it and `project sync` reports drift like any other template. Never edit `templates/schemas/` by hand. The spec skills live in the same plugin; `aeos-core/skills/aeos/` is a different thing.
 
 `skills/aeos/SKILL.md` (also shipped via `files`) teaches an agentic executor to drive the `aeos` CLI. `project init` copies it to `.aeos/skills/aeos/` and relative-symlinks it into each executor's skills dir (`.claude/skills`, `.augment/skills` — see `skill-source.ts`). The **portable** carrier of the decomposition instruction is the architect's `taskInstruction` (in the prompt, so every executor gets it); the skill is reinforcement for skill-aware backends. This is how `TASK_BREAKDOWN` decomposition works: that column is **agentic**, and the architect calls `aeos ticket create --parent <epic> --key T-NNN` to create the child tasks itself rather than AEOS parsing them out of an artifact. `requiresRepoDiff: false` on that column stops the agentic diff check (which enforces the IMPLEMENTATION guarantee) from failing a run that creates tickets rather than editing the repo.
 

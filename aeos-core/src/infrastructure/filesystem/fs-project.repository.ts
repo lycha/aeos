@@ -112,6 +112,8 @@ export class FsProjectRepository implements ProjectRepository {
   scaffoldDefaults(projectPath: string): string[] {
     const aeosRoot = path.join(projectPath, AEOS_DIR);
     fs.mkdirSync(path.join(aeosRoot, COLUMN_SPECS_DIR), { recursive: true });
+    fs.mkdirSync(path.join(aeosRoot, 'features'), { recursive: true });
+    fs.mkdirSync(path.join(aeosRoot, 'contexts'), { recursive: true });
 
     const created: string[] = [];
     for (const template of readTemplates()) {

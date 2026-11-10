@@ -6,8 +6,8 @@ allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion
 
 # Artefact Tree Init
 
-The other three skills in this plugin (`prototype-harvest`, `gap-interrogation-capture`,
-`spec-writer`) read and write specification artefacts that are validated against JSON Schemas and
+The other skills in this plugin (`prototype-harvest`, `gap-interrogation-capture`,
+`gap-interrogation-solo`, `spec-writer`) read and write specification artefacts that are validated against JSON Schemas and
 a cross-file linter. Those schemas are **owned by this plugin**, not by any one skill, so they
 travel with it. This skill puts a **seeded copy** into the project so the non-agent consumers can
 reach it: `lint_decisions.py` (run from the tree), CI, and editor `$schema` validation.
@@ -28,14 +28,19 @@ no `decisions.yaml`, and no `spec.md`. Those are the other skills' jobs, and the
 
 ### Step 1: Resolve the artefact-tree root
 
-Specification artefacts live in a tree that may be a separate git repository from the code, or an
-in-repo directory. Resolve the root in this order and never guess:
+Specification artefacts live in a tree with its own git history. In an AEOS project that is
+`<project>/.aeos`: its own git repository, ignored by the code repository. Resolve the root in this
+order and never guess:
 
 1. `$AEOS_ARTEFACT_TREE`
-2. Project config that names it
-3. A sibling `*-specs` directory
-4. An existing in-repo `docs/artefact-tree/`
-5. **Ask.** Offer `docs/artefact-tree` as the in-repo default.
+2. `artefactTree` in `.aeos/project.json`
+3. `<project>/.aeos` when it exists
+4. A sibling `*-specs` directory
+5. An existing in-repo `docs/artefact-tree/`
+6. **Ask.** Offer `docs/artefact-tree` as the in-repo default.
+
+In an AEOS project `aeos project init` has already seeded the schemas and scaffolded `features/`
+and `contexts/`, and `aeos project sync` reports a stale or hand-edited copy.
 
 See `../spec-writer/references/artefact-tree.md` for the resolution rationale shared across the
 pipeline.
@@ -48,8 +53,8 @@ Run the seed script, passing the resolved root:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/seed-schemas.mjs" --tree <artefact-tree-root>
 ```
 
-It copies `decisions.schema.json`, `feature-inventory.schema.json`,
-`assumption-register.schema.json`, and `lint_decisions.py` into `<root>/schemas/`, and writes a
+It copies every schema the plugin ships (`decisions`, `feature-inventory`, `assumption-register`,
+`run-record`, `gates`, `conformance`) and `lint_decisions.py` into `<root>/schemas/`, and writes a
 `<root>/schemas/.source` stamp (plugin version + a sha256 over the schema set). It is idempotent:
 
 - stamp matches the shipped schemas → prints "up to date" and exits 0,

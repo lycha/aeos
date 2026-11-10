@@ -106,8 +106,18 @@ Each column follows the same cycle:
 ├── CONSTRAINTS.md         placeholder for your architecture/style/security rules
 ├── column-specs/          one YAML per pipeline column
 ├── agents/                worker and reviewer agent specs
-└── rubrics/               reviewer rubrics and artifact templates
+├── rubrics/               reviewer rubrics and artifact templates
+├── schemas/               artefact schemas and lint_decisions.py, with a .source stamp
+├── features/              one directory per feature: its human-written spec
+└── contexts/              one directory per bounded context: glossary, constraints
 ```
+
+`.aeos/` is the project's **artefact tree**: its own git repository, ignored by the
+code repository, so the specification keeps a history separate from the code. To keep
+the tree elsewhere, set `"artefactTree"` in `project.json` to a path relative to the
+project root. `schemas/` is a seeded copy of `plugins/artefact-tree-pipeline/schemas/`;
+do not edit it. `aeos project sync` reports a stale or hand-edited copy and only
+overwrites it with `--force`.
 
 Everything under `column-specs/`, `agents/`, and `rubrics/` is scaffolded from the
 templates shipped with AEOS and is **yours to edit** — changing pipeline behaviour

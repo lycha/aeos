@@ -21,7 +21,7 @@ describe('readTemplates', () => {
   it('ships templates under the expected top-level directories', () => {
     const dirs = new Set(readTemplates().map((t) => t.relativePath.split(path.sep)[0]));
 
-    expect(dirs).toEqual(new Set(['column-specs', 'agents', 'rubrics']));
+    expect(dirs).toEqual(new Set(['column-specs', 'agents', 'rubrics', 'schemas']));
   });
 });
 

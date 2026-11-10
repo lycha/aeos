@@ -44,7 +44,7 @@ If the inventory is missing, stop and say so. Without it there is nothing to rec
 
 ### Step 0: Locate the artefact tree
 
-All specification artefacts live in a **separate git tree** from the code. Resolve its root before doing anything else — env `AEOS_ARTEFACT_TREE`, then project config, then a sibling `*-specs` directory, then **ask**. Never fall back to the working directory, and never write specification artefacts into the code repo.
+All specification artefacts live in a **separate git tree** from the code. Resolve its root before doing anything else — env `AEOS_ARTEFACT_TREE`, then `artefactTree` in `.aeos/project.json`, then `<project>/.aeos` when it exists, then a sibling `*-specs` directory, then an existing in-repo `docs/artefact-tree/`, then **ask**. Never fall back to the working directory, and never commit specification artefacts to the code repository (`.aeos/` is its own git repository, ignored by the code repository).
 
 Record artefact-tree `HEAD` now; you will need it to detect concurrent writes before committing. See `references/artefact-tree.md`.
 
