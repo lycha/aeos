@@ -54,14 +54,22 @@
           "evidence": { "type": "string" }
         },
         "allOf": [
-          { "if": { "properties": { "outcome": { "const": "ANSWERED" } } },
-            "then": { "required": ["answer", "answered_by"] } },
-          { "if": { "properties": { "outcome": { "const": "RECLASSIFIED" } } },
-            "then": { "required": ["reclassified_as", "becomes"] } },
-          { "if": { "properties": { "outcome": { "const": "DROPPED" } } },
-            "then": { "required": ["reason"] } },
-          { "if": { "properties": { "outcome": { "const": "ESCALATED" } } },
-            "then": { "required": ["owner", "due"] } }
+          {
+            "if": { "properties": { "outcome": { "const": "ANSWERED" } } },
+            "then": { "required": ["answer", "answered_by"] }
+          },
+          {
+            "if": { "properties": { "outcome": { "const": "RECLASSIFIED" } } },
+            "then": { "required": ["reclassified_as", "becomes"] }
+          },
+          {
+            "if": { "properties": { "outcome": { "const": "DROPPED" } } },
+            "then": { "required": ["reason"] }
+          },
+          {
+            "if": { "properties": { "outcome": { "const": "ESCALATED" } } },
+            "then": { "required": ["owner", "due"] }
+          }
         ]
       }
     },
@@ -90,7 +98,16 @@
           },
           "affects_downstream": {
             "type": "array",
-            "items": { "enum": ["api-contract", "table-names", "event-names", "ui-copy", "tickets", "glossary"] }
+            "items": {
+              "enum": [
+                "api-contract",
+                "table-names",
+                "event-names",
+                "ui-copy",
+                "tickets",
+                "glossary"
+              ]
+            }
           },
           "split_into": {
             "type": "array",
@@ -110,12 +127,18 @@
           "evidence": { "type": "string" }
         },
         "allOf": [
-          { "if": { "properties": { "outcome": { "enum": ["RESOLVED", "RECONCILED"] } } },
-            "then": { "required": ["debt_created"] } },
-          { "if": { "properties": { "outcome": { "const": "SPLIT" } } },
-            "then": { "required": ["split_into"] } },
-          { "if": { "properties": { "outcome": { "const": "ESCALATED" } } },
-            "then": { "required": ["owner", "due"] } }
+          {
+            "if": { "properties": { "outcome": { "enum": ["RESOLVED", "RECONCILED"] } } },
+            "then": { "required": ["debt_created"] }
+          },
+          {
+            "if": { "properties": { "outcome": { "const": "SPLIT" } } },
+            "then": { "required": ["split_into"] }
+          },
+          {
+            "if": { "properties": { "outcome": { "const": "ESCALATED" } } },
+            "then": { "required": ["owner", "due"] }
+          }
         ]
       }
     },
@@ -142,12 +165,18 @@
           "evidence": { "type": "string" }
         },
         "allOf": [
-          { "if": { "properties": { "outcome": { "enum": ["DECIDED", "DEFERRED"] } } },
-            "then": { "required": ["becomes"] } },
-          { "if": { "properties": { "outcome": { "const": "ASSUMED" } } },
-            "then": { "required": ["rationale", "revisit_when", "risk", "decided_by"] } },
-          { "if": { "properties": { "outcome": { "const": "ESCALATED" } } },
-            "then": { "required": ["owner", "due"] } },
+          {
+            "if": { "properties": { "outcome": { "enum": ["DECIDED", "DEFERRED"] } } },
+            "then": { "required": ["becomes"] }
+          },
+          {
+            "if": { "properties": { "outcome": { "const": "ASSUMED" } } },
+            "then": { "required": ["rationale", "revisit_when", "risk", "decided_by"] }
+          },
+          {
+            "if": { "properties": { "outcome": { "const": "ESCALATED" } } },
+            "then": { "required": ["owner", "due"] }
+          },
           {
             "comment": "An agent-originated call is never a decision.",
             "if": { "properties": { "decided_by": { "const": "agent" } } },

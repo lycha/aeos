@@ -1,0 +1,1015 @@
+# Approved by Kris, 10 Nov 2026 (signed off as drafted; the questions at the end stand answered by the text above them).
+#
+# The API contract of AEOS is its command surface: commands, parameters,
+# required resources, output formats and exit codes (decided 10 Nov 2026).
+# This file is human-owned. Agents build to it and may not change it; a change
+# to it needs its own recorded approval (the contract gate, task I1-M4-004d).
+#
+# ── How to read this file ─────────────────────────────────────────────────
+# The format is AEOS's own. Its shape borrows from the OpenCLI Specification
+# 1.0 (openclispec.org), so anyone who knows OpenAPI can read it:
+#
+#   borrowed from OpenCLI                 kept or added by AEOS
+#   ───────────────────────────────────   ──────────────────────────────────
+#   info, platforms, environment          resources, and `requires` per command
+#   commands, each with an operationId    exitCodes: one named vocabulary
+#   parameters with `in`, position,       status / task: what exists on main
+#     required and a schema                 and which task adds the rest
+#   responses keyed by exit code          pending: wording a task will change
+#   components + $ref for reuse           valueName: the placeholder in help
+#   JSON Schema for every output shape    prompt: commands that ask on stdin
+#
+# It is not an OpenCLI document and does not validate as one: OpenCLI has no
+# place for required resources, and allows extensions only on commands and
+# parameters. Question 5 at the end asks whether to export one.
+#
+# ── Conventions ───────────────────────────────────────────────────────────
+# status    `existing` — on main at 0b01fc8, read from `aeos <command> --help`.
+#           `proposed` — new in Iteration 1; `task` names the task that adds it.
+#           A missing status means `existing`.
+# pending   An existing summary or description that a task rewords. The
+#           verifier accepts the current text or the pending text, never a third.
+# $ref      Always local: "#/components/<kind>/<name>". A $ref stands alone;
+#           it takes no sibling keys.
+# schema    On a parameter: a fixed subset of JSON Schema that the generator
+#           compiles to plain checks — type (string, number, integer, boolean,
+#           or array of string), enum, pattern, minimum, exclusiveMinimum,
+#           format: date. Nothing else.
+#           On a response: full JSON Schema 2020-12, checked in tests only.
+# Help text Every `existing` summary and description is the exact text on
+#           main. Once I1-M4-004b lands, help is generated from this file.
+
+contractVersion: 0
+
+info:
+  title: AEOS command line
+  binary: aeos
+  summary: Drives tickets through LLM-agent pipelines with a human gate on every column.
+  license: Apache-2.0           # the repository LICENSE; package.json still says ISC (I1-M0-002)
+  runtime: node >=22
+
+platforms: [darwin, linux]      # what CI and the maintainer run. Windows is undeclared, not refused.
+
+# ── Environment ───────────────────────────────────────────────────────────
+# Every variable the CLI reads. A variable not listed here is not an input.
+environment:
+  AEOS_HOME:
+    description: Directory holding state.db and global configuration.
+    default: ~/.aeos
+    schema: { type: string }
+  AEOS_EXECUTOR:
+    description: Set to `stub` to run every agent with the offline stub executor. No model is called and nothing is spent.
+    schema: { enum: [stub] }
+  AEOS_GIT_ISOLATION:
+    description: Set to `none` to stop the orchestrator isolating an epic's work on its own branch.
+    schema: { enum: [none] }
+
+# ── Required resources ────────────────────────────────────────────────────
+# What must be in place for a command to run. The generated guard checks each
+# one before the handler and exits `missing_resource` naming it and the fix.
+resources:
+  aeos_home:
+    description: The AEOS home directory exists (AEOS_HOME, default ~/.aeos).
+    fix: Run `aeos install`.
+  project:
+    description: An initialised project. `.aeos/project.json` is found from the working directory upward.
+    fix: Run `aeos project init` in the project root.
+  state_db:
+    description: The state database at <AEOS_HOME>/state.db can be opened and migrated.
+    fix: Run `aeos install`, or check AEOS_HOME.
+  git_repo:
+    description: The project root is inside a git work tree.
+    fix: Run `git init`, or run the command from the repository.
+  executor:
+    description: The executor CLI resolved for this run is on PATH.
+    fix: Install the executor, or choose another with --executor.
+  python:
+    description: python3 is on PATH (needed by lint_decisions.py).
+    fix: Install Python 3.
+    status: proposed
+    task: I1-M3-002a
+  gh:
+    description: The `gh` command is on PATH and authenticated for this repository.
+    fix: Install GitHub CLI and run `gh auth login`.
+    status: proposed
+    task: I1-M2-003
+
+# ── Exit codes ────────────────────────────────────────────────────────────
+# Today: 0, 1 everywhere, and 130 on interrupt. Failure and escalation both
+# exit 1, which contradicts the engine's rule that escalation is not failure.
+# Commands name these codes by number in `responses`. This is the whole set.
+exitCodes:
+  0: { name: success, meaning: The command did what was asked. }
+  1: { name: failure, meaning: "Something broke: executor crash, validation rejection, unexpected error." }
+  2: { name: usage, meaning: Invalid arguments or options. Nothing was attempted. }
+  3: { name: needs_human, meaning: "The pipeline worked and stopped for a person: escalated, blocked, awaiting approval, a gate, budget exceeded." }
+  4: { name: missing_resource, meaning: A required resource is not in place. Nothing was attempted. }
+  130: { name: interrupted, meaning: The operator interrupted the run. }
+
+# ── Output ────────────────────────────────────────────────────────────────
+output:
+  formats: [text, json]
+  default: text
+  # text: for people. Not part of the contract beyond "it stays readable".
+  # json: selected by the global --json flag. stdout carries exactly one JSON
+  #       object, the envelope, and nothing else. Progress and diagnostics go
+  #       to stderr; long runs write one JSON event per line there. The
+  #       terminal interface is not started.
+  json:
+    mediaType: application/json
+    envelope: { $ref: "#/components/schemas/Envelope" }
+  # Prompts. A question is written to stderr, never stdout, so --json stays one
+  # object. When stdin is not a terminal no command asks a question: a command
+  # that declares `prompt` follows the `nonInteractive` rule it declares.
+  nonInteractive: stdin is not a TTY
+
+# ── Applied to every command ──────────────────────────────────────────────
+globals:
+  parameters:
+    - $ref: "#/components/parameters/json"
+  responses:
+    "2": { $ref: "#/components/responses/usage" }
+
+# ── Reusable parts ────────────────────────────────────────────────────────
+components:
+
+  parameters:
+    ticketId:
+      name: id
+      in: argument
+      position: 1
+      required: true
+      description: Ticket ID (e.g. AEOS-1)
+      schema: { type: string }
+    epicId:
+      name: epicId
+      in: argument
+      position: 1
+      required: true
+      description: Epic ticket ID
+      schema: { type: string }
+    json:
+      name: json
+      in: flag
+      status: proposed
+      task: I1-M4-004c
+      description: Write one JSON envelope to stdout instead of text
+    "yes":
+      name: "yes"
+      in: flag
+      status: proposed
+      task: I1-M4-004c
+      description: Answer yes to this command's confirmation
+
+  responses:
+    # A response is { description, data? }. `data` is the JSON Schema of
+    # envelope.data for that exit code. Without `data`, envelope.data is null.
+    # On any non-zero code, envelope.error is set and envelope.data may also be
+    # null when the command stopped before it had a result.
+    failure:
+      description: Something broke. envelope.error says what.
+    usage:
+      description: Invalid arguments or options. Nothing was attempted.
+    missingResource:
+      description: A resource in `requires` is not in place. envelope.error.resource names it.
+    interrupted:
+      description: The operator interrupted the run.
+    confirmationRequired:
+      description: The command needs a person at a terminal and stdin is not one. error.code is CONFIRMATION_REQUIRED.
+
+  schemas:
+    # ── The envelope ──
+    Envelope:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      additionalProperties: false
+      required: [ok, command, exit, contractVersion, data, error, warnings]
+      properties:
+        ok: { type: boolean, description: True exactly when exit is 0. }
+        command: { type: string, description: 'The command path, e.g. "ticket move".' }
+        exit: { enum: [0, 1, 2, 3, 4, 130], description: "The exit code, repeated for consumers that lose it." }
+        contractVersion: { type: integer }
+        data: { description: "The schema declared under the command's response for this exit code, or null." }
+        error:
+          anyOf: [{ $ref: "#/components/schemas/Error" }, { type: "null" }]
+        warnings:
+          type: array
+          description: Things that did not stop the command, e.g. a cost that could not be read.
+          items: { $ref: "#/components/schemas/Warning" }
+      allOf:
+        - if: { properties: { exit: { const: 0 } } }
+          then: { properties: { ok: { const: true }, error: { type: "null" } } }
+          else: { properties: { ok: { const: false }, error: { $ref: "#/components/schemas/Error" } } }
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, resource]
+      properties:
+        code: { type: string, pattern: "^[A-Z][A-Z0-9_]*$", description: "Stable machine code, e.g. TICKET_NOT_FOUND." }
+        message: { type: string }
+        resource:
+          description: Set exactly when exit is 4.
+          enum: [aeos_home, project, state_db, git_repo, executor, python, gh, null]
+    Warning:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code: { type: string, pattern: "^[A-Z][A-Z0-9_]*$" }
+        message: { type: string }
+
+    # ── Shared values ──
+    TicketId: { type: string, pattern: "^[A-Z]{2,4}-[0-9]+$" }
+    NullableTicketId: { anyOf: [{ $ref: "#/components/schemas/TicketId" }, { type: "null" }] }
+    Kind: { enum: [EPIC, TASK] }
+    Column: { type: string, description: "A column identifier such as TECH_SPEC. Set by the pipeline definition, so not an enum here." }
+    SubState:
+      description: Null when the ticket is in a column with no work in it (BACKLOG, DONE).
+      enum: [READY, BLOCKED, WORKING, INTERRUPTED, FAILED, ESCALATED, IN_REVIEW, SIGNED_OFF, null]
+    Usd: { type: [number, "null"], minimum: 0, description: "US dollars. Null means unknown, and is never written as 0." }
+    GateRecordId: { type: string, pattern: "^GATE-[0-9]+$" }
+    RunId: { type: string, pattern: "^RUN-[0-9A-Za-z-]+$" }
+    NullableString: { type: [string, "null"] }
+    StringList: { type: array, items: { type: string } }
+    SpecPin:
+      type: object
+      additionalProperties: false
+      required: [repo, commit, path]
+      properties:
+        repo: { type: string }
+        commit: { type: string, pattern: "^[0-9a-f]{7,40}$" }
+        path: { type: string }
+    NullableSpecPin: { anyOf: [{ $ref: "#/components/schemas/SpecPin" }, { type: "null" }] }
+    Escalation:
+      type: object
+      additionalProperties: false
+      required: [reason, message]
+      properties:
+        reason: { type: string, description: "An EscalationReason, e.g. PREFLIGHT_BLOCKERS, ITERATIONS_EXHAUSTED, NOT_CONVERGING, UNPARSEABLE_VERDICT, BUDGET_EXCEEDED." }
+        message: { type: string }
+        attempt: { type: integer, minimum: 1 }
+        artifactPath: { type: string }
+    HaltReason:
+      description: COST_UNKNOWN is added by I1-M1-002.
+      enum: [COMPLETE, HUMAN_GATE, NEEDS_HUMAN, FAILED, BUDGET_EXCEEDED, AWAITING_APPROVAL, INTERRUPTED, AWAITING_DECOMPOSITION, COST_UNKNOWN]
+
+    # ── Tickets ──
+    TicketSummary:
+      type: object
+      additionalProperties: false
+      required: [id, title, kind, parentId, column, columnLabel, subState]
+      properties:
+        id: { $ref: "#/components/schemas/TicketId" }
+        title: { type: string }
+        kind: { $ref: "#/components/schemas/Kind" }
+        parentId: { $ref: "#/components/schemas/NullableTicketId" }
+        column: { $ref: "#/components/schemas/Column" }
+        columnLabel: { type: string }
+        subState: { $ref: "#/components/schemas/SubState" }
+    TicketDetail:
+      type: object
+      additionalProperties: false
+      required: [id, title, kind, parentId, column, columnLabel, subState, escalation, specPin, pullRequestUrl]
+      properties:
+        id: { $ref: "#/components/schemas/TicketId" }
+        title: { type: string }
+        kind: { $ref: "#/components/schemas/Kind" }
+        parentId: { $ref: "#/components/schemas/NullableTicketId" }
+        column: { $ref: "#/components/schemas/Column" }
+        columnLabel: { type: string }
+        subState: { $ref: "#/components/schemas/SubState" }
+        escalation: { anyOf: [{ $ref: "#/components/schemas/Escalation" }, { type: "null" }] }
+        specPin: { $ref: "#/components/schemas/NullableSpecPin" }
+        pullRequestUrl: { $ref: "#/components/schemas/NullableString" }
+    SubStateChange:
+      type: object
+      additionalProperties: false
+      required: [ticketId, subState]
+      properties:
+        ticketId: { $ref: "#/components/schemas/TicketId" }
+        subState: { $ref: "#/components/schemas/SubState" }
+    TicketRunResult:
+      type: object
+      additionalProperties: false
+      required: [ticketId, column, subState, attempts, artifactPath, reviewPath, runIds, costUsd, escalation]
+      properties:
+        ticketId: { $ref: "#/components/schemas/TicketId" }
+        column: { $ref: "#/components/schemas/Column" }
+        subState: { $ref: "#/components/schemas/SubState" }
+        attempts: { type: integer, minimum: 0 }
+        artifactPath: { $ref: "#/components/schemas/NullableString" }
+        reviewPath: { $ref: "#/components/schemas/NullableString" }
+        runIds: { type: array, items: { $ref: "#/components/schemas/RunId" } }
+        costUsd: { $ref: "#/components/schemas/Usd" }
+        escalation: { anyOf: [{ $ref: "#/components/schemas/Escalation" }, { type: "null" }] }
+
+    # ── Orchestrator ──
+    OrchestratorRunResult:
+      type: object
+      additionalProperties: false
+      required: [epicId, haltReason, message, steps, spentUsd]
+      properties:
+        epicId: { $ref: "#/components/schemas/TicketId" }
+        haltReason: { $ref: "#/components/schemas/HaltReason" }
+        message: { type: string }
+        steps: { type: integer, minimum: 0 }
+        spentUsd: { $ref: "#/components/schemas/Usd" }
+    PauseState:
+      type: object
+      additionalProperties: false
+      required: [epicId, paused]
+      properties:
+        epicId: { $ref: "#/components/schemas/TicketId" }
+        paused: { type: boolean }
+    EpicState:
+      type: object
+      additionalProperties: false
+      required: [epicId, status, haltReason, paused, budgetUsd, spentUsd]
+      properties:
+        epicId: { $ref: "#/components/schemas/TicketId" }
+        status: { type: string }
+        haltReason: { anyOf: [{ $ref: "#/components/schemas/HaltReason" }, { type: "null" }] }
+        paused: { type: boolean }
+        budgetUsd: { type: [number, "null"], minimum: 0, description: Null means no ceiling. }
+        spentUsd: { $ref: "#/components/schemas/Usd" }
+
+    # ── Costs ──
+    CostBreakdown:
+      type: object
+      description: A total per key. Keys are column identifiers or run roles.
+      additionalProperties: { $ref: "#/components/schemas/Usd" }
+    TicketCost:
+      type: object
+      additionalProperties: false
+      required: [ticketId, totalUsd, byColumn, byRole]
+      properties:
+        ticketId: { $ref: "#/components/schemas/TicketId" }
+        totalUsd: { $ref: "#/components/schemas/Usd" }
+        byColumn: { $ref: "#/components/schemas/CostBreakdown" }
+        byRole: { $ref: "#/components/schemas/CostBreakdown" }
+    ProjectCost:
+      type: object
+      additionalProperties: false
+      required: [projectId, totalUsd, byTicket]
+      properties:
+        projectId: { type: string }
+        totalUsd: { $ref: "#/components/schemas/Usd" }
+        byTicket: { type: array, items: { $ref: "#/components/schemas/TicketCost" } }
+
+# ── Commands ──────────────────────────────────────────────────────────────
+# Keyed by the command path as typed. Each command has:
+#   operationId  stable name for the handler and its generated types
+#   requires     resources checked before the handler runs
+#   conditionalRequires   a resource needed only in the stated case; the
+#                handler asks the guard for it at that point
+#   parameters   in: argument (positional) | option (takes a value) | flag
+#   responses    by exit code; "2" comes from globals
+commands:
+
+  install:
+    operationId: install
+    summary: One-time global setup
+    requires: []
+    parameters: []
+    responses:
+      "0":
+        description: The AEOS home exists and the database is migrated.
+        data:
+          type: object
+          additionalProperties: false
+          required: [aeosHome, created]
+          properties:
+            aeosHome: { type: string }
+            created: { type: boolean, description: False when it was already installed. }
+      "1": { $ref: "#/components/responses/failure" }
+
+  project init:
+    operationId: projectInit
+    summary: Initialise a project in the current directory
+    requires: [aeos_home]
+    parameters:
+      - name: name
+        in: option
+        valueName: name
+        required: false
+        description: Project name (defaults to directory name)
+        schema: { type: string }
+      - name: key
+        in: option
+        valueName: key
+        required: false
+        description: Ticket prefix key (2–4 uppercase letters)
+        schema: { type: string, pattern: "^[A-Z]{2,4}$" }
+    responses:
+      "0":
+        description: The project is scaffolded.
+        data:
+          type: object
+          additionalProperties: false
+          required: [name, key, scaffolded]
+          properties:
+            name: { type: string }
+            key: { type: string, pattern: "^[A-Z]{2,4}$" }
+            scaffolded: { $ref: "#/components/schemas/StringList" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  project sync:
+    operationId: projectSync
+    summary: Reconcile this project's column specs, agents, and rubrics with the current templates
+    requires: [project]
+    parameters:
+      - name: apply
+        in: flag
+        description: Write files that are missing from the project
+      - name: force
+        in: flag
+        description: Also overwrite drifted files (each backed up to <file>.bak). Implies --apply
+      - name: diff
+        in: flag
+        description: Show a line diff for each drifted file
+    responses:
+      "0":
+        description: The comparison ran. Drift alone is not a failure.
+        data:
+          type: object
+          additionalProperties: false
+          required: [missing, drifted, written]
+          properties:
+            missing: { $ref: "#/components/schemas/StringList" }
+            drifted: { $ref: "#/components/schemas/StringList" }
+            written: { $ref: "#/components/schemas/StringList" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket create:
+    operationId: ticketCreate
+    summary: Create a new ticket (an epic by default, or a task with --parent)
+    requires: [project, state_db]
+    conditionalRequires:
+      - resource: python
+        when: --spec is given. The decisions lint runs before the epic is created.
+        status: proposed
+        task: I1-M3-002a
+    parameters:
+      - name: title
+        in: argument
+        position: 1
+        required: true
+        description: Ticket title
+        schema: { type: string }
+      - name: parent
+        in: option
+        valueName: epicId
+        required: false
+        description: Create this ticket as a task under the given epic, skipping scoping and spec
+        schema: { type: string }
+      - name: key
+        in: option
+        valueName: taskKey
+        required: false
+        description: Stable decomposition key (e.g. T-001); idempotency matches on it instead of the title
+        schema: { type: string }
+      - name: body
+        in: option
+        valueName: markdown
+        required: false
+        description: Markdown description for the ticket (e.g. a task breakdown block). Prefer --body-file for multi-line content
+        schema: { type: string }
+      - name: body-file
+        in: option
+        valueName: path
+        required: false
+        description: Read the ticket description from a file (robust for multi-line markdown)
+        schema: { type: string }
+      - name: spec
+        in: option
+        valueName: feature
+        required: false
+        status: proposed
+        task: I1-M3-002a
+        description: Back this epic with the spec at .aeos/features/<feature>. Refused unless the decisions lint is clean
+        schema: { type: string }
+      - name: bug
+        in: flag
+        status: proposed
+        task: I1-M4-003
+        description: Create a standalone bug task that must show a reproducing test red, then green
+      - name: implements
+        in: option
+        valueName: ids
+        required: false
+        status: proposed
+        task: I1-M4-001
+        description: Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2)
+        separator: ","
+        schema: { type: array, items: { type: string, pattern: "^AC-[0-9]+[a-z]?$" } }
+    responses:
+      "0":
+        description: The ticket exists. Under a parent the command is idempotent, so it may have existed already.
+        data:
+          type: object
+          additionalProperties: false
+          required: [ticketId, kind, parentId, alreadyExisted]
+          properties:
+            ticketId: { $ref: "#/components/schemas/TicketId" }
+            kind: { $ref: "#/components/schemas/Kind" }
+            parentId: { $ref: "#/components/schemas/NullableTicketId" }
+            alreadyExisted: { type: boolean }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket list:
+    operationId: ticketList
+    summary: List all tickets in the current project
+    requires: [project, state_db]
+    parameters:
+      - name: column
+        in: option
+        valueName: column
+        required: false
+        description: Filter by pipeline column
+        pending: { task: I1-M3-006, description: Filter by pipeline column (identifier or label) }
+        schema: { type: string }
+    responses:
+      "0":
+        description: The tickets, possibly none.
+        data:
+          type: object
+          additionalProperties: false
+          required: [tickets]
+          properties:
+            tickets: { type: array, items: { $ref: "#/components/schemas/TicketSummary" } }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket show:
+    operationId: ticketShow
+    summary: Show details of a single ticket
+    requires: [project, state_db]
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+    responses:
+      "0":
+        description: The ticket.
+        data:
+          type: object
+          additionalProperties: false
+          required: [ticket, artifacts, costUsd]
+          properties:
+            ticket: { $ref: "#/components/schemas/TicketDetail" }
+            artifacts: { $ref: "#/components/schemas/StringList" }
+            costUsd: { $ref: "#/components/schemas/Usd" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket answer:
+    operationId: ticketAnswer
+    summary: Unblock a BLOCKED ticket after answering preflight questions
+    requires: [project, state_db]
+    prompt:
+      when: The questions file does not appear to have been modified.
+      nonInteractive: "Refused with exit 2 unless --yes is given."
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+      - $ref: "#/components/parameters/yes"
+    responses:
+      "0":
+        description: The ticket is unblocked and its answers are promoted to decisions.
+        data:
+          type: object
+          additionalProperties: false
+          required: [ticketId, promoted, amendedDecisions, specPin]
+          properties:
+            ticketId: { $ref: "#/components/schemas/TicketId" }
+            promoted: { $ref: "#/components/schemas/StringList" }
+            amendedDecisions: { $ref: "#/components/schemas/StringList" }
+            specPin: { $ref: "#/components/schemas/NullableSpecPin" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket resolve:
+    operationId: ticketResolve
+    summary: Resume an ESCALATED ticket after writing a decision in its escalation.md
+    requires: [project, state_db]
+    prompt:
+      when: The escalation file does not appear to have been modified.
+      nonInteractive: "Refused with exit 2 unless --yes is given."
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+      - $ref: "#/components/parameters/yes"
+    responses:
+      "0":
+        description: The ticket can be run again.
+        data: { $ref: "#/components/schemas/SubStateChange" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket run:
+    operationId: ticketRun
+    summary: Run the full column cycle for a ticket (preflight → executor → review → sign-off)
+    pending: { task: I1-M2-001, summary: Run the full column cycle for a ticket (preflight → executor → checks → review → sign-off) }
+    requires: [project, state_db, executor]
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+      - name: executor
+        in: option
+        valueName: type
+        required: false
+        description: Override executor type (claude-cli, auggie-cli, opencode-cli, ollama-cli)
+        schema: { type: string, enum: [claude-cli, auggie-cli, opencode-cli, ollama-cli] }
+      - name: model
+        in: option
+        valueName: model
+        required: false
+        description: Override model identifier
+        schema: { type: string }
+    responses:
+      "0":
+        description: The ticket ended SIGNED_OFF.
+        data: { $ref: "#/components/schemas/TicketRunResult" }
+      "1":
+        description: The ticket ended FAILED, or the run broke before it had a result.
+        data: { $ref: "#/components/schemas/TicketRunResult" }
+      "3":
+        description: The ticket ended ESCALATED or BLOCKED. data.escalation says why and where to look.
+        data: { $ref: "#/components/schemas/TicketRunResult" }
+      "4": { $ref: "#/components/responses/missingResource" }
+      "130":
+        description: Interrupted. The ticket is left INTERRUPTED.
+        data: { $ref: "#/components/schemas/TicketRunResult" }
+
+  ticket approve:
+    operationId: ticketApprove
+    summary: Advance a SIGNED_OFF ticket to the next pipeline column
+    requires: [project, state_db, git_repo]
+    conditionalRequires:
+      - resource: gh
+        when: This approval opens a pull request and pullRequests.enabled is true.
+        status: proposed
+        task: I1-M2-003
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+      - name: contract
+        in: flag
+        status: proposed
+        task: I1-M4-004d
+        description: Also approve the contract or schema change this ticket carries
+    responses:
+      "0":
+        description: The ticket moved to the next column and the approval is recorded as a gate.
+        data:
+          type: object
+          additionalProperties: false
+          required: [ticketId, fromColumn, toColumn, pullRequestUrl, gateRecordId]
+          properties:
+            ticketId: { $ref: "#/components/schemas/TicketId" }
+            fromColumn: { $ref: "#/components/schemas/Column" }
+            toColumn: { $ref: "#/components/schemas/Column" }
+            pullRequestUrl: { $ref: "#/components/schemas/NullableString" }
+            gateRecordId: { $ref: "#/components/schemas/GateRecordId" }
+      "1": { $ref: "#/components/responses/failure" }
+      "3":
+        description: A gate refused the approval, e.g. the ticket carries a contract change and --contract was not given.
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket sign-off:
+    operationId: ticketSignOff
+    summary: Manually set a ticket sub-state to SIGNED_OFF
+    requires: [project, state_db]
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+      - name: reason
+        in: option
+        valueName: text
+        required: true
+        status: proposed
+        task: I1-M3-004
+        description: Why the review is being overridden. Recorded as a gate
+        schema: { type: string }
+    responses:
+      "0":
+        description: The ticket is SIGNED_OFF and the override is recorded as a gate.
+        data:
+          type: object
+          additionalProperties: false
+          required: [ticketId, subState, gateRecordId]
+          properties:
+            ticketId: { $ref: "#/components/schemas/TicketId" }
+            subState: { $ref: "#/components/schemas/SubState" }
+            gateRecordId: { $ref: "#/components/schemas/GateRecordId" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket move:
+    operationId: ticketMove
+    summary: Move a ticket to any workflow status
+    requires: [project, state_db]
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+      - name: status
+        in: argument
+        position: 2
+        required: true
+        description: Target workflow status / column
+        pending: { task: I1-M3-006, description: Target column (identifier or label) }
+        schema: { type: string }
+      - name: reason
+        in: option
+        valueName: text
+        required: true
+        status: proposed
+        task: I1-M3-004
+        description: Why the normal path is being bypassed. Recorded as a gate
+        schema: { type: string }
+    responses:
+      "0":
+        description: The ticket moved and the override is recorded as a gate.
+        data:
+          type: object
+          additionalProperties: false
+          required: [ticketId, fromColumn, toColumn, gateRecordId]
+          properties:
+            ticketId: { $ref: "#/components/schemas/TicketId" }
+            fromColumn: { $ref: "#/components/schemas/Column" }
+            toColumn: { $ref: "#/components/schemas/Column" }
+            gateRecordId: { $ref: "#/components/schemas/GateRecordId" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket ready:
+    operationId: ticketReady
+    summary: Set a ticket sub-state to READY
+    requires: [project, state_db]
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+    responses:
+      "0":
+        description: The ticket is READY.
+        data: { $ref: "#/components/schemas/SubStateChange" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket dod-approve:
+    operationId: ticketDodApprove
+    summary: Review DoD checklist and approve a DOD_GATE ticket as DONE
+    pending: { task: I1-M4-002b, summary: Review the conformance report and approve a final-gate ticket as DONE }
+    requires: [project, state_db, git_repo]
+    prompt:
+      when: Always. This is the release decision, and a person makes it.
+      nonInteractive: "Refused with exit 3. There is no --yes."
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+      - name: reason
+        in: option
+        valueName: text
+        required: false
+        status: proposed
+        task: I1-M4-002b
+        description: Required when any criterion is failed or unverified
+        schema: { type: string }
+      - name: verified
+        in: option
+        valueName: ids
+        required: false
+        status: proposed
+        task: I1-M4-002b
+        description: Criteria a person vouches for, comma-separated (e.g. AC-3,AC-7). Each gains a human instrument citing the gate record
+        separator: ","
+        schema: { type: array, items: { type: string, pattern: "^AC-[0-9]+[a-z]?$" } }
+    responses:
+      "0":
+        description: The decision is recorded as a gate. `approved` is false when the person answered no; the ticket then stays where it is.
+        data:
+          type: object
+          additionalProperties: false
+          required: [ticketId, approved, conformance, gateRecordId]
+          properties:
+            ticketId: { $ref: "#/components/schemas/TicketId" }
+            approved: { type: boolean }
+            conformance:
+              type: object
+              additionalProperties: false
+              required: [pass, fail, unverified, total]
+              properties:
+                pass: { type: integer, minimum: 0 }
+                fail: { type: integer, minimum: 0 }
+                unverified: { type: integer, minimum: 0 }
+                total: { type: integer, minimum: 0 }
+            gateRecordId: { $ref: "#/components/schemas/GateRecordId" }
+      "1": { $ref: "#/components/responses/failure" }
+      "3":
+        description: Refused. A criterion is failed or unverified and --reason was not given, or stdin is not a terminal.
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  ticket repin:
+    operationId: ticketRepin
+    status: proposed
+    task: I1-M3-005
+    summary: Move a spec-backed ticket's pin to the current spec after an amendment
+    requires: [project, state_db, python]
+    parameters:
+      - $ref: "#/components/parameters/ticketId"
+    responses:
+      "0":
+        description: The pin moved and the repin is recorded as a gate.
+        data:
+          type: object
+          additionalProperties: false
+          required: [ticketId, fromCommit, toCommit, gateRecordId]
+          properties:
+            ticketId: { $ref: "#/components/schemas/TicketId" }
+            fromCommit: { type: string, pattern: "^[0-9a-f]{7,40}$" }
+            toCommit: { type: string, pattern: "^[0-9a-f]{7,40}$" }
+            gateRecordId: { $ref: "#/components/schemas/GateRecordId" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  orchestrator run:
+    operationId: orchestratorRun
+    summary: Run an epic until it completes, needs a human, or hits its budget
+    requires: [project, state_db, git_repo, executor]
+    parameters:
+      - $ref: "#/components/parameters/epicId"
+      - name: budget
+        in: option
+        valueName: usd
+        required: false
+        description: USD ceiling for this epic (persisted for later runs)
+        pending: { task: I1-M1-002, description: USD ceiling for this epic (persisted for later runs). Refused on an executor that cannot report cost }
+        schema: { type: number, exclusiveMinimum: 0 }
+      - name: max-steps
+        in: option
+        valueName: "n"
+        required: false
+        description: Safety bound on scheduled actions
+        schema: { type: integer, minimum: 1 }
+    responses:
+      "0":
+        description: Halted COMPLETE.
+        data: { $ref: "#/components/schemas/OrchestratorRunResult" }
+      "1":
+        description: Halted FAILED, or the run broke before it had a result.
+        data: { $ref: "#/components/schemas/OrchestratorRunResult" }
+      "3":
+        description: Halted NEEDS_HUMAN, HUMAN_GATE, AWAITING_APPROVAL, AWAITING_DECOMPOSITION, BUDGET_EXCEEDED or COST_UNKNOWN.
+        data: { $ref: "#/components/schemas/OrchestratorRunResult" }
+      "4": { $ref: "#/components/responses/missingResource" }
+      "130":
+        description: Halted INTERRUPTED.
+        data: { $ref: "#/components/schemas/OrchestratorRunResult" }
+
+  orchestrator pause:
+    operationId: orchestratorPause
+    summary: Stop scheduling new work for an epic (in-flight runs finish)
+    requires: [project, state_db]
+    parameters:
+      - $ref: "#/components/parameters/epicId"
+    responses:
+      "0":
+        description: The epic is paused.
+        data: { $ref: "#/components/schemas/PauseState" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  orchestrator resume:
+    operationId: orchestratorResume
+    summary: Allow an epic to be scheduled again
+    requires: [project, state_db]
+    parameters:
+      - $ref: "#/components/parameters/epicId"
+    responses:
+      "0":
+        description: The epic can be scheduled.
+        data: { $ref: "#/components/schemas/PauseState" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  orchestrator status:
+    operationId: orchestratorStatus
+    summary: Show orchestrator state for one epic or all of them
+    requires: [project, state_db]
+    parameters:
+      - name: epicId
+        in: argument
+        position: 1
+        required: false
+        description: Epic ticket ID
+        schema: { type: string }
+    responses:
+      "0":
+        description: One entry per epic, possibly none.
+        data:
+          type: object
+          additionalProperties: false
+          required: [epics]
+          properties:
+            epics: { type: array, items: { $ref: "#/components/schemas/EpicState" } }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  costs:
+    operationId: costs
+    status: proposed            # the file exists as a stub and is not registered
+    task: I1-M1-004
+    summary: Report model spend
+    requires: [state_db]
+    parameters:
+      - name: project
+        in: option
+        valueName: key
+        required: false
+        description: Limit to one project
+        schema: { type: string }
+      - name: epic
+        in: option
+        valueName: id
+        required: false
+        description: One epic and its child tasks
+        schema: { type: string }
+      - name: ticket
+        in: option
+        valueName: id
+        required: false
+        description: One ticket
+        schema: { type: string }
+      - name: since
+        in: option
+        valueName: date
+        required: false
+        description: Records from this date on (YYYY-MM-DD)
+        schema: { type: string, format: date }
+    responses:
+      "0":
+        description: The spend that matches, possibly none. totalUsd covers known costs; unknownRecords counts the rest.
+        data:
+          type: object
+          additionalProperties: false
+          required: [totalUsd, unknownRecords, byProject]
+          properties:
+            totalUsd: { $ref: "#/components/schemas/Usd" }
+            unknownRecords: { type: integer, minimum: 0 }
+            byProject: { type: array, items: { $ref: "#/components/schemas/ProjectCost" } }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+  dashboard:
+    operationId: dashboard
+    status: proposed            # the file exists as a stub and is not registered
+    task: I1-M5-001             # the Iteration 1 proving feature
+    summary: Cross-project board of tickets by column
+    requires: [state_db]
+    parameters: []
+    responses:
+      "0":
+        description: Every project in the state database, with its tickets grouped by column.
+        data:
+          type: object
+          additionalProperties: false
+          required: [projects]
+          properties:
+            projects:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [projectId, name, path, columns]
+                properties:
+                  projectId: { type: string }
+                  name: { type: string }
+                  path: { type: string }
+                  columns:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [column, label, tickets]
+                      properties:
+                        column: { $ref: "#/components/schemas/Column" }
+                        label: { type: string }
+                        tickets: { type: array, items: { $ref: "#/components/schemas/TicketSummary" } }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
+# ── Questions for the reviewer ────────────────────────────────────────────
+# 1. Is 3 the right code for "needs a human"? It lets a script loop on 0 and
+#    stop cleanly on 3 without treating it as an error.
+# 2. Should --reason be required on `ticket move` and `ticket sign-off`
+#    (breaking for existing scripts), or optional for one release with an
+#    entry in envelope.warnings?
+# 3. `--json` as a global flag, or `--format json`?
+# 4. Output shapes forbid undeclared fields (additionalProperties: false), so
+#    adding a field is a contract change that needs your approval. Is that the
+#    strictness you want, or should additive fields be free?
+# 5. This file is AEOS's own format, shaped after OpenCLI. Should the
+#    generator also export a real OpenCLI document (resources and status as
+#    x- extensions) for outside tools? Nothing reads one today.
+# 6. Prompts. Three commands ask on stdin. This draft lets `ticket answer`
+#    and `ticket resolve` skip theirs with --yes, and gives `ticket
+#    dod-approve` no --yes at all: without a terminal it exits 3. That keeps
+#    an agent from recording a release decision by accident. It is a line for
+#    honest callers, not a security boundary. Is it the line you want?
+# 7. The envelope gained `warnings` and `contractVersion`. Keep both?
+# 8. Error codes (TICKET_NOT_FOUND, NOT_SIGNED_OFF, …) are stable but are not
+#    listed here; they live in one enum in code (I1-M4-004c). Should the
+#    contract list them too?
