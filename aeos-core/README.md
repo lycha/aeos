@@ -37,8 +37,9 @@ aeos install
 #    column specs, agent specs, and reviewer rubrics
 aeos project init --name "My Project" --key MYPRJ
 
-# 2. Create a ticket
-aeos ticket create "Add user authentication"
+# 2. Write the spec (a person does this; see "Spec-backed epics"), commit it
+#    in .aeos/, and create an epic from it
+aeos ticket create "Add user authentication" --spec user-authentication
 
 # 3. Edit the ticket description
 $EDITOR .aeos/MYPRJ-1-ticket.md
@@ -64,14 +65,14 @@ aeos ticket dod-approve MYPRJ-1
 A ticket is either an **epic** or a **task**, and each follows its own pipeline.
 
 ```
-EPIC   BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN ──→ INTEGRATION_REVIEW → DOD_GATE → DONE
-                 PM Agent          Architect    Architect          Integration Reviewer  Human
+EPIC   BACKLOG → SPEC_REVIEW → TECH_SPEC → TASK_BREAKDOWN ──→ INTEGRATION_REVIEW → DOD_GATE → DONE
+                 Spec Reviewer     Architect    Architect          Integration Reviewer  Human
                  ↓                 ↓            ↓                    ↓                      ▲
-                 PRD               Tech Spec    tasks.md            integration-review.md  │
+                 spec-review.md    Tech Spec    tasks.md            integration-review.md  │
                  ↓                 ↓            ↓                    ↓                      │
                  Reviewer          Reviewer     Reviewer            Reviewer               │
                                                 │                   (whole-feature diff    │
-                                   fans out into child tasks         vs PRD/tech spec)     │
+                                   fans out into child tasks         vs spec/tech spec)    │
                                                              all children DONE ────────────┘
                                                 ▼                           │
 TASK   BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE ───────────────────┘
@@ -82,11 +83,16 @@ TASK   BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE ────�
                  Reviewer          Reviewer      Reviewer
 ```
 
-An epic is scoped, specced, and decomposed — it never implements anything itself.
+An epic starts from a spec a person wrote. `SPEC_REVIEW` does not draft
+requirements: an agent reads the pinned spec and reports gaps, ambiguities,
+contradictions and untestable criteria in `spec-review.md`, each finding citing
+the `AC-n`, `INV-n` or decision id it concerns. Approving the epic out of
+`SPEC_REVIEW` is the **spec gate**. The epic is then specced technically and
+decomposed — it never implements anything itself.
 Its child tasks do that, and the epic cannot leave `TASK_BREAKDOWN` until every
 child reaches `DONE`. It then runs `INTEGRATION_REVIEW`, which reviews the whole
-assembled feature (the epic branch's `base..HEAD` diff) against the PRD and tech
-spec — the check per-task review cannot make — before the human `DOD_GATE`.
+assembled feature (the epic branch's `base..HEAD` diff) against the pinned spec
+and tech spec — the check per-task review cannot make — before the human `DOD_GATE`.
 
 Each column follows the same cycle:
 
@@ -142,11 +148,11 @@ The forward order depends on the ticket's kind:
 
 | Kind   | Pipeline                                                                   |
 | ------ | -------------------------------------------------------------------------- |
-| `EPIC` | `BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE` |
+| `EPIC` | `BACKLOG → SPEC_REVIEW → TECH_SPEC → TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE` |
 | `TASK` | `BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE`                       |
 
 `aeos ticket approve` uses the kind to pick the next column, so a task never
-visits `PRODUCT_SCOPING` and an epic never visits `IMPLEMENTATION`.
+visits `SPEC_REVIEW` and an epic never visits `IMPLEMENTATION`.
 
 ### Sub-states
 
@@ -193,7 +199,7 @@ Every non-terminal column allows the same set:
 | Column            | Kind | Allowed sub-state values |
 | ----------------- | ---- | ------------------------ |
 | `BACKLOG`         | both | `null` only              |
-| `PRODUCT_SCOPING` | epic | all eight                |
+| `SPEC_REVIEW`     | epic | all eight                |
 | `TECH_SPEC`       | epic | all eight                |
 | `TASK_BREAKDOWN`  | epic | all eight                |
 | `IMPLEMENTATION`  | task | all eight                |
@@ -318,7 +324,7 @@ Notes:
 | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | `aeos install`                                               | One-time global setup (`~/.aeos/`, global gitignore)                       |
 | `aeos project init [--name] [--key]`                         | Initialise `.aeos/` in the current directory                               |
-| `aeos ticket create <title> [--parent <epicId>] [--spec <feature>]` | Create a ticket in BACKLOG — an epic by default, a task with `--parent`; `--spec` backs an epic with a spec |
+| `aeos ticket create <title> [--parent <epicId>] [--spec <feature>]` | Create a ticket in BACKLOG — an epic with `--spec` (required for an epic), a task with `--parent` |
 | `aeos ticket list [--column]`                                | List tickets, optionally filtered by column                                |
 | `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, recorded executions, and run ids |
 | `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |
@@ -333,16 +339,17 @@ Notes:
 
 ## Epics and Tasks
 
-A ticket created without a parent is an **epic**. It carries a requirement through
-scoping, spec, and decomposition, and its `TASK_BREAKDOWN` artifact (`tasks.md`)
+A ticket created without a parent is an **epic**, and it must be backed by a
+spec (`--spec`, see [Spec-backed epics](#spec-backed-epics)). It carries that spec through
+spec review, tech spec, and decomposition, and its `TASK_BREAKDOWN` artifact (`tasks.md`)
 lists the atomic tasks that will implement it.
 
 ```bash
 # 1. An epic
-aeos ticket create "Add user authentication"        # → AEOS-1 (EPIC)
+aeos ticket create "Add user authentication" --spec user-authentication   # → AEOS-1 (EPIC)
 
-# 2. Run it through scoping, spec, and breakdown
-aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # PRD
+# 2. Run it through spec review, tech spec, and breakdown
+aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # spec-review.md
 aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tech spec
 aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tasks.md
 
@@ -357,7 +364,7 @@ aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation
 
 # 5. Only once every task is DONE can the epic advance
 aeos ticket approve AEOS-1                             # → INTEGRATION_REVIEW
-aeos ticket run AEOS-1                                 # reviews the whole feature vs PRD/spec
+aeos ticket run AEOS-1                                 # reviews the whole feature vs spec/tech spec
 aeos ticket approve AEOS-1                             # → DOD_GATE, and opens the pull request
 ```
 
@@ -370,7 +377,7 @@ is unfinished reports which tasks are outstanding and refuses the transition.
 
 ## Spec-backed epics
 
-An epic can be created from a human-written spec in the artefact tree and pinned to the exact revision of it:
+An epic is always created from a human-written spec in the artefact tree and pinned to the exact revision of it. `aeos ticket create` without `--spec` (and without `--parent`) is refused. The spec is a person's work; the skills in `plugins/artefact-tree-pipeline/` help write it: `prototype-harvest`, `gap-interrogation-solo` or `gap-interrogation-capture`, then `spec-writer`.
 
 ```bash
 aeos ticket create "Checkout flow" --spec checkout     # reads .aeos/features/checkout/
@@ -389,6 +396,10 @@ Steps 2 and 3 are one run of the linter, which needs `python3` with the `PyYAML`
 The pin is the triple `{ repo, commit, path }`: `<project key>-aeos`, the `HEAD` of the `.aeos` repository at creation, and `features/<feature>`. A task has no pin of its own; it uses its epic's. `aeos ticket show` prints the pin for both, and warns `spec has moved since this epic was pinned` once the feature has later commits. The pin is also written to every run record (`spec_pin`), to the pull request body, and to each task commit as a `Spec:` trailer.
 
 Every prompt for a spec-backed epic and for its tasks (preflight, worker and reviewer) opens its context with a `## Specification (pinned <repo>@<commit>)` section: `spec.md`, `decisions.yaml` and every `features/*.feature`, plus `contexts/<context>/glossary.md` when the front matter of `spec.md` (or `meta` of `decisions.yaml`) names a `context`. That context's `CONSTRAINTS.md` is appended to the project's `.aeos/CONSTRAINTS.md`. All of it is read through git at the pinned commit, never from the working tree, so editing the spec does not change what a running epic is told; a pinned commit that can no longer be read fails the run. A task still receives its epic's tech spec as before. A ticket with no pin gets exactly the prompt it got before.
+
+### Projects created before `SPEC_REVIEW`
+
+The column `PRODUCT_SCOPING` is now `SPEC_REVIEW`; the database is migrated on the next command. An epic that was in that column with no spec is kept, set `ESCALATED`, and says why in `aeos ticket show`: create a new epic with `--spec` and close the old one with `aeos ticket move`. In the project, `aeos project sync` lists `column-specs/spec-review.yaml`, `agents/spec-reviewer-agent.yaml` and `rubrics/structure/spec-review-structure.md` as missing (`--apply` adds them) and the retired `product-scoping.yaml`, `pm-agent.yaml` and PRD rubrics as obsolete; it never deletes those. The reworded agents and rubrics show as drifted (`--force` overwrites, with a backup).
 
 ## Branches and pull requests
 
@@ -432,9 +443,9 @@ aeos orchestrator run AEOS-1 --budget 25
 ```
 
 ```
-  AEOS-1: advanced BACKLOG → PRODUCT_SCOPING
+  AEOS-1: advanced BACKLOG → SPEC_REVIEW
   AEOS-1: run succeeded in 1 attempt(s)
-  AEOS-1: advanced PRODUCT_SCOPING → TECH_SPEC
+  AEOS-1: advanced SPEC_REVIEW → TECH_SPEC
   AEOS-1: run succeeded in 2 attempt(s)
   ...
 

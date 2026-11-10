@@ -11,7 +11,7 @@ the DoD Gate does not allow partial credit.
 
 Verifies that every required worker artifact has been produced by the pipeline.
 
-**Required artifacts:** ticket, prd, spike, tech-spec, implementation-notes, code-review, qa-report.
+**Required artifacts:** ticket, spec-review, spike, tech-spec, implementation-notes, code-review, qa-report.
 
 | Grade | Definition |
 |-------|------------|
@@ -26,7 +26,7 @@ Verifies that reviewer sign-off artifacts exist for every column that has a revi
 
 | Grade | Definition |
 |-------|------------|
-| **PASS** | A reviewer sign-off artifact exists for each agent-driven column (PRODUCT_SCOPING, TECH_SPEC, TASK_BREAKDOWN, IMPLEMENTATION, CODE_REVIEW, QA). Each sign-off artifact contains a clear verdict (PASS or equivalent approval). |
+| **PASS** | A reviewer sign-off artifact exists for each agent-driven column (SPEC_REVIEW, TECH_SPEC, TASK_BREAKDOWN, IMPLEMENTATION, CODE_REVIEW, QA). Each sign-off artifact contains a clear verdict (PASS or equivalent approval). |
 | **FAIL** | One or more columns are missing a reviewer sign-off artifact, or a sign-off artifact exists but contains an unresolved FAIL verdict. Any column with an outstanding reviewer FAIL blocks the DoD Gate. |
 
 ---
@@ -59,7 +59,7 @@ Verifies that the body of work produced by the pipeline matches the original tic
 
 | Grade | Definition |
 |-------|------------|
-| **PASS** | The implementation notes and code review confirm that the work delivered matches the ticket's original requirements. The PRD's acceptance criteria are addressed in the QA report. No significant scope additions or omissions are present relative to the ticket description. |
+| **PASS** | The implementation notes and code review confirm that the work delivered matches the ticket's original requirements. The spec's acceptance criteria (each `AC-n`) are addressed in the QA report. No significant scope additions or omissions are present relative to the ticket description. |
 | **FAIL** | The delivered work diverges from the ticket's original intent — either by implementing something materially different, omitting stated deliverables, or adding significant unscoped work that was not approved via a scope change. |
 
 ---
@@ -71,7 +71,7 @@ Verifies that artifacts produced across different pipeline columns are internall
 | Grade | Definition |
 |-------|------------|
 | **PASS** | Key decisions (architecture choices, API contracts, data models, error handling strategies) are consistent across the spike, tech-spec, implementation-notes, and code-review artifacts. The QA report's test coverage aligns with the tech-spec's test strategy. No artifact contradicts a decision documented in an earlier artifact without an explicit rationale for the change. |
-| **FAIL** | Artifacts contain contradictory decisions — e.g., the tech-spec specifies REST but the implementation uses GraphQL without documented justification; the spike recommends approach A but the implementation follows approach B with no rationale; the QA report tests requirements not present in the PRD. |
+| **FAIL** | Artifacts contain contradictory decisions — e.g., the tech-spec specifies REST but the implementation uses GraphQL without documented justification; the spike recommends approach A but the implementation follows approach B with no rationale; the QA report tests requirements not present in the spec. |
 
 ---
 
@@ -83,7 +83,7 @@ The following hypothetical pipeline state is evaluated against the rubric to con
 >
 > **Pipeline state:**
 > - ticket: ✅ exists
-> - prd: ✅ exists, approved by reviewer
+> - spec-review: ✅ exists, approved by reviewer
 > - spike: ✅ exists, approved by reviewer
 > - tech-spec: ✅ exists, approved by reviewer
 > - implementation-notes: ✅ exists, approved by reviewer

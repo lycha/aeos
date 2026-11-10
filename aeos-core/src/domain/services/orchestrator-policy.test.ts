@@ -13,7 +13,7 @@ function epic(overrides: Partial<Ticket> = {}): Ticket {
     title: 'Epic',
     kind: TicketKind.EPIC,
     parentId: null,
-    column: Column.PRODUCT_SCOPING,
+    column: Column.SPEC_REVIEW,
     subState: SubState.READY,
     createdAt: 'x',
     updatedAt: 'y',

@@ -2,7 +2,7 @@
 // AEOS_EXECUTOR=stub. Later tasks extend this file rather than writing their
 // own scaffolding.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -14,8 +14,17 @@ import type { Column } from '../domain/model/column.js';
 import type { SubStateOrNull } from '../domain/model/sub-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
+import { PythonDecisionsLint } from '../infrastructure/spec/decisions-lint.adapter.js';
 import { getDb, resetDb } from '../infrastructure/persistence/database.js';
 import { SqliteTicketRepository } from '../infrastructure/persistence/sqlite-ticket.repository.js';
+
+/** `ticket create --spec` runs lint_decisions.py, which needs python3 with PyYAML and jsonschema. */
+export const pythonReady =
+  spawnSync('python3', ['-c', 'import yaml, jsonschema'], { stdio: 'ignore' }).status === 0;
+// Captured at load: the harness moves HOME, and with it python's per-user packages.
+const pythonUserSite = spawnSync('python3', ['-m', 'site', '--user-site'], {
+  encoding: 'utf-8',
+}).stdout?.trim();
 
 export interface TempProject {
   /** A git repository with one commit; `process.cwd()` reports this path. */
@@ -64,6 +73,17 @@ export function createTempProject(): TempProject {
   vi.stubEnv('GIT_COMMITTER_NAME', 'AEOS E2E');
   vi.stubEnv('GIT_COMMITTER_EMAIL', 'e2e@aeos.invalid');
   vi.spyOn(process, 'cwd').mockReturnValue(projectPath);
+  if (pythonUserSite) vi.stubEnv('PYTHONPATH', pythonUserSite);
+  // shortcut: every epic needs a spec, so without python the lint is answered
+  // clean here and the pipeline cases still run; a case that tests the lint
+  // itself must be skipped on `pythonReady` instead.
+  if (!pythonReady) {
+    vi.spyOn(PythonDecisionsLint.prototype, 'lint').mockReturnValue({
+      schemaErrors: [],
+      lintErrors: [],
+      escalated: [],
+    });
+  }
 
   const stubRun = StubExecutor.prototype.run;
   vi.spyOn(StubExecutor.prototype, 'run').mockImplementation(function (
@@ -120,6 +140,17 @@ export function addFixtureFeature(feature = 'feature-sample'): string {
   git('add', 'features');
   git('commit', '-m', `spec(${feature}): fixture`);
   return git('rev-parse', 'HEAD').trim();
+}
+
+/** Creates an epic backed by the fixture feature (added on first use), and returns its id. */
+export async function createEpic(title: string): Promise<string> {
+  if (!fs.existsSync(path.join(process.cwd(), '.aeos', 'features', 'feature-sample'))) {
+    addFixtureFeature();
+  }
+  const { output } = await runCli('ticket', 'create', title, '--spec', 'feature-sample');
+  const id = /Created \w+ (\S+):/.exec(output)?.[1];
+  if (!id) throw new Error(`ticket create printed no id:\n${output}`);
+  return id;
 }
 
 /** Runs `aeos <args>` in-process through Commander, capturing its output. */

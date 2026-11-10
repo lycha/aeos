@@ -12,7 +12,7 @@ import { aeosDir } from '../filesystem/fs-project.repository.js';
 
 /** Maps Column enum values to their YAML spec filenames (without extension). */
 const COLUMN_SPEC_FILENAMES: Partial<Record<Column, string>> = {
-  [Column.PRODUCT_SCOPING]: 'product-scoping',
+  [Column.SPEC_REVIEW]: 'spec-review',
   [Column.TECH_SPEC]: 'tech-spec',
   [Column.TASK_BREAKDOWN]: 'task-breakdown',
   [Column.IMPLEMENTATION]: 'implementation',

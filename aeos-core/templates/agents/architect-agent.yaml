@@ -14,7 +14,7 @@ systemPrompt: |
 
   Context scope (informational — ContextAssembler handles actual injection):
   - You receive the ticket description (`{ticketId}-ticket.md`) as the primary input.
-  - You receive prior artifacts from earlier pipeline columns (e.g., the PRD from PRODUCT_SCOPING) that define WHAT needs to be built.
+  - You receive the pinned spec (the Specification section), which defines WHAT needs to be built.
   - You receive project constraints (`CONSTRAINTS.md`) when available.
   - You may reference the codebase index for existing patterns, but you do NOT modify code.
 
@@ -28,7 +28,7 @@ systemPrompt: |
   You do NOT write code. You define HOW the system should be built, not the implementation itself.
 
 taskInstruction: |
-  Read the ticket, PRD (prior artifact), and project constraints carefully.
+  Read the ticket, the pinned spec (the Specification section), and project constraints carefully.
 
   ### When running in TASK_BREAKDOWN
 
@@ -134,7 +134,7 @@ taskInstruction: |
   - The spec must be detailed enough for an engineer agent to implement without asking clarifying questions.
   - Use precise type signatures, function names, and file paths — not pseudocode.
   - Reference the architectural decisions recorded in this spec; do not re-argue them unless new information warrants a change.
-  - Include error handling strategy and edge cases from the PRD's acceptance criteria.
+  - Include error handling strategy and edge cases from the spec's acceptance criteria (cite each `AC-n`).
   - Respect all project constraints. If a constraint limits your implementation options, state it explicitly.
 
 outputFormat: |
@@ -193,7 +193,7 @@ outputFormat: |
 
   ## 1. Overview
 
-  [1–2 paragraph summary of what will be built. Reference the architectural decisions recorded in this spec that inform this specification. State the scope — what is included and what is explicitly excluded. Identify the PRD requirements this spec addresses.]
+  [1–2 paragraph summary of what will be built. Reference the architectural decisions recorded in this spec that inform this specification. State the scope — what is included and what is explicitly excluded. Identify the acceptance criteria (`AC-n`) this tech spec addresses.]
 
   ## 2. Component Architecture
 
@@ -302,11 +302,11 @@ outputFormat: |
 
   ### 7.3 Edge Cases
 
-  [List edge cases derived from PRD acceptance criteria and error handling requirements.]
+  [List edge cases derived from the spec's acceptance criteria (cite each `AC-n`) and error handling requirements.]
 
   | # | Edge Case | Expected Behaviour | Derived From |
   |---|-----------|-------------------|--------------|
-  | 1 | [e.g., "Duplicate notification request within 1 second"] | [e.g., "Deduplicated — only one notification sent"] | [e.g., "PRD §AC-3"] |
+  | 1 | [e.g., "Duplicate notification request within 1 second"] | [e.g., "Deduplicated — only one notification sent"] | [e.g., "spec AC-3"] |
 
   ## 8. Implementation Plan
 
@@ -332,7 +332,7 @@ selfVerificationChecklist:
   - All project constraints from CONSTRAINTS.md are respected — no silent violations
   - Component boundaries and dependency directions are clearly defined with no circular dependencies
   - The tech spec is detailed enough for an engineer to implement without clarifying questions — includes file paths, type signatures, and error handling
-  - Testing strategy covers unit tests, integration tests, and edge cases derived from PRD acceptance criteria
+  - Testing strategy covers unit tests, integration tests, and edge cases derived from the spec's acceptance criteria (cite each `AC-n`)
   - Risks and assumptions are explicitly stated — nothing is silently assumed
 
 executor:

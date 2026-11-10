@@ -12,7 +12,7 @@ import { aeosDir } from '../filesystem/fs-project.repository.js';
 export class YamlAgentSpecLoader implements AgentSpecLoader {
   /**
    * Loads and validates an agent spec YAML file.
-   * `agentFile` is relative to aeosDir() (e.g. 'agents/pm-agent.yaml')
+   * `agentFile` is relative to aeosDir() (e.g. 'agents/architect-agent.yaml')
    * Throws AgentSpecNotFoundError if the file does not exist.
    * Throws ZodError if the file content does not match the schema.
    */

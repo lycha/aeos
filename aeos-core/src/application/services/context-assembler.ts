@@ -12,10 +12,10 @@ import { Column } from '../../domain/model/column.js';
 export const MAX_DIFF_CHARS = 50_000;
 
 /**
- * The parent epic's specification artifacts a child task is assembled against.
- * Suffix-matched against the parent's artifact filenames (e.g. `AEOS-1-prd.md`).
+ * The parent epic's artifact a child task is assembled against, matched by
+ * suffix (`AEOS-1-tech-spec.md`). The human-written spec comes through the pin.
  */
-const EPIC_SPEC_SUFFIXES = ['-prd.md', '-tech-spec.md'] as const;
+const EPIC_TECH_SPEC_SUFFIX = '-tech-spec.md';
 
 /** Pulls the parent epic id out of the ticket document's AEOS metadata block. */
 function parentEpicId(ticketContent: string): string | null {
@@ -83,9 +83,9 @@ export class ContextAssembler {
         content: this.artifactStore.readArtifact(projectRoot, ticketId, filename),
       }));
 
-    // 3a. For a child task, inject the parent epic's spec (PRD, tech spec) so the
-    //     task is built against — and does not contradict — the decisions that
-    //     scoped it. The task's own artifact dir never contains these.
+    // 3a. For a child task, inject the parent epic's tech spec so the task is
+    //     built against — and does not contradict — the decisions that scoped
+    //     it. The task's own artifact dir never contains it.
     const epicContext = this.gatherEpicContext(ticketContent, projectRoot);
 
     // 3b. The pinned spec, for a spec-backed ticket.
@@ -179,26 +179,23 @@ export class ContextAssembler {
   }
 
   /**
-   * Reads the parent epic's PRD and tech-spec artifacts for a child task.
-   * Returns [] for an epic (no parent) or when the parent has no such artifacts.
+   * Reads the parent epic's tech spec for a child task.
+   * Returns [] for an epic (no parent) or when the parent has none.
    */
   private gatherEpicContext(ticketContent: string, projectRoot: string): PriorArtifact[] {
     const epicId = parentEpicId(ticketContent);
     if (!epicId) return [];
 
-    const parentFiles = this.artifactStore.listArtifacts(projectRoot, epicId);
-    const out: PriorArtifact[] = [];
-    // Preserve EPIC_SPEC_SUFFIXES order (PRD before tech spec) rather than the
-    // directory's order.
-    for (const suffix of EPIC_SPEC_SUFFIXES) {
-      const filename = parentFiles.find((name) => name.endsWith(suffix));
-      if (filename) {
-        out.push({
-          name: filename,
-          content: this.artifactStore.readArtifact(projectRoot, epicId, filename),
-        });
-      }
-    }
-    return out;
+    const filename = this.artifactStore
+      .listArtifacts(projectRoot, epicId)
+      .find((name) => name.endsWith(EPIC_TECH_SPEC_SUFFIX));
+    return filename
+      ? [
+          {
+            name: filename,
+            content: this.artifactStore.readArtifact(projectRoot, epicId, filename),
+          },
+        ]
+      : [];
   }
 }

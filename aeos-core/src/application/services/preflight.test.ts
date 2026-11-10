@@ -34,7 +34,7 @@ function createMockStateMachine(): Pick<StateMachineService, 'setSubState'> {
 
 function makeColumnSpec(overrides: Partial<ColumnSpec> = {}): ColumnSpec {
   return {
-    column: 'PRODUCT_SCOPING',
+    column: 'SPEC_REVIEW',
     workerAgentFile: 'agents/pm-agent.yaml',
     reviewerAgentFile: 'agents/reviewer-agent.yaml',
     outputArtifact: 'prd.md',
@@ -303,7 +303,7 @@ describe('PreflightService', () => {
     expect(invocation.prompt).toContain('NO_BLOCKERS');
     expect(invocation.prompt).toContain('Format-Version: 2');
     expect(invocation.ticketId).toBe(TICKET_ID);
-    expect(invocation.column).toBe('PRODUCT_SCOPING');
+    expect(invocation.column).toBe('SPEC_REVIEW');
   });
 
   it('uses the executor instance passed to run()', async () => {

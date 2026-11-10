@@ -12,9 +12,14 @@ import type { Executor } from '../../domain/ports/driven/executor.port.js';
  * knows to emit a verdict trailer. Without one the run escalates as
  * UNPARSEABLE_VERDICT — correct for a real reviewer, useless for a test double
  * whose whole job is exercising the pipeline end to end.
+ *
+ * Three columns' own artifacts are named `*-review.md` too; those are worker
+ * output, and only the review of one (`*-review-review.md`) is a review.
  */
 function isReviewInvocation(outputPath: string): boolean {
-  return outputPath.endsWith('-review.md');
+  // Anchored on the ticket id: `<id>-tech-spec-review.md` is a review.
+  const workerArtifact = /^[A-Za-z0-9]+-\d+-(spec|code|integration)-review\.md$/;
+  return outputPath.endsWith('-review.md') && !workerArtifact.test(path.basename(outputPath));
 }
 
 /**

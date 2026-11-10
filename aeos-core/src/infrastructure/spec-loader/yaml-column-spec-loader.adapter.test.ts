@@ -13,7 +13,7 @@ let loader: YamlColumnSpecLoader;
 /** Minimal valid column spec YAML content. */
 function validColumnSpecYaml(overrides: Record<string, unknown> = {}): string {
   const spec = {
-    column: 'PRODUCT_SCOPING',
+    column: 'SPEC_REVIEW',
     workerAgentFile: 'agents/pm-agent.yaml',
     reviewerAgentFile: 'agents/reviewer-agent.yaml',
     outputArtifact: 'prd.md',
@@ -35,22 +35,22 @@ afterEach(() => {
 });
 
 describe('YamlColumnSpecLoader', () => {
-  it('loads and returns a valid product-scoping column spec', () => {
-    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'product-scoping.yaml');
+  it('loads and returns a valid spec-review column spec', () => {
+    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
     fs.writeFileSync(specPath, validColumnSpecYaml(), 'utf-8');
 
-    const result = loader.load(Column.PRODUCT_SCOPING, tmpDir);
-    expect(result.column).toBe('PRODUCT_SCOPING');
+    const result = loader.load(Column.SPEC_REVIEW, tmpDir);
+    expect(result.column).toBe('SPEC_REVIEW');
     expect(result.workerAgentFile).toBe('agents/pm-agent.yaml');
     expect(result.reviewerAgentFile).toBe('agents/reviewer-agent.yaml');
     expect(result.outputArtifact).toBe('prd.md');
   });
 
   it('applies default values from schema', () => {
-    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'product-scoping.yaml');
+    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
     fs.writeFileSync(specPath, validColumnSpecYaml(), 'utf-8');
 
-    const result = loader.load(Column.PRODUCT_SCOPING, tmpDir);
+    const result = loader.load(Column.SPEC_REVIEW, tmpDir);
     expect(result.minWordCount).toBe(50);
     // Unset in YAML so it inherits the global reviewLoop cap.
     expect(result.maxIterations).toBeUndefined();
@@ -62,10 +62,10 @@ describe('YamlColumnSpecLoader', () => {
   });
 
   it('loads optional executorMode when present', () => {
-    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'product-scoping.yaml');
+    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
     fs.writeFileSync(specPath, validColumnSpecYaml({ executorMode: 'agentic' }), 'utf-8');
 
-    const result = loader.load(Column.PRODUCT_SCOPING, tmpDir);
+    const result = loader.load(Column.SPEC_REVIEW, tmpDir);
     expect(result.executorMode).toBe('agentic');
   });
 
@@ -92,21 +92,21 @@ describe('YamlColumnSpecLoader', () => {
 
   it('throws ColumnSpecNotFoundError when file does not exist for a mapped column', () => {
     // Don't create the file — it should throw
-    expect(() => loader.load(Column.PRODUCT_SCOPING, tmpDir)).toThrow(ColumnSpecNotFoundError);
-    expect(() => loader.load(Column.PRODUCT_SCOPING, tmpDir)).toThrow('Column spec file not found');
+    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(ColumnSpecNotFoundError);
+    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow('Column spec file not found');
   });
 
   it('throws ZodError when YAML is missing required fields', () => {
-    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'product-scoping.yaml');
-    fs.writeFileSync(specPath, 'column: "PRODUCT_SCOPING"\n', 'utf-8');
+    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
+    fs.writeFileSync(specPath, 'column: "SPEC_REVIEW"\n', 'utf-8');
 
-    expect(() => loader.load(Column.PRODUCT_SCOPING, tmpDir)).toThrow(ZodError);
+    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(ZodError);
   });
 
   it('throws ZodError when YAML has invalid field types', () => {
-    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'product-scoping.yaml');
+    const specPath = path.join(tmpDir, '.aeos', 'column-specs', 'spec-review.yaml');
     const yaml = [
-      'column: "PRODUCT_SCOPING"',
+      'column: "SPEC_REVIEW"',
       'workerAgentFile: "agents/pm-agent.yaml"',
       'reviewerAgentFile: "agents/reviewer-agent.yaml"',
       'outputArtifact: "prd.md"',
@@ -114,12 +114,12 @@ describe('YamlColumnSpecLoader', () => {
     ].join('\n');
     fs.writeFileSync(specPath, yaml, 'utf-8');
 
-    expect(() => loader.load(Column.PRODUCT_SCOPING, tmpDir)).toThrow(ZodError);
+    expect(() => loader.load(Column.SPEC_REVIEW, tmpDir)).toThrow(ZodError);
   });
 
   it('maps all expected columns to correct filenames', () => {
     const mappings: Array<[Column, string]> = [
-      [Column.PRODUCT_SCOPING, 'product-scoping'],
+      [Column.SPEC_REVIEW, 'spec-review'],
       [Column.TECH_SPEC, 'tech-spec'],
       [Column.TASK_BREAKDOWN, 'task-breakdown'],
       [Column.IMPLEMENTATION, 'implementation'],

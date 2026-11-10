@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -10,10 +10,12 @@ import type { RunRecord } from '../domain/model/run-record.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
 import {
   addFixtureFeature,
+  createEpic,
   createStandaloneTask,
   createTempProject,
   dodApprove,
   driveColumn,
+  pythonReady,
   runCli,
   ticketState,
   type TempProject,
@@ -85,8 +87,8 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     git('commit', '-m', 'aeos project init');
     const defaultBranch = git('branch', '--show-current').trim();
 
-    // Epic: BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN
-    const epic = await createTicket('An epic');
+    // Epic: BACKLOG → SPEC_REVIEW → TECH_SPEC → TASK_BREAKDOWN
+    const epic = await createEpic('An epic');
     await runCli('ticket', 'approve', epic);
     await driveColumn(epic);
     await driveColumn(epic);
@@ -209,7 +211,13 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
   it('accepts a budget on a stub run and completes it', async () => {
     await runCli('install');
     await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
-    const epic = await createTicket('An epic');
+    // An epic is spec-backed or it is not created.
+    const refused = await runCli('ticket', 'create', 'An epic with no spec');
+    expect(refused.exitCode).toBe(1);
+    expect(refused.output).toContain('--spec');
+    expect((await runCli('ticket', 'list')).output).not.toContain('An epic with no spec');
+
+    const epic = await createEpic('An epic');
     await runCli('ticket', 'approve', epic);
 
     const run = await runCli('orchestrator', 'run', epic, '--budget', '5');
@@ -217,7 +225,19 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     // Columns advance manually, so the run stops for approval after one column.
     expect(run.output).toContain(`${epic} — AWAITING_APPROVAL`);
     expect(run.exitCode).toBe(0);
-    expect(ticketState(epic)).toMatchObject({ column: 'PRODUCT_SCOPING', subState: 'SIGNED_OFF' });
+    expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'SIGNED_OFF' });
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    expect(fs.existsSync(path.join(aeosDir, 'tickets', epic, `${epic}-spec-review.md`))).toBe(true);
+    expect((await runCli('ticket', 'list')).output).not.toContain('PRODUCT_SCOPING');
+
+    // A project scaffolded before the rename: sync names what is stale and what is new.
+    fs.renameSync(
+      path.join(aeosDir, 'column-specs', 'spec-review.yaml'),
+      path.join(aeosDir, 'column-specs', 'product-scoping.yaml'),
+    );
+    const sync = (await runCli('project', 'sync')).output;
+    expect(sync).toMatch(/obsolete\s+column-specs\/product-scoping\.yaml/);
+    expect(sync).toMatch(/missing\s+column-specs\/spec-review\.yaml/);
   });
 
   it('escalates when the reviewer output carries no verdict trailer', async () => {
@@ -236,12 +256,12 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     await runCli('install');
     await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
-    const epic = await createTicket('An epic');
+    const epic = await createEpic('An epic');
     await runCli('ticket', 'approve', epic);
 
     await runCli('ticket', 'run', epic);
 
-    expect(ticketState(epic)).toMatchObject({ column: 'PRODUCT_SCOPING', subState: 'ESCALATED' });
+    expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'ESCALATED' });
   });
 
   it('runs the project checks before the reviewer, and skips the reviewer when one fails', async () => {
@@ -310,18 +330,9 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(aeosGit('ls-files', `tickets/${green}/${green}-checks.md`)).not.toBe('');
   });
 
-  // `ticket create --spec` runs lint_decisions.py, which needs python3 with PyYAML and jsonschema.
-  const pythonReady =
-    spawnSync('python3', ['-c', 'import yaml, jsonschema'], { stdio: 'ignore' }).status === 0;
-  // The harness moves HOME, and with it python's per-user packages.
-  const pythonUserSite = spawnSync('python3', ['-m', 'site', '--user-site'], {
-    encoding: 'utf-8',
-  }).stdout?.trim();
-
   it.skipIf(!pythonReady)(
     'pins a spec-backed epic, shows the pin on its task, and warns once the spec moves',
     async () => {
-      if (pythonUserSite) vi.stubEnv('PYTHONPATH', pythonUserSite);
       await runCli('install');
       await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
       const aeosDir = path.join(project.projectPath, '.aeos');
@@ -423,7 +434,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // `.aeos` repository: a rubric the reviewer will judge the work against.
     // Creating the epic commits the scaffold, so the rubric is tracked.
-    const epic = await createTicket('An epic');
+    const epic = await createEpic('An epic');
     await runCli('ticket', 'approve', epic);
     const rubric = '.aeos/rubrics/structure/code-structure.md';
     const rubricFile = path.join(project.projectPath, rubric);
@@ -432,7 +443,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     vi.stubEnv('AEOS_STUB_TOUCH', rubric);
     const epicRun = await runCli('ticket', 'run', epic);
 
-    expect(ticketState(epic)).toMatchObject({ column: 'PRODUCT_SCOPING', subState: 'FAILED' });
+    expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'FAILED' });
     expect(epicRun.output).toContain(rubric);
     expect(fs.readFileSync(rubricFile, 'utf-8')).toBe(original);
     expect(failedRun(epic)).toMatchObject({ role: 'worker' });

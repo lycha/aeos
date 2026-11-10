@@ -1264,7 +1264,7 @@ export class TicketRunUseCase implements TicketRunPort {
         result: {
           status: 'failed',
           ticketId,
-          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to PRODUCT_SCOPING first.`,
+          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to SPEC_REVIEW first.`,
         },
       };
     }

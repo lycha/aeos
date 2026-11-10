@@ -15,7 +15,7 @@ systemPrompt: |
 
   Context scope (informational — ContextAssembler handles actual injection):
   - You receive the ticket description (`{ticketId}-ticket.md`) as the primary input.
-  - You receive prior artifacts from earlier pipeline columns: PRD (from PRODUCT_SCOPING), tech spec (from TECH_SPEC).
+  - You receive prior artifacts from earlier pipeline columns: the pinned spec (the Specification section), tech spec (from TECH_SPEC).
   - You receive project constraints (`CONSTRAINTS.md`) when available.
   - You have access to the full codebase index for understanding existing patterns, file structure, and dependencies.
 
@@ -26,7 +26,7 @@ systemPrompt: |
   In IMPLEMENTATION you write production code and tests directly in the repository, then summarize the completed work. In CODE_REVIEW you produce a review verdict.
 
 taskInstruction: |
-  Read the ticket, prior artifacts (PRD, tech spec), and project constraints carefully.
+  Read the ticket, prior artifacts (spec, tech spec), and project constraints carefully.
 
   ### When running in IMPLEMENTATION
 
@@ -60,7 +60,7 @@ taskInstruction: |
   Guidelines:
   - Do the implementation work first; the written output is a summary of completed changes, not a proposal.
   - Prefer the simplest implementation that satisfies the spec. Avoid premature optimisation.
-  - When adding tests, enumerate happy path, error handling, and edge cases that are explicitly called for by the PRD or tech spec.
+  - When adding tests, enumerate happy path, error handling, and edge cases that are explicitly called for by the spec or tech spec.
   - Make sequencing explicit in the summary: note which foundational changes came first and which later changes depended on them.
   - Always include a rollback section. If the change is purely additive or low risk, say so explicitly and explain why rollback is straightforward.
   - If a new dependency would be required, do not invent it silently; call it out explicitly in the summary.
@@ -204,10 +204,10 @@ outputFormat: |
   [If no constraints apply or all are met: "All applicable constraints satisfied."]
 
 selfVerificationChecklist:
-  - The implementation is consistent with the epic's PRD and tech-spec decisions (see the "Epic Specification" context block); no settled decision (e.g. a chosen mechanism or delivery path) is silently contradicted
+  - The implementation is consistent with the epic's pinned spec and tech-spec decisions (see the "Epic Specification" context block); no settled decision (e.g. a chosen mechanism or delivery path) is silently contradicted
   - Every file changed is within the ticket's `Touches:` scope; nothing reserved for another task (per `Out of scope`/`Notes`) was modified
   - Every implementation step references specific file paths and function/type names from the tech spec — no vague "update the module" language
-  - The test plan covers every implementation step with at least one unit test and all edge cases from the PRD acceptance criteria
+  - The test plan covers every implementation step with at least one unit test and all edge cases from the spec's acceptance criteria (cite each `AC-n`)
   - The implementation step order respects dependency direction — foundational types and interfaces come before consumers
   - All project constraints from CONSTRAINTS.md are respected — no silent violations
   - Deviations from the tech spec are explicitly listed with justification — nothing is silently changed

@@ -17,7 +17,7 @@ function createMockTicketShowUseCase(): TicketShowPort {
         title: 'Add rate limiting',
         kind: 'EPIC',
         parentId: null,
-        column: 'PRODUCT_SCOPING',
+        column: 'SPEC_REVIEW',
         subState: 'WORKING',
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
@@ -28,7 +28,7 @@ function createMockTicketShowUseCase(): TicketShowPort {
           executor: 'claude-cli',
           model: 'claude-opus-4-6',
           agent: 'worker-agent',
-          column: 'PRODUCT_SCOPING',
+          column: 'SPEC_REVIEW',
           recordedAt: '2026-01-01T00:00:00.000Z',
           costUsd: 0.0123,
         },
@@ -36,7 +36,7 @@ function createMockTicketShowUseCase(): TicketShowPort {
           executor: 'ollama-cli',
           model: 'llama',
           agent: 'reviewer-agent',
-          column: 'PRODUCT_SCOPING',
+          column: 'SPEC_REVIEW',
           recordedAt: '2026-01-01T00:01:00.000Z',
           costUsd: null,
         },
@@ -96,7 +96,7 @@ describe('registerTicketShowCommand', () => {
 
     expect(consoleSpy).toHaveBeenCalledWith('Ticket: AEOS-1');
     expect(consoleSpy).toHaveBeenCalledWith('Title:  Add rate limiting');
-    expect(consoleSpy).toHaveBeenCalledWith('Column: PRODUCT_SCOPING');
+    expect(consoleSpy).toHaveBeenCalledWith('Column: SPEC_REVIEW');
     expect(consoleSpy).toHaveBeenCalledWith('State:  WORKING');
     expect(consoleSpy).toHaveBeenCalledWith('');
     expect(consoleSpy).toHaveBeenCalledWith('Artifacts:');
@@ -126,10 +126,10 @@ describe('registerTicketShowCommand', () => {
     program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      '  • PRODUCT_SCOPING (worker-agent): claude-cli / claude-opus-4-6 — $0.0123',
+      '  • SPEC_REVIEW (worker-agent): claude-cli / claude-opus-4-6 — $0.0123',
     );
     expect(consoleSpy).toHaveBeenCalledWith(
-      '  • PRODUCT_SCOPING (reviewer-agent): ollama-cli / llama — unknown',
+      '  • SPEC_REVIEW (reviewer-agent): ollama-cli / llama — unknown',
     );
   });
 

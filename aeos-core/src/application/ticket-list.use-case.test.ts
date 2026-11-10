@@ -53,7 +53,7 @@ describe('TicketListUseCase', () => {
   it('should return tickets from the repository', () => {
     const tickets = [
       makeTicket({ id: 'AEOS-1', title: 'First' }),
-      makeTicket({ id: 'AEOS-2', title: 'Second', column: 'PRODUCT_SCOPING', subState: 'WORKING' }),
+      makeTicket({ id: 'AEOS-2', title: 'Second', column: 'SPEC_REVIEW', subState: 'WORKING' }),
     ];
     (ticketRepo.findByProject as ReturnType<typeof vi.fn>).mockReturnValue(tickets);
 

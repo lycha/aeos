@@ -6,7 +6,7 @@ import { ColumnSpecSchema, AgentSpecSchema, ProjectChecksSchema } from './schema
 
 function validColumnInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    column: 'product-scoping',
+    column: 'spec-review',
     workerAgentFile: 'agents/pm-agent.yaml',
     reviewerAgentFile: 'agents/reviewer-agent.yaml',
     outputArtifact: 'prd.md',
@@ -17,7 +17,7 @@ function validColumnInput(overrides: Record<string, unknown> = {}): Record<strin
 describe('ColumnSpecSchema', () => {
   it('parses a valid column spec with all required fields', () => {
     const result = ColumnSpecSchema.parse(validColumnInput());
-    expect(result.column).toBe('product-scoping');
+    expect(result.column).toBe('spec-review');
     expect(result.workerAgentFile).toBe('agents/pm-agent.yaml');
   });
 

@@ -98,6 +98,8 @@ describe('TicketCreateUseCase', () => {
     projectKey: 'AEOS',
     projectPath: path.join(os.tmpdir(), 'aeos-test-project'),
   };
+  // An epic is always spec-backed; `defaultInput` plus a parent is a task.
+  const epicInput = { ...defaultInput, spec: 'checkout' };
 
   beforeEach(() => {
     ticketRepo = createMockTicketRepo();
@@ -218,16 +220,25 @@ describe('TicketCreateUseCase', () => {
       expect(() => useCase.execute(withSpec)).toThrow('python3 is not on PATH.');
     });
 
-    it('creates an epic with no pin when --spec is not given', () => {
-      const result = useCase.execute(defaultInput);
+    it('refuses an epic with no --spec, pointing at the skills that produce one', () => {
+      expect(() => useCase.execute(defaultInput)).toThrow(
+        /--spec[\s\S]*prototype-harvest[\s\S]*gap-interrogation[\s\S]*spec-writer/,
+      );
+      expect(ticketRepo.createAtomic).not.toHaveBeenCalled();
+    });
 
-      expect(result.specPin).toBeUndefined();
-      expect(decisionsLint.lint).not.toHaveBeenCalled();
+    it('does not ask a task for a spec: it inherits the pin of its epic', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+        id: 'AEOS-1',
+        kind: 'EPIC',
+      });
+
+      expect(useCase.execute({ ...defaultInput, parentId: 'AEOS-1' }).kind).toBe('TASK');
     });
   });
 
   it('should return the generated ticket ID and title', () => {
-    const result = useCase.execute(defaultInput);
+    const result = useCase.execute(epicInput);
 
     expect(result).toEqual({
       ticketId: 'AEOS-1',
@@ -237,17 +248,18 @@ describe('TicketCreateUseCase', () => {
       parentId: null,
       taskKey: null,
       alreadyExisted: false,
+      specPin: { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' },
     });
   });
 
   it('should call createAtomic with the project ID', () => {
-    useCase.execute(defaultInput);
+    useCase.execute(epicInput);
 
     expect(ticketRepo.createAtomic).toHaveBeenCalledWith('startup-a', expect.any(Function));
   });
 
   it('should write artifact with correct filename and path', () => {
-    useCase.execute(defaultInput);
+    useCase.execute(epicInput);
 
     expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
       defaultInput.projectPath,
@@ -258,7 +270,7 @@ describe('TicketCreateUseCase', () => {
   });
 
   it('should generate ticket file with all four required sections', () => {
-    useCase.execute(defaultInput);
+    useCase.execute(epicInput);
 
     const content = (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock
       .calls[0][3] as string;
@@ -275,7 +287,7 @@ describe('TicketCreateUseCase', () => {
   });
 
   it('writes the provided body into the ticket document', () => {
-    useCase.execute({ ...defaultInput, body: '**Acceptance criteria**\n- [ ] rate cap enforced' });
+    useCase.execute({ ...epicInput, body: '**Acceptance criteria**\n- [ ] rate cap enforced' });
 
     const content = (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock
       .calls[0][3] as string;
@@ -293,7 +305,7 @@ describe('TicketCreateUseCase', () => {
       },
     );
 
-    useCase.execute(defaultInput);
+    useCase.execute(epicInput);
 
     expect(capturedTicket).not.toBeNull();
     expect(capturedTicket!.id).toBe('AEOS-1');
@@ -306,7 +318,7 @@ describe('TicketCreateUseCase', () => {
   });
 
   it('should commit with structured message', () => {
-    useCase.execute(defaultInput);
+    useCase.execute(epicInput);
 
     expect(gitGateway.commit).toHaveBeenCalledWith(
       path.join(defaultInput.projectPath, '.aeos'),
@@ -319,7 +331,7 @@ describe('TicketCreateUseCase', () => {
       (_pid: string, build: (n: number) => Ticket) => build(5),
     );
 
-    const result = useCase.execute(defaultInput);
+    const result = useCase.execute(epicInput);
 
     expect(result.ticketId).toBe('AEOS-5');
   });
@@ -339,7 +351,7 @@ describe('TicketCreateUseCase', () => {
       callOrder.push('commit'),
     );
 
-    useCase.execute(defaultInput);
+    useCase.execute(epicInput);
 
     expect(callOrder).toEqual(['createAtomic', 'writeArtifact', 'commit']);
   });
@@ -353,8 +365,8 @@ describe('TicketCreateUseCase', () => {
       },
     );
 
-    const r1 = useCase.execute(defaultInput);
-    const r2 = useCase.execute({ ...defaultInput, title: 'Second ticket' });
+    const r1 = useCase.execute(epicInput);
+    const r2 = useCase.execute({ ...epicInput, title: 'Second ticket' });
 
     expect(r1.ticketId).toBe('AEOS-1');
     expect(r2.ticketId).toBe('AEOS-2');
@@ -557,7 +569,7 @@ describe('TicketCreateUseCase', () => {
       );
 
       // --key with no --parent: the key is meaningless for an epic and must not persist.
-      const result = useCase.execute({ ...defaultInput, taskKey: 'T-001' });
+      const result = useCase.execute({ ...epicInput, taskKey: 'T-001' });
 
       expect(built?.taskKey).toBeNull();
       expect(result.taskKey).toBeNull();

@@ -2,11 +2,11 @@
 
 Applied by the reviewer in **INTEGRATION_REVIEW** to grade the integration
 review of an assembled feature. It checks that the review actually verified the
-whole feature against the epic's PRD and tech spec — the check that per-task
+whole feature against the epic's pinned spec and tech spec — the check that per-task
 review structurally cannot perform.
 
 The reviewer applies each criterion independently. Any **FAIL** blocks
-advancement; **WARN** must be flagged but does not block. The epic PRD, tech
+advancement; **WARN** must be flagged but does not block. The pinned spec, tech
 spec, and the base..HEAD feature diff are all in context.
 
 ---
@@ -15,7 +15,7 @@ spec, and the base..HEAD feature diff are all in context.
 
 | Grade | Definition |
 |-------|------------|
-| **PASS** | The integration review traces every load-bearing tech-spec decision (`D-N`) and every PRD acceptance criterion to the assembled diff, marking each present / missing / contradicted with file:line evidence. Nothing load-bearing is left unaddressed. |
+| **PASS** | The integration review traces every load-bearing tech-spec decision (`D-N`) and every acceptance criterion of the spec (by its `AC-n` id) to the assembled diff, marking each present / missing / contradicted with file:line evidence. Nothing load-bearing is left unaddressed. |
 | **WARN** | The trace covers most decisions but omits one minor item, or cites evidence loosely. |
 | **FAIL** | The review does not trace decisions/criteria to the diff, or asserts the feature is complete without citing where each decision is realized. A spec decision could be silently dropped and this review would not show it. |
 

@@ -62,6 +62,28 @@ describe('ProjectSyncUseCase', () => {
     expect(byPath['column-specs/qa.yaml']).toBe('missing');
   });
 
+  it('reports a retired template the project still has as obsolete, and never touches it', () => {
+    project.set('column-specs/product-scoping.yaml', 'column: PRODUCT_SCOPING');
+    project.set('agents/my-own-agent.yaml', 'mine');
+    const catalog = new FakeCatalog(templates, project);
+
+    const result = new ProjectSyncUseCase(catalog).execute({
+      projectPath: '/p',
+      apply: true,
+      force: true,
+    });
+
+    expect(result.files.filter((f) => f.status === 'obsolete')).toEqual([
+      expect.objectContaining({
+        relativePath: 'column-specs/product-scoping.yaml',
+        action: 'none',
+      }),
+    ]);
+    expect(catalog.writes.map((w) => w.relativePath)).not.toContain(
+      'column-specs/product-scoping.yaml',
+    );
+  });
+
   it('writes nothing on a dry run', () => {
     const catalog = new FakeCatalog(templates, project);
     new ProjectSyncUseCase(catalog).execute({ projectPath: '/p', apply: false, force: false });

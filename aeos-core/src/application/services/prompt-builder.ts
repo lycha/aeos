@@ -52,7 +52,7 @@ export function buildContextSection(context: AssembledContext): string {
     );
   }
 
-  // Epic Specification — the parent epic's PRD/tech spec for a child task.
+  // Epic Specification — the parent epic's tech spec for a child task.
   // Placed first and framed as authoritative: the task must implement against
   // these decisions and must not contradict them.
   if (context.epicContext.length > 0) {

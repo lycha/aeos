@@ -25,7 +25,7 @@ describe('StubExecutor', () => {
       prompt: 'Test prompt',
       outputPath: path.join(tmpDir, 'output.md'),
       ticketId: 'T-42',
-      column: Column.PRODUCT_SCOPING,
+      column: Column.SPEC_REVIEW,
       ...overrides,
     };
   }
@@ -84,6 +84,22 @@ describe('StubExecutor', () => {
     const result = await executor.run(makeInvocation({ column: Column.TECH_SPEC }));
 
     expect(result.ok && result.content).not.toContain('AEOS-VERDICT');
+  });
+
+  it('tells a worker artifact named *-review.md from the review of it', async () => {
+    const run = async (name: string): Promise<string> => {
+      const result = await executor.run({
+        ...makeInvocation({}),
+        outputPath: path.join(tmpDir, name),
+      });
+      return result.ok ? (result.content ?? '') : '';
+    };
+
+    for (const artifact of ['spec-review', 'code-review', 'integration-review']) {
+      expect(await run(`AEOS-1-${artifact}.md`), artifact).not.toContain('AEOS-VERDICT');
+      expect(await run(`AEOS-1-${artifact}-review.md`), artifact).toContain('AEOS-VERDICT');
+    }
+    expect(await run('AEOS-1-tech-spec-review.md')).toContain('AEOS-VERDICT');
   });
 
   it('touches the file named by AEOS_STUB_TOUCH on a worker run only', async () => {

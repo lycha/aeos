@@ -23,6 +23,15 @@ describe('readTemplates', () => {
 
     expect(dirs).toEqual(new Set(['column-specs', 'agents', 'rubrics', 'schemas']));
   });
+
+  it('has no agent that drafts requirements: a person writes the spec', () => {
+    for (const template of readTemplates()) {
+      expect(template.content, template.relativePath).not.toMatch(
+        /Product Requirements Document|\bPRD\b/,
+      );
+    }
+    expect(readTemplates().map((t) => t.relativePath)).not.toContain('agents/pm-agent.yaml');
+  });
 });
 
 describe('scaffolded project integrity', () => {
@@ -71,20 +80,20 @@ describe('scaffolded project integrity', () => {
   it('reports what it created', () => {
     const created = repo.scaffoldDefaults(tmpDir);
 
-    expect(created).toContain('agents/pm-agent.yaml');
+    expect(created).toContain('agents/spec-reviewer-agent.yaml');
     expect(created.some((p) => p.startsWith('column-specs/'))).toBe(true);
     expect(created.some((p) => p.startsWith('rubrics/'))).toBe(true);
   });
 
   it('never overwrites a file the user has edited', () => {
     repo.scaffoldDefaults(tmpDir);
-    const edited = path.join(tmpDir, '.aeos', 'agents', 'pm-agent.yaml');
+    const edited = path.join(tmpDir, '.aeos', 'agents', 'spec-reviewer-agent.yaml');
     fs.writeFileSync(edited, 'name: my-own-agent\n', 'utf-8');
 
     const created = repo.scaffoldDefaults(tmpDir);
 
     expect(fs.readFileSync(edited, 'utf-8')).toBe('name: my-own-agent\n');
-    expect(created).not.toContain('agents/pm-agent.yaml');
+    expect(created).not.toContain('agents/spec-reviewer-agent.yaml');
   });
 
   it('restores only what is missing on a re-run', () => {

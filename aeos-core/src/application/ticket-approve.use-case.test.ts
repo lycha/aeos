@@ -102,7 +102,7 @@ const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
 const TICKET_ID = 'AEOS-1';
 
-function signedOffTicket(column: Ticket['column'] = 'PRODUCT_SCOPING'): Ticket {
+function signedOffTicket(column: Ticket['column'] = 'SPEC_REVIEW'): Ticket {
   return {
     id: TICKET_ID,
     projectId: PROJECT_ID,
@@ -147,7 +147,7 @@ describe('TicketApproveUseCase', () => {
     expect(result).toEqual({
       status: 'advanced',
       ticketId: TICKET_ID,
-      fromColumn: 'PRODUCT_SCOPING',
+      fromColumn: 'SPEC_REVIEW',
       toColumn: 'TECH_SPEC',
     });
   });
@@ -215,7 +215,7 @@ describe('TicketApproveUseCase', () => {
       status: 'advanced',
       ticketId: TICKET_ID,
       fromColumn: 'BACKLOG',
-      toColumn: 'PRODUCT_SCOPING',
+      toColumn: 'SPEC_REVIEW',
     });
   });
 
@@ -228,24 +228,24 @@ describe('TicketApproveUseCase', () => {
   it('should return error when transition fails', () => {
     (stateMachine.transition as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: false,
-      reason: 'Cannot transition from PRODUCT_SCOPING to ARCH_SPIKE',
+      reason: 'Cannot transition from SPEC_REVIEW to ARCH_SPIKE',
     });
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
     expect(result).toEqual({
       status: 'error',
       ticketId: TICKET_ID,
-      error: 'Cannot transition from PRODUCT_SCOPING to ARCH_SPIKE',
+      error: 'Cannot transition from SPEC_REVIEW to ARCH_SPIKE',
     });
   });
 
-  it('should advance BACKLOG ticket to PRODUCT_SCOPING', () => {
+  it('should advance BACKLOG ticket to SPEC_REVIEW', () => {
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket('BACKLOG'));
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
     expect(result).toEqual({
       status: 'advanced',
       ticketId: TICKET_ID,
       fromColumn: 'BACKLOG',
-      toColumn: 'PRODUCT_SCOPING',
+      toColumn: 'SPEC_REVIEW',
     });
   });
 
@@ -320,7 +320,7 @@ describe('TicketApproveUseCase', () => {
       });
 
       // A task in IMPLEMENTATION goes to CODE_REVIEW — it never visits
-      // PRODUCT_SCOPING, TECH_SPEC, or TASK_BREAKDOWN.
+      // SPEC_REVIEW, TECH_SPEC, or TASK_BREAKDOWN.
       expect(useCase.execute(PROJECT_ID, PROJECT_PATH, 'AEOS-2')).toMatchObject({
         status: 'advanced',
         toColumn: 'CODE_REVIEW',

@@ -9,7 +9,7 @@ function createMockTicketMoveUseCase(): TicketMovePort {
     execute: vi.fn().mockReturnValue({
       status: 'moved',
       ticketId: 'AEOS-1',
-      fromColumn: 'PRODUCT_SCOPING',
+      fromColumn: 'SPEC_REVIEW',
       toColumn: 'QA',
     }),
   };
@@ -73,7 +73,7 @@ describe('registerTicketMoveCommand', () => {
 
   it('prints a success message when the move succeeds', () => {
     program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA']);
-    expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 moved: PRODUCT_SCOPING → QA');
+    expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 moved: SPEC_REVIEW → QA');
   });
 
   it('rejects an invalid status', () => {

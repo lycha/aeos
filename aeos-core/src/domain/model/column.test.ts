@@ -18,7 +18,7 @@ describe('COLUMN_ORDER', () => {
     expect(COLUMN_ORDER).toHaveLength(10);
     expect([...COLUMN_ORDER]).toEqual([
       'BACKLOG',
-      'PRODUCT_SCOPING',
+      'SPEC_REVIEW',
       'TECH_SPEC',
       'TASK_BREAKDOWN',
       'IMPLEMENTATION',

@@ -183,15 +183,15 @@ describe('StateMachineService', () => {
   // Legal backward transitions
   // =========================================================================
   describe('legal backward transitions', () => {
-    it('allows backward one column (TECH_SPEC → PRODUCT_SCOPING)', () => {
+    it('allows backward one column (TECH_SPEC → SPEC_REVIEW)', () => {
       seedTicket(ticketRepo, { column: Column.TECH_SPEC, subState: SubState.WORKING });
-      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.SPEC_REVIEW);
       expect(result).toEqual({ ok: true });
     });
 
-    it('allows backward multiple columns (CODE_REVIEW → PRODUCT_SCOPING)', () => {
+    it('allows backward multiple columns (CODE_REVIEW → SPEC_REVIEW)', () => {
       seedTicket(ticketRepo, { column: Column.CODE_REVIEW, subState: SubState.IN_REVIEW });
-      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.SPEC_REVIEW);
       expect(result).toEqual({ ok: true });
     });
 
@@ -203,7 +203,7 @@ describe('StateMachineService', () => {
 
     it('allows backward from DONE to any prior column', () => {
       seedTicket(ticketRepo, { column: Column.DONE });
-      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      const result = stateMachine.transition(PROJECT_ID, 'T-1', Column.SPEC_REVIEW);
       expect(result).toEqual({ ok: true });
     });
 
@@ -244,7 +244,7 @@ describe('StateMachineService', () => {
     });
 
     it('rejects transition on a non-existent ticket', () => {
-      const result = stateMachine.transition(PROJECT_ID, 'NOPE-1', Column.PRODUCT_SCOPING);
+      const result = stateMachine.transition(PROJECT_ID, 'NOPE-1', Column.SPEC_REVIEW);
       expect(result).toEqual({ ok: false, reason: 'Ticket not found' });
     });
   });
@@ -262,7 +262,7 @@ describe('StateMachineService', () => {
 
     it('leaves comment as null when not provided', () => {
       seedTicket(ticketRepo, { column: Column.BACKLOG });
-      stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.SPEC_REVIEW);
       expect(transitionRepo.records).toHaveLength(1);
       expect(transitionRepo.records[0].comment).toBeNull();
     });
@@ -379,13 +379,13 @@ describe('StateMachineService', () => {
   describe('DB integrity', () => {
     it('records one transition row after a legal transition', () => {
       seedTicket(ticketRepo, { column: Column.BACKLOG });
-      stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.SPEC_REVIEW);
       expect(transitionRepo.records).toHaveLength(1);
     });
 
     it('records two transition rows after two transitions', () => {
       seedTicket(ticketRepo, { column: Column.BACKLOG });
-      stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.SPEC_REVIEW);
       stateMachine.transition(PROJECT_ID, 'T-1', Column.TECH_SPEC);
       expect(transitionRepo.records).toHaveLength(2);
     });
@@ -396,7 +396,7 @@ describe('StateMachineService', () => {
       const t0 = ticketRepo.findById(PROJECT_ID, 'T-1')!.updatedAt;
 
       vi.advanceTimersByTime(1000);
-      stateMachine.transition(PROJECT_ID, 'T-1', Column.PRODUCT_SCOPING);
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.SPEC_REVIEW);
       const t1 = ticketRepo.findById(PROJECT_ID, 'T-1')!.updatedAt;
       expect(t1).not.toBe(t0);
 
@@ -431,11 +431,11 @@ describe('StateMachineService', () => {
       seedTicket(ticketRepo, { id: 'T-1', projectId: 'proj-a', column: Column.BACKLOG });
       seedTicket(ticketRepo, { id: 'T-1', projectId: 'proj-b', column: Column.BACKLOG });
 
-      stateMachine.transition('proj-a', 'T-1', Column.PRODUCT_SCOPING);
+      stateMachine.transition('proj-a', 'T-1', Column.SPEC_REVIEW);
 
       const ticketA = ticketRepo.findById('proj-a', 'T-1')!;
       const ticketB = ticketRepo.findById('proj-b', 'T-1')!;
-      expect(ticketA.column).toBe(Column.PRODUCT_SCOPING);
+      expect(ticketA.column).toBe(Column.SPEC_REVIEW);
       expect(ticketB.column).toBe(Column.BACKLOG);
     });
   });

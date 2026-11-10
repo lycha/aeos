@@ -150,6 +150,60 @@ describe('database', () => {
       expect(rows[0].applied_at).toBeTruthy();
     });
 
+    it('renames PRODUCT_SCOPING to SPEC_REVIEW wherever a column is stored, and can run twice', () => {
+      const db = getDb();
+      const now = new Date().toISOString();
+      const insertTicket = db.prepare(
+        `INSERT INTO tickets (id, project_id, title, kind, "column", sub_state, spec_feature, spec_commit, created_at, updated_at)
+         VALUES (?, 'p', 'T', ?, 'PRODUCT_SCOPING', 'READY', ?, ?, ?, ?)`,
+      );
+      insertTicket.run('E-1', 'EPIC', null, null, now, now); // an epic from before specs
+      insertTicket.run('E-2', 'EPIC', 'checkout', 'abc123', now, now); // spec-backed
+      db.prepare(
+        `INSERT INTO transitions (ticket_id, project_id, from_column, to_column, at)
+         VALUES ('E-1', 'p', 'BACKLOG', 'PRODUCT_SCOPING', ?), ('E-1', 'p', 'PRODUCT_SCOPING', 'TECH_SPEC', ?)`,
+      ).run(now, now);
+      db.prepare(
+        `INSERT INTO cost_records (ticket_id, project_id, "column", agent, model, recorded_at)
+         VALUES ('E-1', 'p', 'PRODUCT_SCOPING', 'pm-agent', 'm', ?)`,
+      ).run(now);
+      const dump = (): unknown[] =>
+        ['tickets', 'transitions', 'cost_records'].map((table) =>
+          db.prepare(`SELECT * FROM ${table} ORDER BY id`).all(),
+        );
+      const migration = _testing.MIGRATIONS.find((m) => m.description.includes('SPEC_REVIEW'))!;
+
+      migration.apply(db);
+      const once = dump();
+      migration.apply(db);
+
+      expect(dump()).toEqual(once);
+      expect(JSON.stringify(once)).not.toContain('PRODUCT_SCOPING');
+      const ticket = (id: string): Record<string, unknown> =>
+        db.prepare('SELECT * FROM tickets WHERE id = ?').get(id) as Record<string, unknown>;
+      // No pin: kept, but stopped for a person, with the reason.
+      expect(ticket('E-1')).toMatchObject({
+        column: 'SPEC_REVIEW',
+        sub_state: 'ESCALATED',
+        escalation_reason: 'SPEC_REQUIRED',
+      });
+      expect(ticket('E-1').escalation_message).toMatch(/--spec/);
+      expect(ticket('E-2')).toMatchObject({
+        column: 'SPEC_REVIEW',
+        sub_state: 'READY',
+        escalation_reason: null,
+      });
+      expect(
+        db.prepare('SELECT from_column, to_column FROM transitions ORDER BY id').all(),
+      ).toEqual([
+        { from_column: 'BACKLOG', to_column: 'SPEC_REVIEW' },
+        { from_column: 'SPEC_REVIEW', to_column: 'TECH_SPEC' },
+      ]);
+      expect(db.prepare('SELECT "column" FROM cost_records').get()).toEqual({
+        column: 'SPEC_REVIEW',
+      });
+    });
+
     it('should detect legacy databases without schema_version table', () => {
       const db = getDb();
       // After initSchema, schema_version exists so detectLegacyDb should be false

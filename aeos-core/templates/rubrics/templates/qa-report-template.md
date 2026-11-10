@@ -12,9 +12,9 @@
 
 ## 2. Requirements Coverage Matrix
 
-[Trace every PRD requirement through the full artifact chain. Each row must show whether the requirement is covered at each pipeline stage. Do not omit any requirement — silent omissions are defects.]
+[Trace every spec criterion through the full artifact chain. Each row must show whether the requirement is covered at each pipeline stage. Do not omit any requirement — silent omissions are defects.]
 
-| PRD Requirement | Spike | Tech Spec | Implementation | Code Review | Status |
+| Spec criterion | Spike | Tech Spec | Implementation | Code Review | Status |
 |-----------------|-------|-----------|----------------|-------------|--------|
 | [e.g., FR-1: Widget creation endpoint] | [✅ / ⚠️ / ❌ / N/A] | [✅ / ⚠️ / ❌ / N/A] | [✅ / ⚠️ / ❌ / N/A] | [✅ / ⚠️ / ❌ / N/A] | [Covered / Partial / Missing] |
 
@@ -30,9 +30,9 @@
 
 | # | Category | Description | Source Artifact | Severity | Mitigation Status |
 |---|----------|-------------|-----------------|----------|-------------------|
-| 1 | [e.g., Boundary] | [e.g., "No validation for widget name exceeding 255 characters"] | [e.g., "PRD §FR-1, Tech Spec §3.1"] | [CRITICAL / HIGH / MEDIUM / LOW] | [Addressed / Unaddressed / Partially addressed] |
+| 1 | [e.g., Boundary] | [e.g., "No validation for widget name exceeding 255 characters"] | [e.g., "spec AC-1, Tech Spec §3.1"] | [CRITICAL / HIGH / MEDIUM / LOW] | [Addressed / Unaddressed / Partially addressed] |
 
-[Include at minimum: edge cases derived from PRD acceptance criteria, error conditions from the tech spec, integration risks from the architecture spike, and any open questions or assumptions that were never validated.]
+[Include at minimum: edge cases derived from the spec's acceptance criteria (cite each `AC-n`), error conditions from the tech spec, integration risks from the architecture spike, and any open questions or assumptions that were never validated.]
 
 **Severity breakdown:** [X CRITICAL, Y HIGH, Z MEDIUM, W LOW]
 
@@ -42,13 +42,13 @@
 
 [Assess test coverage across the artifact chain. Evaluate whether the implementation has adequate unit, integration, and edge-case test coverage.]
 
-| Test Category | Expected (from PRD/Spec) | Implemented | Coverage | Gaps |
+| Test Category | Expected (from Spec/Tech spec) | Implemented | Coverage | Gaps |
 |---------------|--------------------------|-------------|----------|------|
 | [e.g., Unit tests] | [e.g., "All FR acceptance criteria"] | [e.g., "FR-1 through FR-4 covered"] | [e.g., "4/5 = 80%"] | [e.g., "FR-5 error path untested"] |
 | [e.g., Integration tests] | [e.g., "Cross-boundary interactions per Tech Spec §5"] | [e.g., "API→DB tested"] | [e.g., "2/3 = 67%"] | [e.g., "Queue failure recovery untested"] |
-| [e.g., Edge case tests] | [e.g., "Boundary conditions from PRD §AC"] | [e.g., "Empty input tested"] | [e.g., "1/4 = 25%"] | [e.g., "Max length, concurrent access, null fields untested"] |
+| [e.g., Edge case tests] | [e.g., "Boundary conditions from spec AC-n"] | [e.g., "Empty input tested"] | [e.g., "1/4 = 25%"] | [e.g., "Max length, concurrent access, null fields untested"] |
 
-[Every acceptance criterion from the PRD should map to at least one test. Untested acceptance criteria are findings.]
+[Every acceptance criterion from the spec should map to at least one test. Untested acceptance criteria are findings.]
 
 **Overall test coverage assessment:** [Adequate / Insufficient — with justification]
 
@@ -110,7 +110,7 @@
 
 [Numbered list of specific actions required to achieve READY status. Each action must reference a finding ID.]
 
-1. [e.g., "Resolve C-1: Add input validation for widget name length (PRD §FR-1)"]
+1. [e.g., "Resolve C-1: Add input validation for widget name length (spec AC-1)"]
 2. [e.g., "Resolve H-1: Add integration test for queue failure recovery (Tech Spec §5.2)"]
 
 [If READY FOR DOD, state: "No conditions — all quality gates are satisfied."]

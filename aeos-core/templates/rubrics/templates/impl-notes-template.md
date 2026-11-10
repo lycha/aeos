@@ -2,7 +2,7 @@
 
 ## 1. Summary
 
-[1–2 paragraph summary of what will be implemented in this pass. Reference the tech spec sections that drive each change. State what is included in scope and what is explicitly deferred to future work. Identify the ticket and PRD requirements this implementation addresses.]
+[1–2 paragraph summary of what will be implemented in this pass. Reference the tech spec sections that drive each change. State what is included in scope and what is explicitly deferred to future work. Identify the ticket and spec criteria this implementation addresses.]
 
 ## 2. Approach & Design Decisions
 
@@ -39,7 +39,7 @@
 
 ## 5. Test Plan
 
-[List all tests to be written, grouped by type. Each test must reference the requirement and file change it validates. The test plan must cover happy-path scenarios, error cases, and edge cases derived from the PRD acceptance criteria.]
+[List all tests to be written, grouped by type. Each test must reference the requirement and file change it validates. The test plan must cover happy-path scenarios, error cases, and edge cases derived from the spec's acceptance criteria (cite each `AC-n`).]
 
 ### 5.1 Unit Tests
 
@@ -57,7 +57,7 @@
 
 | # | Edge Case | Expected Behaviour | Derived From |
 |---|-----------|-------------------|--------------|
-| 1 | [e.g., "Duplicate request within 1 second"] | [e.g., "Deduplicated — one notification sent"] | [e.g., "PRD §AC-3"] |
+| 1 | [e.g., "Duplicate request within 1 second"] | [e.g., "Deduplicated — one notification sent"] | [e.g., "spec AC-3"] |
 
 [If the test plan does not cover a known edge case, flag it: "⚠️ Gap — {edge case} not covered. Reason: {reason}."]
 

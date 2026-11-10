@@ -25,6 +25,8 @@ export const EscalationReason = {
    * once the orchestrator owns budget accounting.
    */
   BUDGET_EXCEEDED: 'BUDGET_EXCEEDED',
+  /** An epic from before spec pins: it has no spec to be reviewed against. */
+  SPEC_REQUIRED: 'SPEC_REQUIRED',
 } as const;
 
 export type EscalationReason = (typeof EscalationReason)[keyof typeof EscalationReason];

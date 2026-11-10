@@ -31,6 +31,13 @@ export class TicketCreateUseCase implements TicketCreatePort {
         '--spec backs an epic with a spec; it cannot be combined with --parent. A task inherits the pin of its epic.',
       );
     }
+    if (input.spec === undefined && !parentId) {
+      throw new Error(
+        'An epic needs a spec: pass --spec <feature>. A person writes the spec; AEOS reviews it and builds from it. ' +
+          'The skills that produce one, in order: prototype-harvest (what exists), gap-interrogation-solo or ' +
+          'gap-interrogation-capture (the decisions), spec-writer (spec.md under .aeos/features/<feature>/).',
+      );
+    }
     const specPin =
       input.spec === undefined ? null : this.pinSpec(projectKey, projectPath, input.spec);
 

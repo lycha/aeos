@@ -1,15 +1,15 @@
-column: PRODUCT_SCOPING
+column: SPEC_REVIEW
 phase: PLAN
-workerAgentFile: agents/pm-agent.yaml
+workerAgentFile: agents/spec-reviewer-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml
-outputArtifact: prd.md
+outputArtifact: spec-review.md
 minWordCount: 50
 requiredSections: []
 reviewerRubrics:
-  - rubrics/structure/prd-structure.md
-  - rubrics/drift/intent-drift.md
+  - rubrics/structure/spec-review-structure.md
 maxIterations: 3
 escalation: escalate_to_human
+# The approval that follows this column is the spec gate.
 advanceMode: manual
 preflight:
   enabled: true

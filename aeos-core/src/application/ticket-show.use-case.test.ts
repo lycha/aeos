@@ -50,7 +50,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     title: 'Add rate limiting',
     kind: 'EPIC',
     parentId: null,
-    column: 'PRODUCT_SCOPING',
+    column: 'SPEC_REVIEW',
     subState: 'WORKING',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',

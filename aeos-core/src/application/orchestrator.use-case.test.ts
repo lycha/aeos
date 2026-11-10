@@ -29,7 +29,7 @@ function epic(overrides: Partial<Ticket> = {}): Ticket {
     title: 'Epic',
     kind: TicketKind.EPIC,
     parentId: null,
-    column: Column.PRODUCT_SCOPING,
+    column: Column.SPEC_REVIEW,
     subState: SubState.READY,
     createdAt: 'x',
     updatedAt: 'y',
@@ -111,7 +111,7 @@ describe('OrchestratorUseCase', () => {
       execute: vi.fn().mockReturnValue({
         status: 'advanced',
         ticketId: EPIC_ID,
-        fromColumn: 'PRODUCT_SCOPING',
+        fromColumn: 'SPEC_REVIEW',
         toColumn: 'TECH_SPEC',
       }),
     };
@@ -165,7 +165,7 @@ describe('OrchestratorUseCase', () => {
   });
 
   it('runs a READY epic, then halts at the human gate', async () => {
-    let column: Column = Column.PRODUCT_SCOPING;
+    let column: Column = Column.SPEC_REVIEW;
     let subState: SubState = SubState.READY;
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockImplementation(() =>
       epic({ column, subState }),
@@ -299,7 +299,7 @@ describe('OrchestratorUseCase', () => {
 
     it('accepts a budget when the non-reporting executor is on an epic column already passed', async () => {
       at(Column.TECH_SPEC, []);
-      ollamaIn(Column.PRODUCT_SCOPING);
+      ollamaIn(Column.SPEC_REVIEW);
 
       await expect(run()).resolves.toBeDefined();
     });
@@ -419,7 +419,7 @@ describe('OrchestratorUseCase', () => {
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0].outcome).toContain('escalated');
     // The step records the column it drove, so the progress log can show it.
-    expect(result.steps[0].column).toBe(Column.PRODUCT_SCOPING);
+    expect(result.steps[0].column).toBe(Column.SPEC_REVIEW);
     // One run attempted, then the escalated sub-state stops the loop.
     expect(ticketRun.execute).toHaveBeenCalledTimes(1);
   });

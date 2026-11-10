@@ -11,7 +11,7 @@ export interface TicketCreateInput {
   /**
    * Parent epic ID. Supplying one creates a TASK; omitting it creates an EPIC.
    * A task inherits its specification from the parent's tech spec and task
-   * breakdown, so it skips scoping and goes straight to the build pipeline.
+   * breakdown, so it skips spec review and goes straight to the build pipeline.
    */
   parentId?: string;
   /**
@@ -30,7 +30,8 @@ export interface TicketCreateInput {
   body?: string;
   /**
    * Feature under `features/` of the artefact tree to back this epic with. The
-   * epic is pinned to the tree's current commit. Refused with `parentId`.
+   * epic is pinned to the tree's current commit. Required for an epic, refused
+   * with `parentId`.
    */
   spec?: string;
 }

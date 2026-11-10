@@ -426,7 +426,7 @@ describe('ContextAssembler — epic context (WI-3)', () => {
     });
   });
 
-  it("injects the parent epic's PRD and tech spec, PRD first", async () => {
+  it("injects the parent epic's tech spec, and nothing else of the epic's", async () => {
     (artifactStore.listArtifacts as ReturnType<typeof vi.fn>).mockImplementation(
       (_root: string, ticketId: string) =>
         ticketId === 'AEOS-2'
@@ -446,10 +446,10 @@ describe('ContextAssembler — epic context (WI-3)', () => {
 
     const result = await assembler.assemble('AEOS-2', PROJECT_ROOT, Column.IMPLEMENTATION);
 
-    expect(result.epicContext.map((a) => a.name)).toEqual(['AEOS-1-prd.md', 'AEOS-1-tech-spec.md']);
-    expect(result.epicContext[0].content).toBe('# PRD body');
-    // The epic's tasks.md is NOT pulled in — only PRD + tech spec.
-    expect(result.epicContext.some((a) => a.name.endsWith('-tasks.md'))).toBe(false);
+    // The human-written spec arrives through the pin (`spec`), not from the epic's artifacts.
+    expect(result.epicContext).toEqual([
+      { name: 'AEOS-1-tech-spec.md', content: '# Tech spec body' },
+    ]);
   });
 
   it('returns no epic context for an epic (no parent in metadata)', async () => {

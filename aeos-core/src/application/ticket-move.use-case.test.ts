@@ -80,7 +80,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     title: 'Test ticket',
     kind: 'EPIC',
     parentId: null,
-    column: 'PRODUCT_SCOPING',
+    column: 'SPEC_REVIEW',
     subState: 'WORKING',
     createdAt: '2025-01-01T09:00:00Z',
     updatedAt: '2025-01-01T10:00:00Z',
@@ -114,7 +114,7 @@ describe('TicketMoveUseCase', () => {
     expect(result).toEqual({
       status: 'moved',
       ticketId: TICKET_ID,
-      fromColumn: 'PRODUCT_SCOPING',
+      fromColumn: 'SPEC_REVIEW',
       toColumn: 'QA',
     });
     expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'QA');
@@ -162,7 +162,7 @@ describe('TicketMoveUseCase', () => {
     });
     expect(gitGateway.commit).toHaveBeenCalledWith(
       path.join(PROJECT_PATH, '.aeos'),
-      `[${TICKET_ID}][HUMAN][v1][move: PRODUCT_SCOPING → TECH_SPEC]`,
+      `[${TICKET_ID}][HUMAN][v1][move: SPEC_REVIEW → TECH_SPEC]`,
     );
   });
 
@@ -184,18 +184,18 @@ describe('TicketMoveUseCase', () => {
   it('returns error when transition fails', () => {
     (stateMachine.transition as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: false,
-      reason: 'Already in PRODUCT_SCOPING',
+      reason: 'Already in SPEC_REVIEW',
     });
     const result = useCase.execute({
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
-      targetColumn: 'PRODUCT_SCOPING',
+      targetColumn: 'SPEC_REVIEW',
     });
     expect(result).toEqual({
       status: 'error',
       ticketId: TICKET_ID,
-      error: 'Already in PRODUCT_SCOPING',
+      error: 'Already in SPEC_REVIEW',
     });
   });
 
@@ -229,7 +229,7 @@ describe('TicketMoveUseCase', () => {
         targetColumn: 'QA',
       }),
     ).toThrow('git commit failed');
-    expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'PRODUCT_SCOPING');
+    expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'SPEC_REVIEW');
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'WORKING');
   });
 });

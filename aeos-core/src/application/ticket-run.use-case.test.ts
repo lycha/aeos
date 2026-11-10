@@ -549,11 +549,11 @@ describe('TicketRunUseCase', () => {
 
   it('should keep non-IMPLEMENTATION worker runs in artifact mode by default', async () => {
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
-      runnableTicket({ column: 'PRODUCT_SCOPING' }),
+      runnableTicket({ column: 'SPEC_REVIEW' }),
     );
     (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue({
       ...defaultColumnSpec(),
-      column: 'PRODUCT_SCOPING',
+      column: 'SPEC_REVIEW',
       phase: 'PLAN',
       outputArtifact: 'prd.md',
       executorMode: undefined,
@@ -564,7 +564,7 @@ describe('TicketRunUseCase', () => {
     expect(executor.run).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        column: 'PRODUCT_SCOPING',
+        column: 'SPEC_REVIEW',
         mode: 'artifact',
         workingDirectory: undefined,
         onChunk: expect.any(Function),

@@ -86,7 +86,7 @@ describe('registerTicketListCommand', () => {
         title: 'Implement PM agent',
         kind: 'EPIC',
         parentId: null,
-        column: 'PRODUCT_SCOPING',
+        column: 'SPEC_REVIEW',
         subState: 'WORKING',
       }),
     ];
@@ -109,7 +109,7 @@ describe('registerTicketListCommand', () => {
 
     const row2 = consoleSpy.mock.calls[2][0] as string;
     expect(row2).toContain('AEOS-2');
-    expect(row2).toContain('PRODUCT_SCOPING');
+    expect(row2).toContain('SPEC_REVIEW');
     expect(row2).toContain('WORKING');
   });
 
