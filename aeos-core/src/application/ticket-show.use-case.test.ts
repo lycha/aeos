@@ -4,6 +4,7 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
 
 function createMockTicketRepo(): TicketRepository {
   return {
@@ -58,6 +59,7 @@ describe('TicketShowUseCase', () => {
   let ticketRepo: ReturnType<typeof createMockTicketRepo>;
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let costRepo: ReturnType<typeof createMockCostRepo>;
+  let runRecordStore: RunRecordStore;
   let useCase: TicketShowUseCase;
 
   const defaultInput = {
@@ -70,7 +72,8 @@ describe('TicketShowUseCase', () => {
     ticketRepo = createMockTicketRepo();
     artifactStore = createMockArtifactStore();
     costRepo = createMockCostRepo();
-    useCase = new TicketShowUseCase(ticketRepo, artifactStore, costRepo);
+    runRecordStore = { write: vi.fn(), list: vi.fn().mockReturnValue([]) };
+    useCase = new TicketShowUseCase(ticketRepo, artifactStore, costRepo, runRecordStore);
   });
 
   it('should return ticket and artifacts when ticket exists', () => {
@@ -167,5 +170,18 @@ describe('TicketShowUseCase', () => {
     if (result.ok) {
       expect(result.ticket.subState).toBeNull();
     }
+  });
+
+  it('lists the run ids recorded for the ticket', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
+    (runRecordStore.list as ReturnType<typeof vi.fn>).mockReturnValue([
+      { run_id: 'RUN-1' },
+      { run_id: 'RUN-2' },
+    ]);
+
+    const result = useCase.execute(defaultInput);
+
+    expect(runRecordStore.list).toHaveBeenCalledWith('/test/project', 'AEOS-1');
+    expect(result.ok && result.runs).toEqual(['RUN-1', 'RUN-2']);
   });
 });

@@ -3,6 +3,7 @@
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
+import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
 import type {
   TicketShowPort,
   TicketShowInput,
@@ -15,6 +16,7 @@ export class TicketShowUseCase implements TicketShowPort {
     private readonly ticketRepo: TicketRepository,
     private readonly artifactStore: ArtifactStore,
     private readonly costRepo: CostRepository,
+    private readonly runRecordStore: RunRecordStore,
   ) {}
 
   execute(input: TicketShowInput): TicketShowResult {
@@ -43,6 +45,10 @@ export class TicketShowUseCase implements TicketShowPort {
       ? this.ticketRepo.findById(input.projectId, ticket.parentId)
       : null;
 
-    return { ok: true, ticket, artifacts, executions, children, parent };
+    const runs = this.runRecordStore
+      .list(input.projectPath, ticket.id)
+      .map((record) => record.run_id);
+
+    return { ok: true, ticket, artifacts, executions, runs, children, parent };
   }
 }

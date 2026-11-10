@@ -149,4 +149,11 @@ describe('parseVerdict', () => {
     if (!result.ok) return;
     expect(result.verdict.verdict).toBe(Verdict.APPROVED);
   });
+
+  it('still finds exactly one trailer when a run link follows it', () => {
+    const review =
+      '<!-- AEOS-VERDICT\nverdict: APPROVED\nblockers: 0\n-->\n\n<!-- AEOS-RUN: RUN-20261110T100000Z-ab12 -->\n';
+
+    expect(parseVerdict(review)).toMatchObject({ ok: true, verdict: { verdict: 'APPROVED' } });
+  });
 });

@@ -1,9 +1,12 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { Ajv2020 } from 'ajv/dist/2020.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { RunRecord } from '../domain/model/run-record.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
 import {
   createStandaloneTask,
@@ -21,6 +24,21 @@ const realRegistry = (): string | null => {
   const file = path.join(realAeosHome, 'registry.json');
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null;
 };
+
+// The approved contract lives with the plugin, outside this package.
+const runRecordSchema = JSON.parse(
+  fs.readFileSync(
+    path.resolve(
+      import.meta.dirname,
+      '../../../plugins/artefact-tree-pipeline/schemas/run-record.schema.json',
+    ),
+    'utf-8',
+  ),
+) as object;
+const validateRunRecord = new Ajv2020({
+  // shortcut: one format in use, so a pattern instead of the ajv-formats package.
+  formats: { 'date-time': /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/ },
+}).compile(runRecordSchema);
 
 async function createTicket(...args: string[]): Promise<string> {
   const { output } = await runCli('ticket', 'create', ...args);
@@ -89,6 +107,53 @@ describe('stub end-to-end pipeline', () => {
     for (const id of [epic, ...tasks, standalone]) {
       expect(ticketState(id).column, id).toBe('DONE');
     }
+
+    // Run records: one per executor invocation, each valid against the
+    // approved schema, with its brief and its log, all committed.
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const read = (relative: string): string =>
+      fs.readFileSync(path.join(aeosDir, relative), 'utf-8');
+    const records: RunRecord[] = [];
+    for (const id of [epic, ...tasks, standalone]) {
+      const runsDir = path.join('tickets', id, 'runs');
+      for (const file of fs.readdirSync(path.join(aeosDir, runsDir))) {
+        if (file.endsWith('.json')) records.push(JSON.parse(read(path.join(runsDir, file))));
+      }
+    }
+    expect(records).toHaveLength(vi.mocked(StubExecutor.prototype.run).mock.calls.length);
+    expect(new Set(records.map((record) => record.role))).toEqual(
+      new Set(['preflight', 'worker', 'reviewer']),
+    );
+    for (const record of records) {
+      expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
+      expect(createHash('sha256').update(read(record.brief!.path)).digest('hex')).toBe(
+        record.brief!.sha256,
+      );
+      expect(fs.existsSync(path.join(aeosDir, record.transcript!))).toBe(true);
+      // Every artefact's last line names the run that wrote it.
+      if (record.role !== 'preflight') {
+        expect(read(record.output!).trimEnd().split('\n').pop()).toMatch(/^<!-- AEOS-RUN: RUN-/);
+      }
+    }
+    // Later attempts overwrite an artefact, so check the link from the artefact's side too.
+    for (const id of [epic, ...tasks, standalone]) {
+      for (const file of fs.readdirSync(path.join(aeosDir, 'tickets', id))) {
+        if (!file.endsWith('.md')) continue;
+        const runId = /<!-- AEOS-RUN: (\S+) -->\s*$/.exec(
+          read(path.join('tickets', id, file)),
+        )?.[1];
+        if (runId) expect(records.map((record) => record.run_id)).toContain(runId);
+      }
+    }
+    expect(
+      execFileSync('git', ['status', '--porcelain', '--', 'tickets/*/runs'], {
+        cwd: aeosDir,
+        encoding: 'utf-8',
+      }),
+    ).toBe('');
+    expect((await runCli('ticket', 'show', epic)).output).toContain(
+      records.find((record) => record.ticket === epic)!.run_id,
+    );
 
     // One git spawn for all commit assertions.
     const subjects = git('log', '--format=%s').split('\n');

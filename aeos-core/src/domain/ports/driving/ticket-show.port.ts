@@ -24,6 +24,8 @@ export type TicketShowResult =
       ticket: Ticket;
       artifacts: string[];
       executions: TicketExecutionInfo[];
+      /** Ids of the run records under the ticket's `runs/`, oldest first. */
+      runs: string[];
       /** Child tasks, when the ticket is an epic. Empty otherwise. */
       children: Ticket[];
       /** Parent epic, when the ticket is a task. Null otherwise. */

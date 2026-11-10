@@ -102,6 +102,7 @@ Changing pipeline behaviour usually means editing YAML, not TypeScript. Loaders 
 
 - **SQLite at `~/.aeos/state.db`** — the source of truth for tickets, transitions, and costs. All projects share one DB, isolated by `project_id`. Path overridable via `AEOS_HOME`.
 - **`<project>/.aeos/tickets/<ticketId>/`** — artifacts, named `<ticketId>-<artifact>.md`. Ticket state is mirrored into a markdown file on disk via `syncTicketDocument`, but **git carries artifacts only** — no commit on sub-state transitions. SQLite is authoritative for state; committing every transition buried the artifact history a human actually reads. Don't reintroduce `[STATE]` commits.
+- **`<project>/.aeos/tickets/<ticketId>/runs/`** — one run record per executor invocation (`<run_id>.json`, `.brief.md`, `.log`), written by `writeRunRecord` in `TicketRunUseCase` through `RunRecordStore`, on success and failure alike. `domain/model/run-record.ts` mirrors the human-owned `run-record.schema.json` field for field; the end-to-end test validates every record against it. A record is committed with the artifact it produced (which ends with an `AEOS-RUN` link to it), or alone when there is none. Preflight is recorded by wrapping the executor handed to `PreflightService`.
 - `Ticket` carries `kind` (`EPIC`/`TASK`) and `parentId`. Migration v2 backfills existing rows as epics and folds retired `ARCH_SPIKE` tickets into `TECH_SPEC`. Migrations must be idempotent — `ALTER TABLE ADD COLUMN` is not, so guard with `hasColumn`.
 
 ### Executors

@@ -140,5 +140,16 @@ export function registerTicketShowCommand(
           );
         }
       }
+
+      if (result.runs.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log('');
+        // eslint-disable-next-line no-console
+        console.log('Runs:');
+        for (const runId of result.runs) {
+          // eslint-disable-next-line no-console
+          console.log(`  • ${runId}`);
+        }
+      }
     });
 }

@@ -265,7 +265,7 @@ Notes:
 | `aeos project init [--name] [--key]`                         | Initialise `.aeos/` in the current directory                               |
 | `aeos ticket create <title> [--parent <epicId>]`             | Create a ticket in BACKLOG — an epic by default, a task with `--parent`    |
 | `aeos ticket list [--column]`                                | List tickets, optionally filtered by column                                |
-| `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, and recorded executions |
+| `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, recorded executions, and run ids |
 | `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |
 | `aeos ticket approve <id>`                                   | Advance a SIGNED_OFF ticket to the next column                             |
 | `aeos ticket sign-off <id>`                                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
@@ -497,6 +497,18 @@ Every executor invocation (both agent and reviewer) records token usage and cost
 An unknown cost is stored and shown as `unknown`, never as `$0.00`. Only `claude-cli` and `stub` report cost, so `aeos orchestrator run --budget` (or a budget persisted earlier) is refused when any agent of the epic or task columns resolves to `auggie-cli`, `opencode-cli` or `ollama-cli`; the message names the agent and the executor. Spend is the sum of known costs. If a run with an unknown cost is recorded against a budgeted epic anyway (an `--executor` override, or an executor failure), the orchestrator halts with `COST_UNKNOWN`.
 
 `aeos ticket show <id>` surfaces this history back to the operator as an `Executions:` section showing the column, agent, executor, model, and cost of each run.
+
+## Run Records
+
+Every executor invocation (preflight, worker, reviewer) leaves three files under `.aeos/tickets/<ticket>/runs/`, whether it succeeded, failed, timed out or was interrupted:
+
+- `<run_id>.json`: the record (role, agent, executor, model, attempt, timings, exit, usage, cost, verdict), valid against `plugins/artefact-tree-pipeline/schemas/run-record.schema.json`
+- `<run_id>.brief.md`: the exact prompt the agent received; its SHA-256 is in the record
+- `<run_id>.log`: the raw executor output. An executor with no output stream logs the text it returned, and a failed run logs its failure reason.
+
+Run ids look like `RUN-20261110T101500Z-k3f9`. The files are committed to the `.aeos` repository in the same commit as the artifact or review the run produced; a run that produced none is committed alone as `[<ticket>][RUN][<run_id>][<role>][<exit>]`. Each artifact and review ends with `<!-- AEOS-RUN: <run_id> -->`, naming the run that wrote it. `aeos ticket show <id>` lists the ticket's run ids.
+
+Briefs and logs are not redacted and may contain source code. `.aeos/` has no remote by default; think before you add one.
 
 ## Development
 
