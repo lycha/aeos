@@ -196,8 +196,10 @@ The file is checked every time it is loaded, and a command that needs it fails w
 - every pipeline starts at `BACKLOG` and ends at `DONE`
 - a column appears at most once in a pipeline
 - every column listed (other than `BACKLOG` and `DONE`) has a column spec in `.aeos/column-specs/`
+- an `EPIC` pipeline has exactly one `spec-review` column, before the `decomposition` column
 - an `EPIC` pipeline has exactly one `decomposition` column, before any `integration` or `final-gate` column
 - a pipeline has at most one `final-gate` column, and it is the last before `DONE`
+- a `TASK` pipeline has no `spec-review`, `decomposition` or `final-gate` column
 - only the kinds `EPIC` and `TASK` exist; any other key is refused
 
 `ticket move` takes a column of that ticket's own pipeline; anything else is refused with the list. The file is a protected path: an agentic run may not edit it.

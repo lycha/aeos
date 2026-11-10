@@ -93,9 +93,37 @@ describe('pipelineErrors', () => {
       }),
     ).toEqual([expect.stringMatching(/DOD_GATE.*EPIC.*last column before DONE/)]);
     expect(
-      pipelineErrors({ EPIC, TASK: ['BACKLOG', 'GATE_A', 'GATE_B', 'DONE'] }, (column) =>
-        column.startsWith('GATE') ? 'final-gate' : roleOf(column),
+      pipelineErrors(
+        { EPIC: ['BACKLOG', 'SPEC_REVIEW', 'TASK_BREAKDOWN', 'GATE_A', 'GATE_B', 'DONE'], TASK },
+        (column) => (column.startsWith('GATE') ? 'final-gate' : roleOf(column)),
       ),
-    ).toEqual([expect.stringMatching(/TASK pipeline has 2 columns with role `final-gate`/)]);
+    ).toEqual([expect.stringMatching(/EPIC pipeline has 2 columns with role `final-gate`/)]);
   });
+
+  it('requires exactly one spec-review column in an EPIC pipeline', () => {
+    expect(
+      errors({ EPIC: ['BACKLOG', 'TECH_SPEC', 'TASK_BREAKDOWN', 'DOD_GATE', 'DONE'] }),
+    ).toEqual([expect.stringMatching(/EPIC pipeline has no column with role `spec-review`/)]);
+    expect(
+      pipelineErrors(
+        { EPIC: ['BACKLOG', 'SPEC_REVIEW', 'SPEC_AGAIN', 'TASK_BREAKDOWN', 'DONE'], TASK },
+        (column) => (column === 'SPEC_AGAIN' ? 'spec-review' : roleOf(column)),
+      ),
+    ).toEqual([expect.stringMatching(/EPIC pipeline has 2 columns with role `spec-review`/)]);
+  });
+
+  it('requires the spec-review column before the decomposition column', () => {
+    expect(
+      errors({ EPIC: ['BACKLOG', 'TASK_BREAKDOWN', 'SPEC_REVIEW', 'DOD_GATE', 'DONE'] }),
+    ).toEqual([expect.stringMatching(/SPEC_REVIEW.*EPIC.*before TASK_BREAKDOWN/)]);
+  });
+
+  it.each(['SPEC_REVIEW', 'TASK_BREAKDOWN', 'DOD_GATE'])(
+    'refuses %s, by its role, in a TASK pipeline',
+    (column) => {
+      expect(errors({ TASK: ['BACKLOG', 'IMPLEMENTATION', column, 'DONE'] })).toEqual([
+        expect.stringMatching(new RegExp(`${column} \\(.*\\).*TASK pipeline`)),
+      ]);
+    },
+  );
 });

@@ -1,5 +1,6 @@
-// Domain service — the rules a project's pipelines must keep. They are the
-// ones the header of the approved `templates/pipelines.yaml` states.
+// Domain service — the rules a project's pipelines must keep: the ones the
+// header of the approved `templates/pipelines.yaml` states, and the spec-review
+// rule its third question proposes, accepted when the file was signed off.
 
 import { Column, type Pipelines } from '../model/column.js';
 import type { ColumnRole } from '../model/column-spec.js';
@@ -38,19 +39,37 @@ export function pipelineErrors(
     const count = (columns: Column[], role: ColumnRole): string =>
       `The ${kind} pipeline has ${columns.length === 0 ? 'no column' : `${columns.length} columns`} with role \`${role}\``;
 
-    if (kind === TicketKind.EPIC) {
-      const decomposition = withRole('decomposition');
-      if (decomposition.length !== 1) {
-        errors.push(`${count(decomposition, 'decomposition')}; it needs exactly one.`);
-      } else {
-        const later = middle.find(
-          (column) => roles.get(column) === 'integration' || roles.get(column) === 'final-gate',
-        );
-        if (later && middle.indexOf(later) < middle.indexOf(decomposition[0])) {
-          errors.push(
-            `Column ${decomposition[0]} (decomposition) of the ${kind} pipeline must come before ${later} (${roles.get(later)}).`,
-          );
+    if (kind === TicketKind.TASK) {
+      for (const [column, role] of roles) {
+        if (role === 'spec-review' || role === 'decomposition' || role === 'final-gate') {
+          errors.push(`Column ${column} (${role}) is not allowed in the ${kind} pipeline.`);
         }
+      }
+      continue;
+    }
+
+    const specReview = withRole('spec-review');
+    const decomposition = withRole('decomposition');
+    if (specReview.length !== 1) {
+      errors.push(`${count(specReview, 'spec-review')}; it needs exactly one.`);
+    } else if (
+      decomposition.length === 1 &&
+      middle.indexOf(decomposition[0]) < middle.indexOf(specReview[0])
+    ) {
+      errors.push(
+        `Column ${specReview[0]} (spec-review) of the ${kind} pipeline must come before ${decomposition[0]} (decomposition).`,
+      );
+    }
+    if (decomposition.length !== 1) {
+      errors.push(`${count(decomposition, 'decomposition')}; it needs exactly one.`);
+    } else {
+      const later = middle.find(
+        (column) => roles.get(column) === 'integration' || roles.get(column) === 'final-gate',
+      );
+      if (later && middle.indexOf(later) < middle.indexOf(decomposition[0])) {
+        errors.push(
+          `Column ${decomposition[0]} (decomposition) of the ${kind} pipeline must come before ${later} (${roles.get(later)}).`,
+        );
       }
     }
 
