@@ -126,6 +126,8 @@ describe('stub end-to-end pipeline', () => {
     );
     for (const record of records) {
       expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
+      // AEOS_EXECUTOR=stub is what ran, so it is what the record names.
+      expect(record).toMatchObject({ executor: 'stub', cost_basis: 'none' });
       expect(createHash('sha256').update(read(record.brief!.path)).digest('hex')).toBe(
         record.brief!.sha256,
       );

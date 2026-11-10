@@ -114,9 +114,13 @@ export function createContainer(): Container {
   const getStateMachine = (): StateMachineService =>
     (stateMachine ??= new StateMachineService(getTicketRepo(), getTransitionRepo()));
 
-  // Executor selection: AEOS_EXECUTOR=stub for testing, otherwise use per-agent executor config.
+  // AEOS_EXECUTOR=stub is read here and handed to the resolver, which turns
+  // every agent's executor into `stub` before createExecutor sees it.
+  const newExecutorConfigResolver = (): ExecutorConfigResolver =>
+    new ExecutorConfigResolver(projectRepo, process.env.AEOS_EXECUTOR === 'stub');
+
   const createExecutor = (agentSpec: AgentSpec) => {
-    if (process.env.AEOS_EXECUTOR === 'stub' || agentSpec.executor.type === 'stub') {
+    if (agentSpec.executor.type === 'stub') {
       return new StubExecutor();
     }
 
@@ -182,7 +186,7 @@ export function createContainer(): Container {
       const agentSpecLoader = new YamlAgentSpecLoader();
       const rubricLoader = new FsRubricLoader();
       const preflight = new PreflightService(artifactStore, getStateMachine());
-      const executorConfigResolver = new ExecutorConfigResolver(projectRepo);
+      const executorConfigResolver = newExecutorConfigResolver();
       return new TicketRunUseCase(
         getTicketRepo(),
         getStateMachine(),
@@ -230,7 +234,7 @@ export function createContainer(): Container {
         this.ticketApprove,
         gitGateway,
         new YamlAgentSpecLoader(),
-        new ExecutorConfigResolver(projectRepo),
+        newExecutorConfigResolver(),
       );
     },
     get ticketDodApprove() {
