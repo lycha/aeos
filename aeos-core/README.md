@@ -428,6 +428,16 @@ The orchestrator still halts with `HUMAN_GATE` when the epic arrives at `DOD_GAT
 
 An existing project needs the new templates: `aeos project sync` reports `agents/conformance-agent.yaml` as missing and `column-specs/dod-gate.yaml` and `rubrics/dod/dod-evaluation.md` as drifted.
 
+### The CLI contract
+
+The API of AEOS is its command line. `cli-contract.yaml`, at the package root, describes it: every command with its arguments, options and flags, the resources it needs, its output shapes and exit codes, and the environment variables the CLI reads. The file is human-owned: agents build to it and may not change it (it is a protected path), and its header is the reference for its format.
+
+```bash
+npm run verify:contract   # lint the contract, then compare the built CLI with it
+```
+
+The check fails when a command, argument, option, flag, summary or description differs between the two, or when an `AEOS_*` variable is read and not declared (or declared and never read). What the contract marks `proposed` and the CLI does not have yet is listed as pending, not as an error; what it marks `proposed` or `pending` and the CLI already has is listed as landed, for a person to update the markers. It does not yet check required resources, exit codes or output shapes.
+
 ### Protected paths
 
 An agent must not be able to weaken what it is judged against. Around every executor invocation (preflight, worker and reviewer, artifact and agentic) AEOS compares the changed files of the project repository and of `.aeos/` (its own repository) before and after. If the run changed a protected path, the path is restored (a tracked file is checked out, a new file is deleted), the run record carries the violation in `error`, and the attempt ends `FAILED`, not `ESCALATED`: the agent broke a rule.
@@ -438,7 +448,7 @@ Always protected, whatever the configuration says:
 .aeos/project.json        .aeos/rubrics/**         .aeos/schemas/**
 .aeos/pipelines.yaml      .aeos/column-specs/**    .aeos/features/**
 .aeos/CONSTRAINTS.md      .aeos/agents/**          .aeos/contexts/**
-.aeos/tickets/*/runs/**
+.aeos/tickets/*/runs/**   **/cli-contract.yaml
 ```
 
 Add project paths with `protectedPaths` in `.aeos/project.json`; the list can only add to the defaults:

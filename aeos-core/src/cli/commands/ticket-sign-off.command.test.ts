@@ -98,10 +98,12 @@ describe('registerTicketSignOffCommand', () => {
   });
 
   it('is refused without --reason, and the use case is not run', () => {
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1']);
+    // Commander refuses a missing required option before the action runs.
+    program.configureOutput({ writeErr: () => {} });
 
+    expect(() => program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1'])).toThrow(
+      "required option '--reason <text>' not specified",
+    );
     expect(useCase.execute).not.toHaveBeenCalled();
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('--reason'));
-    expect(process.exitCode).toBe(1);
   });
 });

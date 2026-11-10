@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { Command } from 'commander';
 import { vi } from 'vitest';
 
 import { buildProgram, createContainer } from '../cli/index.js';
@@ -173,7 +174,13 @@ export async function runCli(...args: string[]): Promise<CliResult> {
     }),
   ];
   try {
-    await buildProgram().parseAsync(['node', 'aeos', ...args]);
+    // Commander exits the process on a usage error; here every command throws instead.
+    const throwing = (command: Command): Command => {
+      command.exitOverride().configureOutput({ writeErr: () => {} });
+      command.commands.forEach(throwing);
+      return command;
+    };
+    await throwing(buildProgram()).parseAsync(['node', 'aeos', ...args]);
   } catch (error) {
     // As the entrypoint does with an error no command caught.
     capture(`Error: ${error instanceof Error ? error.message : String(error)}`);

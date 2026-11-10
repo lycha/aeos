@@ -124,10 +124,12 @@ describe('registerTicketMoveCommand', () => {
   });
 
   it('is refused without --reason, and the use case is not run', () => {
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA']);
+    // Commander refuses a missing required option before the action runs.
+    program.configureOutput({ writeErr: () => {} });
 
+    expect(() => program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA'])).toThrow(
+      "required option '--reason <text>' not specified",
+    );
     expect(useCase.execute).not.toHaveBeenCalled();
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('--reason'));
-    expect(process.exitCode).toBe(1);
   });
 });

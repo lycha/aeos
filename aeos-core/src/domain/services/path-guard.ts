@@ -19,6 +19,8 @@ export const DEFAULT_PROTECTED_PATHS: readonly string[] = [
   '.aeos/features/**',
   '.aeos/contexts/**',
   '.aeos/tickets/*/runs/**',
+  // The human-owned CLI contract, wherever the project keeps it.
+  '**/cli-contract.yaml',
 ];
 
 /** The defaults plus the project's `protectedPaths`. */

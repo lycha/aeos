@@ -12,6 +12,7 @@
   "files": [
     "dist",
     "templates",
+    "cli-contract.yaml",
     "skills",
     "README.md",
     "LICENSE"
@@ -27,6 +28,7 @@
     "lint": "npm run schemas:check && eslint 'src/**/*.{ts,tsx}' && prettier --check src/",
     "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix && prettier --write src/",
     "typecheck": "tsc --noEmit",
+    "verify:contract": "tsx src/cli/contract/main.ts",
     "smoke-test": "npx tsx src/infrastructure/executor/claude-cli-executor.smoke-test.ts",
     "smoke-test:auggie": "npx tsx src/infrastructure/executor/auggie-cli-executor.smoke-test.ts",
     "smoke-test:opencode": "npx tsx src/infrastructure/executor/opencode-cli-executor.smoke-test.ts"

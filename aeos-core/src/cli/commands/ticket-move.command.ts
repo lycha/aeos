@@ -24,18 +24,9 @@ export function registerTicketMoveCommand(
     .description('Move a ticket to any workflow status')
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
     .argument('<status>', 'Target column (identifier or label)')
-    .option('--reason <text>', 'Why the normal path is being bypassed. Recorded as a gate')
-    .action((ticketId: string, rawStatus: string, options: { reason?: string }) => {
+    .requiredOption('--reason <text>', 'Why the normal path is being bypassed. Recorded as a gate')
+    .action((ticketId: string, rawStatus: string, options: { reason: string }) => {
       try {
-        if (!options.reason) {
-          // eslint-disable-next-line no-console
-          console.error(
-            'Error: --reason <text> is required: say why the normal path is being bypassed. It is recorded with the decision.',
-          );
-          process.exitCode = 1;
-          return;
-        }
-
         const cwd = process.cwd();
         const projectPath = projectRepo.findRoot(cwd);
 
