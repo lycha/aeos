@@ -81,14 +81,39 @@ export function buildProgram(): Command {
   // not at program build time. This allows `aeos install` and `aeos project init`
   // to run before .aeos/ (and state.db) exist.
   registerTicketCreateCommand(program, () => container.ticketCreate, container.projectRepo);
-  registerTicketListCommand(program, () => container.ticketList, container.projectRepo);
-  registerTicketShowCommand(program, () => container.ticketShow, container.projectRepo);
+  registerTicketListCommand(
+    program,
+    () => container.ticketList,
+    container.projectRepo,
+    container.columnLabels,
+  );
+  registerTicketShowCommand(
+    program,
+    () => container.ticketShow,
+    container.projectRepo,
+    container.columnLabels,
+  );
   registerTicketAnswerCommand(program, () => container.ticketAnswer, container.projectRepo);
   registerTicketResolveCommand(program, () => container.ticketResolve, container.projectRepo);
-  registerTicketRunCommand(program, () => container.ticketRun, container.projectRepo);
-  registerTicketApproveCommand(program, () => container.ticketApprove, container.projectRepo);
+  registerTicketRunCommand(
+    program,
+    () => container.ticketRun,
+    container.projectRepo,
+    container.columnLabels,
+  );
+  registerTicketApproveCommand(
+    program,
+    () => container.ticketApprove,
+    container.projectRepo,
+    container.columnLabels,
+  );
   registerTicketSignOffCommand(program, () => container.ticketSignOff, container.projectRepo);
-  registerTicketMoveCommand(program, () => container.ticketMove, container.projectRepo);
+  registerTicketMoveCommand(
+    program,
+    () => container.ticketMove,
+    container.projectRepo,
+    container.columnLabels,
+  );
   registerTicketReadyCommand(program, () => container.ticketReady, container.projectRepo);
   registerTicketDodApproveCommand(
     program,
@@ -97,8 +122,13 @@ export function buildProgram(): Command {
     container.rubricLoader,
     container.artifactStore,
   );
-  registerOrchestratorCommand(program, () => container.orchestrator, container.projectRepo);
-  registerCostsCommand(program, () => container.costs);
+  registerOrchestratorCommand(
+    program,
+    () => container.orchestrator,
+    container.projectRepo,
+    container.columnLabels,
+  );
+  registerCostsCommand(program, () => container.costs, container.columnLabelsOfProject);
 
   return program;
 }

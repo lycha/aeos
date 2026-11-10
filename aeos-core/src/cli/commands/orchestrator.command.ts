@@ -3,6 +3,7 @@
 import type { Command } from 'commander';
 import type { OrchestratorPort } from '../../domain/ports/driving/orchestrator.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { withColumnLabels, type ColumnLabels } from '../../domain/services/column-labels.js';
 import { createTicketRunDisplay } from '../ui/ticket-run-display.js';
 
 /** Halt reasons that mean "finished cleanly", as opposed to "stopped early". */
@@ -12,12 +13,17 @@ export function registerOrchestratorCommand(
   program: Command,
   getOrchestrator: () => OrchestratorPort,
   projectRepo: ProjectRepository,
+  getLabels: (projectPath: string) => ColumnLabels,
 ): void {
   const orchestratorCmd =
     program.commands.find((c) => c.name() === 'orchestrator') ??
     program.command('orchestrator').description('Drive an epic and its tasks autonomously');
 
-  function resolveProject(): { id: string; path: string } | null {
+  /**
+   * `label` puts column labels into text built with identifiers: step outcomes
+   * and halt messages, which are stored with identifiers.
+   */
+  function resolveProject(): { id: string; path: string; label: (text: string) => string } | null {
     const projectPath = projectRepo.findRoot(process.cwd());
     if (!projectPath) {
       // eslint-disable-next-line no-console
@@ -25,7 +31,19 @@ export function registerOrchestratorCommand(
       process.exitCode = 1;
       return null;
     }
-    return { id: projectRepo.read(projectPath).id, path: projectPath };
+    try {
+      const labels = getLabels(projectPath);
+      return {
+        id: projectRepo.read(projectPath).id,
+        path: projectPath,
+        label: (text) => withColumnLabels(text, labels),
+      };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+      return null;
+    }
   }
 
   orchestratorCmd
@@ -42,7 +60,7 @@ export function registerOrchestratorCommand(
       // renders the same pane as a standalone `aeos ticket run`. Started lazily
       // on the first ticket-run event, so an immediate halt (no runs) prints
       // its summary normally rather than flashing a blank screen.
-      const display = createTicketRunDisplay(process.stdout);
+      const display = createTicketRunDisplay(process.stdout, project.label);
       let displayStarted = false;
 
       // Capture the instance so SIGINT interrupts the same run it started.
@@ -75,7 +93,7 @@ export function registerOrchestratorCommand(
               // it instead. Without a TTY, print each step as it happens.
               if (!display.live) {
                 // eslint-disable-next-line no-console
-                console.log(`  ${step.ticketId} [${step.column}]: ${step.outcome}`);
+                console.log(project.label(`  ${step.ticketId} [${step.column}]: ${step.outcome}`));
               }
             },
           },
@@ -89,13 +107,13 @@ export function registerOrchestratorCommand(
         // screen is torn down so the run is legible in scroll-back.
         if (display.live) {
           for (const step of result.steps) {
-            summary.push(`  ${step.ticketId} [${step.column}]: ${step.outcome}`);
+            summary.push(project.label(`  ${step.ticketId} [${step.column}]: ${step.outcome}`));
           }
         }
         summary.push(
           '',
           `${CLEAN_HALTS.has(result.haltReason) ? '✓' : '⏸'} ${result.epicId} — ${result.haltReason}`,
-          `  ${result.message}`,
+          `  ${project.label(result.message)}`,
           `  ${result.steps.length} action(s), $${result.spentUsd.toFixed(2)} spent`,
         );
         // eslint-disable-next-line no-console
@@ -172,7 +190,7 @@ export function registerOrchestratorCommand(
           [
             `${state.epicId}  ${state.status}  (budget: ${budget})`,
             state.haltReason ? `  last halt: ${state.haltReason}` : null,
-            state.message ? `  ${state.message}` : null,
+            state.message ? `  ${project.label(state.message)}` : null,
           ]
             .filter(Boolean)
             .join('\n'),

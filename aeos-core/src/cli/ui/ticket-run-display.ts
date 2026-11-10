@@ -62,14 +62,16 @@ export interface TicketRunDisplay {
   requestInterrupt(): void;
 }
 
+/** `labelOf` turns a column identifier into the name shown; identifiers by default. */
 export function createTicketRunDisplay(
   stdout: NodeJS.WriteStream = process.stdout,
+  labelOf: (column: string) => string = (column) => column,
 ): TicketRunDisplay {
   if (stdout.isTTY && (stdout.columns ?? DEFAULT_COLUMNS) >= MIN_LIVE_COLUMNS) {
-    return new LiveTicketRunDisplay(stdout);
+    return new LiveTicketRunDisplay(stdout, labelOf);
   }
 
-  return new PlainTicketRunDisplay(stdout);
+  return new PlainTicketRunDisplay(stdout, labelOf);
 }
 
 abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserver {
@@ -89,7 +91,10 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
   protected readonly stageStates = new Map<TicketRunPhase, StageSnapshot>();
   private readonly partialBuffers = new Map<string, string>();
 
-  constructor(protected readonly stdout: NodeJS.WriteStream) {
+  constructor(
+    protected readonly stdout: NodeJS.WriteStream,
+    private readonly labelOf: (column: string) => string,
+  ) {
     for (const phase of PHASE_ORDER) {
       this.stageStates.set(phase, { status: 'pending' });
     }
@@ -109,7 +114,7 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
 
   onEvent(event: TicketRunEvent): void {
     this.ticketId = event.ticketId;
-    this.column = event.column;
+    this.column = this.labelOf(event.column);
 
     switch (event.type) {
       case 'ticket-run.started':
@@ -127,7 +132,7 @@ abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserv
         this.executor = event.payload.executor;
         this.model = event.payload.model ?? '—';
         this.appendLogLine(
-          `[run] started | ${event.ticketId} | ${event.column} | executor=${this.executor}${event.payload.model ? ` | model=${event.payload.model}` : ''}`,
+          `[run] started | ${event.ticketId} | ${this.column} | executor=${this.executor}${event.payload.model ? ` | model=${event.payload.model}` : ''}`,
         );
         break;
       case 'run.attempt.started':

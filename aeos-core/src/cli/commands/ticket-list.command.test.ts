@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { registerTicketListCommand } from './ticket-list.command.js';
+import { Column } from '../../domain/model/column.js';
+import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketListPort } from '../../domain/ports/driving/ticket-list.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import type { Ticket } from '../../domain/model/ticket.js';
+
+// The tech spec column is labelled; every other column shows its default.
+const labelsOf = () => columnLabels({ [Column.TECH_SPEC]: { label: 'Shaping' } }, null);
 
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {
@@ -57,7 +62,7 @@ describe('registerTicketListCommand', () => {
     program.exitOverride();
     useCase = createMockTicketListUseCase();
     projectRepo = createMockProjectRepo();
-    registerTicketListCommand(program, () => useCase, projectRepo);
+    registerTicketListCommand(program, () => useCase, projectRepo, labelsOf);
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     savedExitCode = process.exitCode;
@@ -104,12 +109,14 @@ describe('registerTicketListCommand', () => {
     const row1 = consoleSpy.mock.calls[1][0] as string;
     expect(row1).toContain('AEOS-1');
     expect(row1).toContain('Add rate limiting');
-    expect(row1).toContain('BACKLOG');
+    expect(row1).toContain('Backlog');
     expect(row1).toContain('—');
 
     const row2 = consoleSpy.mock.calls[2][0] as string;
     expect(row2).toContain('AEOS-2');
-    expect(row2).toContain('SPEC_REVIEW');
+    // No label set: the identifier in sentence case.
+    expect(row2).toContain('Spec review');
+    expect(row2).not.toContain('SPEC_REVIEW');
     expect(row2).toContain('WORKING');
   });
 
@@ -140,6 +147,22 @@ describe('registerTicketListCommand', () => {
       projectId: 'proj-1',
       columnFilter: 'BACKLOG',
     });
+  });
+
+  it("shows a column's label, and filters by label as well as by identifier", () => {
+    (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue([
+      makeTicket({ column: 'TECH_SPEC', subState: 'READY' }),
+    ]);
+
+    program.parse(['node', 'aeos', 'ticket', 'list', '--column', 'shaping']);
+
+    expect(useCase.execute).toHaveBeenCalledWith({
+      projectId: 'proj-1',
+      columnFilter: 'TECH_SPEC',
+    });
+    const row = consoleSpy.mock.calls[1][0] as string;
+    expect(row).toContain('Shaping');
+    expect(row).not.toContain('TECH_SPEC');
   });
 
   it('should reject invalid column with error and exit code 1', () => {

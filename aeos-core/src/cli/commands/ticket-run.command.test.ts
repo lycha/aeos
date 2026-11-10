@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 
 import { registerTicketRunCommand } from './ticket-run.command.js';
+import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketRunPort } from '../../domain/ports/driving/ticket-run.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 
@@ -50,7 +51,12 @@ describe('registerTicketRunCommand', () => {
     program.exitOverride();
     useCase = createMockTicketRunUseCase();
     projectRepo = createMockProjectRepo();
-    registerTicketRunCommand(program, () => useCase, projectRepo);
+    registerTicketRunCommand(
+      program,
+      () => useCase,
+      projectRepo,
+      () => columnLabels({}, null),
+    );
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     savedExitCode = process.exitCode;

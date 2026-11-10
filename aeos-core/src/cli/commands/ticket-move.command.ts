@@ -1,7 +1,12 @@
 // CLI command — aeos ticket move
 
 import type { Command } from 'commander';
-import { Column, isValidColumn } from '../../domain/model/column.js';
+import { Column } from '../../domain/model/column.js';
+import {
+  resolveColumn,
+  withColumnLabels,
+  type ColumnLabels,
+} from '../../domain/services/column-labels.js';
 import type { TicketMovePort } from '../../domain/ports/driving/ticket-move.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 
@@ -9,6 +14,7 @@ export function registerTicketMoveCommand(
   program: Command,
   getTicketMoveUseCase: () => TicketMovePort,
   projectRepo: ProjectRepository,
+  getLabels: (projectPath: string) => ColumnLabels,
 ): void {
   const ticketCmd =
     program.commands.find((c) => c.name() === 'ticket') ??
@@ -18,7 +24,7 @@ export function registerTicketMoveCommand(
     .command('move')
     .description('Move a ticket to any workflow status')
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
-    .argument('<status>', 'Target workflow status / column')
+    .argument('<status>', 'Target column (identifier or label)')
     .option('--reason <text>', 'Why the normal path is being bypassed. Recorded as a gate')
     .action((ticketId: string, rawStatus: string, options: { reason?: string }) => {
       try {
@@ -41,8 +47,10 @@ export function registerTicketMoveCommand(
           return;
         }
 
-        const targetColumn = rawStatus.toUpperCase();
-        if (!isValidColumn(targetColumn)) {
+        // An identifier or a label; only the identifier goes any further.
+        const labels = getLabels(projectPath);
+        const targetColumn = resolveColumn(rawStatus, labels);
+        if (!targetColumn) {
           // eslint-disable-next-line no-console
           console.error(
             `Error: Unknown status '${rawStatus}'. Valid statuses: ${Object.values(Column).join(', ')}`,
@@ -64,12 +72,12 @@ export function registerTicketMoveCommand(
           case 'moved':
             // eslint-disable-next-line no-console
             console.log(
-              `✓ Ticket ${result.ticketId} moved: ${result.fromColumn} → ${result.toColumn}`,
+              `✓ Ticket ${result.ticketId} moved: ${labels[result.fromColumn]} → ${labels[result.toColumn]}`,
             );
             break;
           case 'error':
             // eslint-disable-next-line no-console
-            console.error(`Error: ${result.error}`);
+            console.error(`Error: ${withColumnLabels(result.error, labels)}`);
             process.exitCode = 1;
             break;
         }

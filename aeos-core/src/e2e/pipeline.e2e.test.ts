@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GateRecord } from '../domain/model/gate-record.js';
 import type { RunRecord } from '../domain/model/run-record.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
+import { getDb } from '../infrastructure/persistence/database.js';
 import {
   addFixtureFeature,
   createEpic,
@@ -543,6 +544,71 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       }
     },
   );
+
+  it('shows column labels, accepts them as input, and stores identifiers only', async () => {
+    await runCli('install');
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    /** Sets, or with null removes, the `label` of a column spec. */
+    const setLabel = (spec: string, label: string | null): void => {
+      const file = path.join(aeosDir, 'column-specs', `${spec}.yaml`);
+      const withoutLabel = fs.readFileSync(file, 'utf-8').replace(/^label: .*\n/m, '');
+      fs.writeFileSync(file, label === null ? withoutLabel : `label: ${label}\n${withoutLabel}`);
+    };
+    const stored = (): string =>
+      JSON.stringify(
+        ['tickets', 'transitions', 'cost_records', 'orchestrator_state'].map((table) =>
+          getDb().prepare(`SELECT * FROM ${table}`).all(),
+        ),
+      );
+
+    setLabel('tech-spec', 'Shaping');
+    setLabel('qa', null);
+    const epic = await createEpic('An epic');
+    expect((await runCli('ticket', 'approve', epic)).output).toContain(
+      `${epic} advanced: Backlog → Spec review`,
+    );
+
+    // A label is accepted wherever a column is named, in any case.
+    const move = await runCli('ticket', 'move', epic, 'shaping', '--reason', 'Moving it by hand.');
+    expect(move.output).toContain(`${epic} moved: Spec review → Shaping`);
+    expect(ticketState(epic).column).toBe('TECH_SPEC');
+
+    const list = (await runCli('ticket', 'list')).output;
+    expect(list).toContain('Shaping');
+    expect(list).not.toContain('TECH_SPEC');
+    expect((await runCli('ticket', 'list', '--column', 'SHAPING')).output).toContain(epic);
+    // The identifier is shown once, here.
+    expect((await runCli('ticket', 'show', epic)).output).toContain('Column: Shaping (TECH_SPEC)');
+
+    // No label: the identifier in sentence case.
+    const task = createStandaloneTask('A task');
+    await runCli('ticket', 'move', task, 'QA', '--reason', 'Moving it by hand.');
+    expect((await runCli('ticket', 'show', task)).output).toContain('Column: Qa (QA)');
+
+    // Nothing stored carries a label: not the database, not the gate records.
+    const gates = fs.readFileSync(
+      path.join(aeosDir, 'features', 'feature-sample', 'gates.yaml'),
+      'utf-8',
+    );
+    for (const text of [stored(), gates]) {
+      expect(text).toContain('TECH_SPEC');
+      expect(text).not.toMatch(/shaping/i);
+    }
+
+    // Renaming a column changes what is shown and nothing that is stored.
+    const before = stored();
+    setLabel('tech-spec', 'Design');
+    expect((await runCli('ticket', 'list')).output).toContain('Design');
+    expect(stored()).toBe(before);
+
+    // Two columns cannot share a label.
+    setLabel('qa', 'design');
+    const clash = await runCli('ticket', 'list');
+    expect(clash.exitCode).toBe(1);
+    expect(clash.output).toContain('column-specs/tech-spec.yaml');
+    expect(clash.output).toContain('column-specs/qa.yaml');
+  });
 
   it('fails a run that touches a protected path, in either repository, and restores it', async () => {
     await runCli('install');

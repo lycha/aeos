@@ -2,6 +2,8 @@
 
 export interface ColumnSpec {
   readonly column: string;
+  /** The name a person sees for the column. Absent means the identifier in sentence case. */
+  readonly label?: string;
   readonly executorMode?: 'artifact' | 'agentic';
   /**
    * Whether an agentic run must leave a git diff to pass validation.

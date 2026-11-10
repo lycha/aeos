@@ -3,7 +3,8 @@
 import type { Command } from 'commander';
 import type { TicketListPort } from '../../domain/ports/driving/ticket-list.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
-import { isValidColumn, Column } from '../../domain/model/column.js';
+import { Column } from '../../domain/model/column.js';
+import { resolveColumn, type ColumnLabels } from '../../domain/services/column-labels.js';
 
 const VALID_COLUMNS = Object.values(Column).join(', ');
 
@@ -11,6 +12,7 @@ export function registerTicketListCommand(
   program: Command,
   getTicketListUseCase: () => TicketListPort,
   projectRepo: ProjectRepository,
+  getLabels: (projectPath: string) => ColumnLabels,
 ): void {
   const ticketCmd =
     program.commands.find((c) => c.name() === 'ticket') ??
@@ -19,25 +21,10 @@ export function registerTicketListCommand(
   ticketCmd
     .command('list')
     .description('List all tickets in the current project')
-    .option('--column <column>', 'Filter by pipeline column')
+    .option('--column <column>', 'Filter by pipeline column (identifier or label)')
     .action((opts: { column?: string }) => {
       try {
-        // 1. Validate --column flag if provided
-        let columnFilter: Column | undefined;
-        if (opts.column) {
-          const upper = opts.column.toUpperCase();
-          if (!isValidColumn(upper)) {
-            // eslint-disable-next-line no-console
-            console.error(
-              `Error: Unknown column '${opts.column}'. Valid columns: ${VALID_COLUMNS}`,
-            );
-            process.exitCode = 1;
-            return;
-          }
-          columnFilter = upper;
-        }
-
-        // 2. Resolve project root
+        // 1. Resolve project root
         const cwd = process.cwd();
         const projectPath = projectRepo.findRoot(cwd);
 
@@ -46,6 +33,22 @@ export function registerTicketListCommand(
           console.error("Error: Not inside an AEOS project. Run 'aeos project init' first.");
           process.exitCode = 1;
           return;
+        }
+        const labels = getLabels(projectPath);
+
+        // 2. Validate --column flag if provided: an identifier or a label
+        let columnFilter: Column | undefined;
+        if (opts.column) {
+          const resolved = resolveColumn(opts.column, labels);
+          if (!resolved) {
+            // eslint-disable-next-line no-console
+            console.error(
+              `Error: Unknown column '${opts.column}'. Valid columns: ${VALID_COLUMNS}`,
+            );
+            process.exitCode = 1;
+            return;
+          }
+          columnFilter = resolved;
         }
 
         const project = projectRepo.read(projectPath);
@@ -105,10 +108,9 @@ export function registerTicketListCommand(
             ticket.title.length > COL_TITLE
               ? ticket.title.substring(0, COL_TITLE - 1) + '…'
               : ticket.title;
+          const label = labels[ticket.column];
           const truncColumn =
-            ticket.column.length > COL_COLUMN
-              ? ticket.column.substring(0, COL_COLUMN - 1) + '…'
-              : ticket.column;
+            label.length > COL_COLUMN ? label.substring(0, COL_COLUMN - 1) + '…' : label;
           const row = [
             truncId.padEnd(COL_ID),
             truncTitle.padEnd(COL_TITLE),

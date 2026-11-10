@@ -133,6 +133,34 @@ usually means editing this YAML, not TypeScript.
 Re-running `aeos project init` is the repair path: it restores anything missing and
 never overwrites a file you have edited.
 
+### Column names
+
+A column has an **identifier** (`TECH_SPEC`), which is fixed: it is what the database,
+the transition log, gate records and run records store. What you see is its **label**,
+which you can change:
+
+```yaml
+# .aeos/column-specs/tech-spec.yaml
+column: TECH_SPEC
+label: Shaping
+```
+
+```json
+// .aeos/project.json: BACKLOG and DONE have no column spec
+{ "labels": { "BACKLOG": "Inbox", "DONE": "Shipped" } }
+```
+
+With no label a column shows its identifier in sentence case (`SPEC_REVIEW` → `Spec review`).
+`ticket list`, `ticket show`, `ticket move`, `ticket approve`, `ticket run`, the orchestrator
+and `aeos costs` show labels; `ticket show` also prints the identifier
+(`Column: Shaping (TECH_SPEC)`). `ticket move <id> <status>` and `ticket list --column`
+accept an identifier or a label, in any case; an identifier wins if both match.
+
+Labels are checked whenever a column spec is loaded: unique within the project whatever
+the case, not empty, at most 40 characters, and not the identifier of another column. A
+clash fails the command and names both files. Renaming a column changes nothing that is
+stored. Column **order** is not configurable yet.
+
 ## Ticket State Machine
 
 Each ticket stores exactly two workflow fields:

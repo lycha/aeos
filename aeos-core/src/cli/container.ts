@@ -69,6 +69,7 @@ import { ExecutorConfigResolver } from '../application/services/executor-config-
 import { GhPullRequestGateway } from '../infrastructure/pull-request/gh-pull-request.adapter.js';
 import { StubPullRequestGateway } from '../infrastructure/pull-request/stub-pull-request.adapter.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
+import { columnLabels, type ColumnLabels } from '../domain/services/column-labels.js';
 
 export interface Container {
   install: InstallPort;
@@ -88,6 +89,10 @@ export interface Container {
   orchestrator: OrchestratorPort;
   costs: CostsPort;
   projectRepo: ProjectRepository;
+  /** The label of every column of the project at this path. Throws when they are invalid. */
+  columnLabels: (projectPath: string) => ColumnLabels;
+  /** The same by project id, for `aeos costs`; the defaults for a project that cannot be read. */
+  columnLabelsOfProject: (projectId: string) => ColumnLabels;
   rubricLoader: RubricLoader;
   artifactStore: ArtifactStore;
 }
@@ -306,6 +311,16 @@ export function createContainer(): Container {
       return new CostsUseCase(getCostRepo(), configStore);
     },
     projectRepo,
+    columnLabels: (projectPath) => new YamlColumnSpecLoader().labels(projectPath),
+    columnLabelsOfProject: (projectId) => {
+      try {
+        const entry = configStore.readRegistry().find((project) => project.id === projectId);
+        if (entry) return new YamlColumnSpecLoader().labels(entry.path);
+      } catch {
+        // A report across projects must not fail on one project's labels.
+      }
+      return columnLabels({}, null);
+    },
     rubricLoader: new FsRubricLoader(),
     artifactStore,
   };

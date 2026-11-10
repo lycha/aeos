@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { registerCostsCommand } from './costs.command.js';
+import { Column } from '../../domain/model/column.js';
+import { columnLabels } from '../../domain/services/column-labels.js';
 import type { CostsPort, CostReport } from '../../domain/ports/driving/costs.port.js';
 
 describe('aeos costs', () => {
@@ -25,7 +27,16 @@ describe('aeos costs', () => {
     vi.spyOn(console, 'error').mockImplementation(capture);
     execute = vi.fn();
     program = new Command().name('aeos').exitOverride().configureOutput({ writeOut: capture });
-    registerCostsCommand(program, () => ({ execute }) as CostsPort);
+    registerCostsCommand(
+      program,
+      () => ({ execute }) as CostsPort,
+      // Labels are per project: only `aeos` labels its tech spec column.
+      (projectId) =>
+        columnLabels(
+          projectId === 'aeos' ? { [Column.TECH_SPEC]: { label: 'Shaping' } } : {},
+          null,
+        ),
+    );
     report({ totalUsd: 0, unknownRecords: 0, byProject: [] });
   });
 
@@ -66,7 +77,7 @@ describe('aeos costs', () => {
     expect(output).toContain('Period: all time');
     expect(output).toMatch(/^ {2}aeos +\$4\.23$/m);
     expect(output).toMatch(/^ {4}AEOS-1 +\$4\.23$/m);
-    expect(output).toMatch(/^ {6}TECH_SPEC +\$4\.23$/m);
+    expect(output).toMatch(/^ {6}Shaping +\$4\.23$/m);
     expect(output).toMatch(/^ {6}worker +\$3\.00$/m);
     expect(output).toMatch(/^ {6}reviewer +\$1\.23$/m);
     expect(output).toMatch(/^ {2}other +\$0\.40$/m);

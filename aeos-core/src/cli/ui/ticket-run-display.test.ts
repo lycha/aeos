@@ -57,6 +57,21 @@ describe('ticket-run-display — agent visibility', () => {
     expect(output()).toContain('agent=architect-agent');
   });
 
+  it('shows the column by its label when given one', () => {
+    const { stream, output } = fakeStdout();
+    const display = createTicketRunDisplay(stream, (column) =>
+      column === 'TECH_SPEC' ? 'Shaping' : column,
+    );
+    display.start();
+
+    display.observer.onEvent?.(
+      event({ type: 'ticket-run.started', payload: { executor: 'stub' } } as never),
+    );
+
+    expect(output()).toContain('| STAN-1 | Shaping |');
+    expect(output()).not.toContain('TECH_SPEC');
+  });
+
   it('prints an unknown cost as unknown, and a known one in dollars', () => {
     const { stream, output } = fakeStdout();
     const display = createTicketRunDisplay(stream);

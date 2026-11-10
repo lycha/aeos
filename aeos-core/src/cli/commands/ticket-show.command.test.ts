@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { registerTicketShowCommand } from './ticket-show.command.js';
+import { Column } from '../../domain/model/column.js';
+import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketShowPort } from '../../domain/ports/driving/ticket-show.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+
+// The tech spec column is labelled; every other column shows its default.
+const labelsOf = () => columnLabels({ [Column.TECH_SPEC]: { label: 'Shaping' } }, null);
 
 function createMockTicketShowUseCase(): TicketShowPort {
   return {
@@ -78,7 +83,7 @@ describe('registerTicketShowCommand', () => {
     program.exitOverride();
     useCase = createMockTicketShowUseCase();
     projectRepo = createMockProjectRepo();
-    registerTicketShowCommand(program, () => useCase, projectRepo);
+    registerTicketShowCommand(program, () => useCase, projectRepo, labelsOf);
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     savedExitCode = process.exitCode;
@@ -96,7 +101,8 @@ describe('registerTicketShowCommand', () => {
 
     expect(consoleSpy).toHaveBeenCalledWith('Ticket: AEOS-1');
     expect(consoleSpy).toHaveBeenCalledWith('Title:  Add rate limiting');
-    expect(consoleSpy).toHaveBeenCalledWith('Column: SPEC_REVIEW');
+    // The one place the identifier is shown beside the label.
+    expect(consoleSpy).toHaveBeenCalledWith('Column: Spec review (SPEC_REVIEW)');
     expect(consoleSpy).toHaveBeenCalledWith('State:  WORKING');
     expect(consoleSpy).toHaveBeenCalledWith('');
     expect(consoleSpy).toHaveBeenCalledWith('Artifacts:');
@@ -126,10 +132,10 @@ describe('registerTicketShowCommand', () => {
     program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      '  • SPEC_REVIEW (worker-agent): claude-cli / claude-opus-4-6 — $0.0123',
+      '  • Spec review (worker-agent): claude-cli / claude-opus-4-6 — $0.0123',
     );
     expect(consoleSpy).toHaveBeenCalledWith(
-      '  • SPEC_REVIEW (reviewer-agent): ollama-cli / llama — unknown',
+      '  • Spec review (reviewer-agent): ollama-cli / llama — unknown',
     );
   });
 

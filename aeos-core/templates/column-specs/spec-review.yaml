@@ -1,4 +1,5 @@
 column: SPEC_REVIEW
+label: Spec review
 phase: PLAN
 workerAgentFile: agents/spec-reviewer-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml

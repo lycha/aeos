@@ -16,6 +16,8 @@ export interface ProjectExecutorConfig extends Project {
   readonly protectedPaths?: readonly string[];
   /** `enabled: false` turns off pushing and pull requests, for a local project. */
   readonly pullRequests?: { readonly enabled?: boolean };
+  /** Column labels by identifier, for `BACKLOG` and `DONE`, which have no column spec. */
+  readonly labels?: Readonly<Record<string, string>>;
   /** Root of the artefact tree, relative to the project root. Default `.aeos`. */
   readonly artefactTree?: string;
   readonly executor?: {
