@@ -17,6 +17,8 @@ interface ExecutorSuccess {
   readonly content?: string;
   /** Token usage if available from the model API */
   readonly usage?: TokenUsage;
+  /** Full raw executor output stream, when the executor has one */
+  readonly transcript?: string;
 }
 
 interface ExecutorFailure {

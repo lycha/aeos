@@ -5,15 +5,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import type { ExecutorInvocation } from '../../domain/model/executor-invocation.js';
-import type { ExecutorResult } from '../../domain/model/executor-result.js';
+import type { ExecutorResult, TokenUsage } from '../../domain/model/executor-result.js';
 import type { Executor } from '../../domain/ports/driven/executor.port.js';
 
 /** Configuration for the Claude CLI executor. */
 export interface ClaudeCliExecutorConfig {
   /** Model identifier passed as --model flag (e.g. 'claude-opus-4-6'). */
   model?: string;
-  /** Maximum output tokens passed as --max-tokens flag. */
-  maxTokens?: number;
   /** Timeout in milliseconds before killing the process (default: 300 000). */
   timeoutMs?: number;
 }
@@ -22,6 +20,48 @@ const DEFAULT_TIMEOUT_MS = 300_000;
 const TIMEOUT_OUTPUT_PREVIEW_LIMIT = 2_000;
 const PROMPT_PREVIEW_LIMIT = 1_000;
 const AGENTIC_ALLOWED_TOOLS = 'Bash,Glob,Grep,LS,Read,Edit,MultiEdit,Write';
+
+/** The fields AEOS reads from one line of `--output-format stream-json`. */
+interface StreamEvent {
+  type?: unknown;
+  message?: { content?: unknown };
+  result?: unknown;
+  usage?: { input_tokens?: unknown; output_tokens?: unknown };
+  total_cost_usd?: unknown;
+}
+
+function parseEvent(line: string): StreamEvent | undefined {
+  try {
+    const value: unknown = JSON.parse(line);
+    return typeof value === 'object' && value !== null ? (value as StreamEvent) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function assistantText(event: StreamEvent): string {
+  const content = event.message?.content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((block: { type?: unknown; text?: unknown }) =>
+      block?.type === 'text' && typeof block.text === 'string' ? block.text : '',
+    )
+    .join('');
+}
+
+function parseUsage(result: StreamEvent): TokenUsage | undefined {
+  const { usage, total_cost_usd: costUsd } = result;
+  const inputTokens = usage?.input_tokens;
+  const outputTokens = usage?.output_tokens;
+  if (
+    typeof inputTokens !== 'number' ||
+    typeof outputTokens !== 'number' ||
+    typeof costUsd !== 'number'
+  ) {
+    return undefined;
+  }
+  return { inputTokens, outputTokens, costUsd };
+}
 
 export class ClaudeCodeCliExecutor implements Executor {
   private runningProcess: ChildProcess | null = null;
@@ -40,6 +80,26 @@ export class ClaudeCodeCliExecutor implements Executor {
       let stdout = '';
       let stderr = '';
       let settled = false;
+      let pending = '';
+      let text = '';
+      let resultEvent: StreamEvent | undefined;
+
+      const forward = (chunk: string): void => {
+        text += chunk;
+        invocation.onChunk?.('stdout', chunk);
+      };
+      const handleLine = (line: string, terminator: string): void => {
+        const event = parseEvent(line);
+        if (!event) {
+          forward(line + terminator);
+        } else if (event.type === 'result') {
+          resultEvent = event;
+        } else if (event.type === 'assistant') {
+          const said = assistantText(event);
+          // Separate turns so the live display does not run them together.
+          if (said) forward(said.endsWith('\n') ? said : `${said}\n`);
+        }
+      };
 
       const finalize = (result: ExecutorResult): void => {
         if (settled) return;
@@ -61,7 +121,9 @@ export class ClaudeCodeCliExecutor implements Executor {
       child.stderr?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {
         stdout += chunk;
-        invocation.onChunk?.('stdout', chunk);
+        const lines = (pending + chunk).split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines) handleLine(line, '\n');
       });
       child.stderr?.on('data', (chunk: string) => {
         stderr += chunk;
@@ -82,6 +144,8 @@ export class ClaudeCodeCliExecutor implements Executor {
         if (settled) {
           return;
         }
+        if (pending) handleLine(pending, '');
+        const resultText = typeof resultEvent?.result === 'string' ? resultEvent.result : undefined;
 
         if (timedOut) {
           finalize({
@@ -104,7 +168,7 @@ export class ClaudeCodeCliExecutor implements Executor {
         if (code !== 0) {
           finalize({
             ok: false,
-            reason: stderr || `claude exited with code ${code ?? 'unknown'}`,
+            reason: resultText || stderr || `claude exited with code ${code ?? 'unknown'}`,
           });
           return;
         }
@@ -113,9 +177,16 @@ export class ClaudeCodeCliExecutor implements Executor {
         // outputPath is constructed by the application layer — trusted input
         try {
           await fs.mkdir(path.dirname(invocation.outputPath), { recursive: true });
-          await fs.writeFile(invocation.outputPath, stdout, 'utf8');
-          // TODO(M2-007): Parse usage from Claude CLI JSON output mode when available
-          finalize({ ok: true, artifactPath: invocation.outputPath, content: stdout });
+          // No usable result line: keep the streamed text, and leave usage unknown.
+          const content = resultText ?? text;
+          await fs.writeFile(invocation.outputPath, content, 'utf8');
+          finalize({
+            ok: true,
+            artifactPath: invocation.outputPath,
+            content,
+            usage: resultEvent && resultText !== undefined ? parseUsage(resultEvent) : undefined,
+            transcript: stdout,
+          });
         } catch (writeErr) {
           finalize({
             ok: false,
@@ -169,11 +240,10 @@ export class ClaudeCodeCliExecutor implements Executor {
           ]
         : ['--print', '-'];
 
+    // Streaming keeps the live display working and ends in a result line with usage and cost.
+    args.push('--output-format', 'stream-json', '--verbose');
     if (this.config.model) {
       args.push('--model', this.config.model);
-    }
-    if (this.config.maxTokens !== undefined) {
-      args.push('--max-tokens', String(this.config.maxTokens));
     }
 
     return args;
