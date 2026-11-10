@@ -275,6 +275,21 @@ export class OrchestratorUseCase implements OrchestratorPort {
     );
   }
 
+  clearBudget(projectId: string, epicId: string): OrchestratorState {
+    const existing = this.stateRepo.find(projectId, epicId);
+    if (!existing) {
+      throw new Error(`Epic ${epicId} has no orchestrator state, so there is no budget to clear.`);
+    }
+    return this.writeState(
+      projectId,
+      epicId,
+      existing.status,
+      existing.haltReason,
+      'Budget cleared by operator.',
+      null,
+    );
+  }
+
   status(projectId: string, epicId?: string): OrchestratorState[] {
     if (epicId) {
       const state = this.stateRepo.find(projectId, epicId);

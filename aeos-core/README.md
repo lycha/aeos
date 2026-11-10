@@ -363,6 +363,7 @@ Every exit is a named halt reason, including the successful ones.
 | `aeos orchestrator run <epicId> [--budget <usd>] [--max-steps <n>]` | Drive the epic; the budget persists for later runs |
 | `aeos orchestrator pause <epicId>`                                  | Refuse to schedule new work for this epic          |
 | `aeos orchestrator resume <epicId>`                                 | Allow scheduling again                             |
+| `aeos orchestrator clear-budget <epicId>`                           | Remove the budget ceiling (ends `COST_UNKNOWN`)    |
 | `aeos orchestrator status [epicId]`                                 | Show status, last halt reason, and budget          |
 
 ### One driver per epic
@@ -494,7 +495,7 @@ Every executor invocation (preflight, worker and reviewer) records token usage a
 
 `claude-cli` runs with `--output-format stream-json --verbose`; tokens and cost come from the final `result` line of that stream. The cost is the CLI's client-side estimate, not billing data. The other executors do not report usage yet.
 
-An unknown cost is stored and shown as `unknown`, never as `$0.00`. Only `claude-cli` and `stub` report cost, so `aeos orchestrator run --budget` (or a budget persisted earlier) is refused when any agent of the epic or task columns resolves to `auggie-cli`, `opencode-cli` or `ollama-cli`; the message names the agent and the executor. Spend is the sum of known costs. If a run with an unknown cost is recorded against a budgeted epic anyway (an `--executor` override, or an executor failure), the orchestrator halts with `COST_UNKNOWN`.
+An unknown cost is stored and shown as `unknown`, never as `$0.00`. Only `claude-cli` and `stub` report cost, so `aeos orchestrator run --budget` (or a budget persisted earlier) is refused when any agent of the epic or task columns resolves to `auggie-cli`, `opencode-cli` or `ollama-cli`; the message names the agent and the executor. Spend is the sum of known costs. If a run with an unknown cost is recorded against a budgeted epic anyway (an `--executor` override, or an executor failure), the orchestrator halts with `COST_UNKNOWN`. The unknown record stays, so every later budgeted run halts the same way; `aeos orchestrator clear-budget <epicId>` removes the persisted ceiling so the next `orchestrator run` without `--budget` proceeds. It errors if the epic has no orchestrator state.
 
 `aeos ticket show <id>` surfaces this history back to the operator as an `Executions:` section showing the column, agent, executor, model, and cost of each run.
 

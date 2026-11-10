@@ -591,4 +591,52 @@ describe('OrchestratorUseCase', () => {
       expect(state.haltReason).toBeNull();
     });
   });
+
+  describe('clear budget', () => {
+    const halted = {
+      projectId: PROJECT_ID,
+      epicId: EPIC_ID,
+      status: OrchestratorStatus.IDLE,
+      haltReason: HaltReason.COST_UNKNOWN,
+      message: 'unknown cost',
+      budgetUsd: 5,
+      updatedAt: 'x',
+    };
+
+    it('removes the ceiling and leaves the status alone', () => {
+      (stateRepo.find as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...halted,
+        status: OrchestratorStatus.PAUSED,
+      });
+
+      const state = useCase.clearBudget(PROJECT_ID, EPIC_ID);
+
+      expect(state.budgetUsd).toBeNull();
+      expect(state.status).toBe(OrchestratorStatus.PAUSED);
+      expect(stateRepo.upsert).toHaveBeenCalledWith(state);
+    });
+
+    it('refuses an epic the orchestrator has never driven', () => {
+      expect(() => useCase.clearBudget(PROJECT_ID, EPIC_ID)).toThrow(/no orchestrator state/);
+      expect(stateRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('lets an epic halted on COST_UNKNOWN run again without a budget', async () => {
+      let stored: unknown = halted;
+      (stateRepo.find as ReturnType<typeof vi.fn>).mockImplementation(() => stored);
+      (stateRepo.upsert as ReturnType<typeof vi.fn>).mockImplementation((state: unknown) => {
+        stored = state;
+      });
+      (costRepo.findByTicket as ReturnType<typeof vi.fn>).mockReturnValue([{ costUsd: null }]);
+
+      const before = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+      expect(before.haltReason).toBe(HaltReason.COST_UNKNOWN);
+
+      useCase.clearBudget(PROJECT_ID, EPIC_ID);
+      const after = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { maxSteps: 1 });
+
+      expect(after.haltReason).not.toBe(HaltReason.COST_UNKNOWN);
+      expect(ticketRun.execute).toHaveBeenCalled();
+    });
+  });
 });

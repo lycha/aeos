@@ -161,7 +161,7 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
     return {
       kind: 'halt',
       reason: HaltReason.COST_UNKNOWN,
-      message: `Epic ${epic.id} has a $${budgetUsd.toFixed(2)} ceiling, but a recorded run has no known cost, so spend cannot be checked against it.`,
+      message: `Epic ${epic.id} has a $${budgetUsd.toFixed(2)} ceiling, but a recorded run has no known cost, so spend cannot be checked against it. Remove the ceiling with \`aeos orchestrator clear-budget ${epic.id}\` to continue.`,
     };
   }
 
