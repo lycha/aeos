@@ -12,6 +12,7 @@ import {
 } from '../../shared/errors.js';
 import { CONSTRAINTS_PLACEHOLDER } from './defaults/constraints-placeholder.js';
 import { readTemplates } from './template-source.js';
+import { ProjectChecksSchema } from '../spec-loader/schemas.js';
 import { scaffoldSkill } from './skill-source.js';
 
 const AEOS_DIR = '.aeos';
@@ -144,11 +145,19 @@ export class FsProjectRepository implements ProjectRepository {
   }
 
   readExecutorConfig(projectPath: string): ProjectExecutorConfig | null {
+    let config: ProjectExecutorConfig;
     try {
-      return readProjectExecutorConfig(projectPath);
+      config = readProjectExecutorConfig(projectPath);
     } catch {
       return null;
     }
+    if (config.checks === undefined) return config;
+    // Thrown, not swallowed: an unreadable list must not read as "no checks".
+    const checks = ProjectChecksSchema.safeParse(config.checks);
+    if (!checks.success) {
+      throw new Error(`Invalid "checks" in .aeos/project.json: ${checks.error.message}`);
+    }
+    return { ...config, checks: checks.data };
   }
 
   readConstraints(projectPath: string): string | null {

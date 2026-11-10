@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ZodError } from 'zod';
-import { ColumnSpecSchema, AgentSpecSchema } from './schemas.js';
+import { ColumnSpecSchema, AgentSpecSchema, ProjectChecksSchema } from './schemas.js';
 
 // ── ColumnSpecSchema ──────────────────────────────────────────────
 
@@ -60,6 +60,12 @@ describe('ColumnSpecSchema', () => {
   it('leaves maxIterations unset so it can inherit the global cap', () => {
     expect(ColumnSpecSchema.parse(validColumnInput({})).maxIterations).toBeUndefined();
     expect(ColumnSpecSchema.parse(validColumnInput({ maxIterations: 2 })).maxIterations).toBe(2);
+  });
+
+  it('leaves runChecks unset unless the column opts in', () => {
+    expect(ColumnSpecSchema.parse(validColumnInput()).runChecks).toBeUndefined();
+    expect(ColumnSpecSchema.parse(validColumnInput({ runChecks: true })).runChecks).toBe(true);
+    expect(() => ColumnSpecSchema.parse(validColumnInput({ runChecks: 'yes' }))).toThrow(ZodError);
   });
 
   it('accepts optional executorMode field', () => {
@@ -135,5 +141,24 @@ describe('AgentSpecSchema', () => {
   it('accepts optional role field', () => {
     expect(AgentSpecSchema.parse(validAgentInput({ role: 'worker' })).role).toBe('worker');
     expect(AgentSpecSchema.parse(validAgentInput({ role: 'reviewer' })).role).toBe('reviewer');
+  });
+});
+
+// ── ProjectChecksSchema ───────────────────────────────────────────
+
+describe('ProjectChecksSchema', () => {
+  const check = { name: 'test', command: 'npm test', timeoutSeconds: 600 };
+
+  it('parses a list of checks, keeping their order', () => {
+    const lint = { name: 'lint', command: 'npm run lint', timeoutSeconds: 120 };
+    expect(ProjectChecksSchema.parse([lint, check])).toEqual([lint, check]);
+  });
+
+  it.each([
+    ['a missing command', { name: 'test', timeoutSeconds: 600 }],
+    ['an empty name', { ...check, name: '' }],
+    ['a timeout of zero', { ...check, timeoutSeconds: 0 }],
+  ])('rejects %s', (_label, invalid) => {
+    expect(() => ProjectChecksSchema.parse([invalid])).toThrow(ZodError);
   });
 });

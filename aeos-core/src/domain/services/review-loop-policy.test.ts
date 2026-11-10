@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { decideNextAttempt, type LoopConfig } from './review-loop-policy.js';
+import { checkBlockerTopic, decideNextAttempt, type LoopConfig } from './review-loop-policy.js';
 import { Verdict, type ReviewVerdict } from '../model/review-verdict.js';
 import { EscalationReason } from '../model/escalation.js';
 
@@ -202,5 +202,60 @@ describe('decideNextAttempt', () => {
     });
 
     expect(decision.action).toBe('escalate');
+  });
+
+  describe('a failed check', () => {
+    it('is retried like a rejection while attempts remain', () => {
+      const decision = decideNextAttempt({
+        failedCheck: 'lint',
+        attempt: 1,
+        config: loopOn,
+        previousBlockerTopics: [],
+      });
+
+      expect(decision).toMatchObject({ action: 'retry', nextAttempt: 2 });
+      if (decision.action !== 'retry') return;
+      expect(decision.reason).toContain("Check 'lint' failed");
+    });
+
+    it('counts toward the iteration cap and escalates there', () => {
+      const decision = decideNextAttempt({
+        failedCheck: 'test',
+        attempt: 5,
+        config: loopOn,
+        previousBlockerTopics: [['check:lint']],
+      });
+
+      expect(decision.action).toBe('escalate');
+      if (decision.action !== 'escalate') return;
+      expect(decision.escalation.reason).toBe(EscalationReason.ITERATIONS_EXHAUSTED);
+      expect(decision.escalation.message).toContain("Check 'test'");
+    });
+
+    it('has the blocker topic check:<name>, so the same check failing twice is a stall', () => {
+      expect(checkBlockerTopic('test')).toBe('check:test');
+
+      const decision = decideNextAttempt({
+        failedCheck: 'test',
+        attempt: 2,
+        config: loopOn,
+        previousBlockerTopics: [['check:test']],
+      });
+
+      expect(decision.action).toBe('escalate');
+      if (decision.action !== 'escalate') return;
+      expect(decision.escalation.reason).toBe(EscalationReason.NOT_CONVERGING);
+    });
+
+    it('escalates at the cap even when the column would mark a rejection done', () => {
+      const decision = decideNextAttempt({
+        failedCheck: 'test',
+        attempt: 5,
+        config: { ...loopOn, escalation: 'mark_done' },
+        previousBlockerTopics: [],
+      });
+
+      expect(decision.action).toBe('escalate');
+    });
   });
 });

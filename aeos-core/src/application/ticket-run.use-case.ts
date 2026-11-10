@@ -4,10 +4,11 @@
 //
 //   eligibility → context → preflight → [WORKING]
 //     ↓
-//   ┌─ attempt: worker → validate → commit → reviewer → verdict ─┐
-//   │    verdict APPROVED*        → advance                       │
-//   │    verdict REJECTED, room   → retry with review feedback ───┘
+//   ┌─ attempt: worker → validate → checks → commit → reviewer → verdict ─┐
+//   │    verdict APPROVED*        → advance                                │
+//   │    verdict REJECTED, room   → retry with review feedback ────────────┘
 //   │    verdict REJECTED, no room→ escalate
+//   │    a failed check counts as REJECTED, and the reviewer is not asked
 //     ↓
 //   [IN_REVIEW] → [SIGNED_OFF]
 //
@@ -61,7 +62,13 @@ import { SubState } from '../domain/model/sub-state.js';
 import { validateOutput } from '../domain/services/output-validation.js';
 import { isValidColumn } from '../domain/model/column.js';
 import { parseVerdict } from '../domain/services/verdict-parser.js';
-import { decideNextAttempt, type LoopConfig } from '../domain/services/review-loop-policy.js';
+import {
+  checkBlockerTopic,
+  decideNextAttempt,
+  type LoopConfig,
+} from '../domain/services/review-loop-policy.js';
+import type { Check, CheckResult } from '../domain/model/check.js';
+import type { CheckRegistry } from './checks/check-registry.js';
 import { DEFAULT_GLOBAL_CONFIG } from '../shared/config.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import { TicketRunEventEmitter } from './services/ticket-run-event-emitter.js';
@@ -122,6 +129,7 @@ function linkToRun(content: string, runId: string): string {
 
 type AttemptOutcome =
   | { kind: 'reviewed'; verdict: ReviewVerdict; reviewContent: string }
+  | { kind: 'checks-failed'; check: string; output: string }
   | { kind: 'failed'; error: string }
   | { kind: 'interrupted'; stage: TicketRunPhase; message: string }
   | { kind: 'escalated'; escalation: Escalation };
@@ -147,6 +155,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly executorConfigResolver: ExecutorConfigResolver,
     private readonly configStore: ConfigStore,
     private readonly runRecordStore: RunRecordStore,
+    private readonly checkRegistry: CheckRegistry,
   ) {}
 
   async execute(
@@ -326,7 +335,7 @@ export class TicketRunUseCase implements TicketRunPort {
       // ── Revision loop ────────────────────────────────────────────
       const loopConfig = this.resolveLoopConfig(columnSpec);
       const blockerHistory: string[][] = [];
-      let feedback: string | undefined;
+      let feedback: { name: string; content: string } | undefined;
       let attempt = 1;
 
       for (;;) {
@@ -383,13 +392,15 @@ export class TicketRunUseCase implements TicketRunPort {
           return this.finishEscalatedRun(ctx, mirroredTicket, outcome.escalation, attempt);
         }
 
-        const decision = decideNextAttempt({
-          verdict: outcome.verdict,
-          attempt,
-          config: loopConfig,
-          previousBlockerTopics: blockerHistory,
-          reviewPath: ctx.reviewAbsPath,
-        });
+        const loopState = { attempt, config: loopConfig, previousBlockerTopics: blockerHistory };
+        const decision =
+          outcome.kind === 'checks-failed'
+            ? decideNextAttempt({ ...loopState, failedCheck: outcome.check })
+            : decideNextAttempt({
+                ...loopState,
+                verdict: outcome.verdict,
+                reviewPath: ctx.reviewAbsPath,
+              });
 
         if (decision.action === 'advance') {
           this.emitStageEvent(emitter, 'stage.completed', 'reviewer', decision.reason, {
@@ -401,27 +412,34 @@ export class TicketRunUseCase implements TicketRunPort {
           break;
         }
 
-        if (decision.action === 'escalate') {
+        // A failed check has no review to point at; its stage.failed event
+        // already said why.
+        if (outcome.kind === 'reviewed') {
           emitter.emit({
             type: 'review.rejected',
             phase: 'reviewer',
             payload: {
               reviewPath: ctx.reviewAbsPath,
-              reason: decision.escalation.message,
+              reason:
+                decision.action === 'escalate' ? decision.escalation.message : decision.reason,
             },
           });
+        }
+
+        if (decision.action === 'escalate') {
           return this.finishEscalatedRun(ctx, mirroredTicket, decision.escalation, attempt);
         }
 
-        // Retry: carry the review forward so the worker revises rather than
-        // regenerating from scratch, and record blockers for stall detection.
-        emitter.emit({
-          type: 'review.rejected',
-          phase: 'reviewer',
-          payload: { reviewPath: ctx.reviewAbsPath, reason: decision.reason },
-        });
-        blockerHistory.push([...outcome.verdict.blockerTopics]);
-        feedback = outcome.reviewContent;
+        // Retry: carry the review (or the failed check's output) forward so the
+        // worker revises rather than regenerating from scratch, and record
+        // blockers for stall detection.
+        if (outcome.kind === 'reviewed') {
+          blockerHistory.push([...outcome.verdict.blockerTopics]);
+          feedback = { name: 'previous-review.md', content: outcome.reviewContent };
+        } else {
+          blockerHistory.push([checkBlockerTopic(outcome.check)]);
+          feedback = { name: 'previous-checks.md', content: outcome.output };
+        }
         attempt = decision.nextAttempt;
       }
 
@@ -502,7 +520,7 @@ export class TicketRunUseCase implements TicketRunPort {
   private async runAttempt(
     ctx: RunContext,
     attempt: number,
-    feedback: string | undefined,
+    feedback: { name: string; content: string } | undefined,
   ): Promise<AttemptOutcome> {
     const { emitter, ticketId, projectPath, projectId, aeosDir, columnSpec, workerMode, column } =
       ctx;
@@ -510,8 +528,9 @@ export class TicketRunUseCase implements TicketRunPort {
     // ── Worker ───────────────────────────────────────────────────
     // On a retry the context is re-assembled rather than reusing the one taken
     // before the run: the worker is being asked to revise an artifact, and the
-    // pre-run snapshot does not contain it. The prior review is then attached
-    // under an unambiguous name, and its raw file dropped so it appears once.
+    // pre-run snapshot does not contain it. The prior review (or the failed
+    // check's output) is then attached under an unambiguous name, and the raw
+    // review file dropped so a review appears once.
     let workerContext = ctx.baseContext;
     if (feedback) {
       const fresh = await this.contextAssembler.assemble(ticketId, projectPath, columnSpec.column);
@@ -519,11 +538,12 @@ export class TicketRunUseCase implements TicketRunPort {
         {
           ...fresh,
           priorArtifacts: fresh.priorArtifacts.filter(
-            (artifact) => artifact.name !== ctx.reviewFilename,
+            (artifact) =>
+              feedback.name !== 'previous-review.md' || artifact.name !== ctx.reviewFilename,
           ),
         },
-        'previous-review.md',
-        feedback,
+        feedback.name,
+        feedback.content,
       );
     }
     const prompt = this.buildPromptFn(workerContext, ctx.workerAgentSpec);
@@ -676,6 +696,19 @@ export class TicketRunUseCase implements TicketRunPort {
 
     this.emitStageEvent(emitter, 'stage.completed', 'validation', 'Validation passed');
 
+    // ── Checks ───────────────────────────────────────────────────
+    // Before the commit and the reviewer: a red build costs no model call.
+    const checks = columnSpec.runChecks ? this.checkRegistry.checksFor(projectPath) : [];
+    let checksFiles: string[] = [];
+    if (checks.length > 0) {
+      const stage = await this.runChecks(ctx, attempt, checks);
+      if (!stage.passed) {
+        this.recordRunAlone(ctx, run);
+        return { kind: 'checks-failed', check: stage.check, output: stage.output };
+      }
+      checksFiles = stage.files;
+    }
+
     // ── Commit the artifact ──────────────────────────────────────
     const revision = attempt > 1 ? `v${attempt}` : 'v1';
     const workerCommitMessage = `[${ticketId}][${columnSpec.outputArtifact}][${revision}][${ctx.workerAgentSpec.name}][${attempt > 1 ? 'revise' : 'create'}]`;
@@ -693,7 +726,7 @@ export class TicketRunUseCase implements TicketRunPort {
     });
     this.gitGateway.commitFiles(
       aeosDir,
-      [ctx.artifactAbsPath, ...written.files],
+      [ctx.artifactAbsPath, ...written.files, ...checksFiles],
       workerCommitMessage,
     );
     emitter.emit({
@@ -708,6 +741,121 @@ export class TicketRunUseCase implements TicketRunPort {
 
     // ── Reviewer ─────────────────────────────────────────────────
     return this.runReview(ctx, attempt, revision);
+  }
+
+  /**
+   * Runs the checks in order and stops at the first failure. Knows a check
+   * only through the `Check` interface: no commands, no exit codes.
+   */
+  private async runChecks(
+    ctx: RunContext,
+    attempt: number,
+    checks: readonly Check[],
+  ): Promise<{ passed: true; files: string[] } | { passed: false; check: string; output: string }> {
+    const { emitter, ticketId, projectPath } = ctx;
+    const checksFilename = `${ticketId}-checks.md`;
+    this.emitStageEvent(emitter, 'stage.started', 'checks', `Running ${checks.length} check(s)`);
+
+    const startedAt = new Date();
+    const results: CheckResult[] = [];
+    for (const check of checks) {
+      const checkStartedAt = Date.now();
+      let result: CheckResult;
+      try {
+        result = await check.run({ projectPath });
+      } catch (err) {
+        result = {
+          name: check.name,
+          passed: false,
+          durationMs: Date.now() - checkStartedAt,
+          timedOut: false,
+          outputTail: err instanceof Error ? err.message : String(err),
+        };
+      }
+      results.push(result);
+      if (!result.passed) break;
+    }
+    const endedAt = new Date();
+    const failed = results.find((result) => !result.passed);
+    const describe = (result: CheckResult): string =>
+      result.passed ? 'passed' : result.timedOut ? 'timed out' : 'failed';
+
+    const runId = this.newRunId(startedAt);
+    const record: RunRecord = {
+      schema_version: 0,
+      run_id: runId,
+      project: ctx.projectId,
+      ticket: ticketId,
+      column: ctx.column,
+      role: 'checks',
+      agent: null,
+      attempt,
+      executor: 'shell',
+      model: null,
+      mode: null,
+      brief: null,
+      output: failed ? null : `tickets/${ticketId}/${checksFilename}`,
+      transcript: runRecordPaths(ticketId, runId).transcript,
+      verdict: failed ? 'CHECKS_FAILED' : 'CHECKS_PASSED',
+      started_at: startedAt.toISOString(),
+      ended_at: endedAt.toISOString(),
+      duration_ms: endedAt.getTime() - startedAt.getTime(),
+      exit: !failed ? 'ok' : failed.timedOut ? 'timeout' : 'failed',
+      usage: null,
+      cost_usd: 0,
+      cost_basis: 'none',
+      spec_pin: null,
+      error: failed ? `Check '${failed.name}' ${describe(failed)}` : null,
+    };
+    const files = this.runRecordStore.write(projectPath, record, {
+      transcript: results
+        .map(
+          (result) =>
+            `## ${result.name}: ${describe(result)} (${result.durationMs}ms)\n\n${result.outputTail}\n`,
+        )
+        .join('\n'),
+    });
+
+    if (failed) {
+      const message = `Check '${failed.name}' ${describe(failed)}`;
+      this.emitStageEvent(emitter, 'stage.failed', 'checks', message);
+      // A table from an earlier, passing attempt would now be a false claim.
+      this.artifactStore.removeArtifact(projectPath, ticketId, checksFilename);
+      this.gitGateway.commitFiles(
+        ctx.aeosDir,
+        files,
+        `[${ticketId}][RUN][${runId}][checks][${record.exit}]`,
+      );
+      return {
+        passed: false,
+        check: failed.name,
+        output: `# ${message}\n\nFix this before anything else. The reviewer was not asked.\n\n\`\`\`\n${failed.outputTail}\n\`\`\`\n`,
+      };
+    }
+
+    // Written into the ticket directory, so the reviewer's re-assembled
+    // context carries it like any other artefact.
+    const table = [
+      '# Checks',
+      '',
+      '| Check | Result | Duration |',
+      '| --- | --- | --- |',
+      ...results.map(
+        (result) =>
+          `| ${result.name} | ${describe(result)} | ${(result.durationMs / 1000).toFixed(1)}s |`,
+      ),
+    ].join('\n');
+    this.artifactStore.writeArtifact(
+      projectPath,
+      ticketId,
+      checksFilename,
+      linkToRun(table, runId),
+    );
+    this.emitStageEvent(emitter, 'stage.completed', 'checks', 'Checks passed');
+    return {
+      passed: true,
+      files: [path.join(ctx.aeosDir, 'tickets', ticketId, checksFilename), ...files],
+    };
   }
 
   private async runReview(
@@ -1193,16 +1341,20 @@ export class TicketRunUseCase implements TicketRunPort {
     );
   }
 
+  private newRunId(startedAt: Date): string {
+    const timestamp = startedAt.toISOString().replace(/[-:]|\.\d+/g, '');
+    return `RUN-${timestamp}-${randomInt(36 ** 4)
+      .toString(36)
+      .padStart(4, '0')}`;
+  }
+
   /** Writes the record, the brief and the log of one executor invocation. */
   private writeRunRecord(ctx: RunContext, run: InvokedRun): WrittenRun {
     const { result } = run;
     const error = run.error ?? (result.ok ? null : result.reason);
     const usage = result.ok ? result.usage : undefined;
     const costUsd = usage?.costUsd ?? null;
-    const timestamp = run.startedAt.toISOString().replace(/[-:]|\.\d+/g, '');
-    const runId = `RUN-${timestamp}-${randomInt(36 ** 4)
-      .toString(36)
-      .padStart(4, '0')}`;
+    const runId = this.newRunId(run.startedAt);
     const paths = runRecordPaths(ctx.ticketId, runId);
 
     const record: RunRecord = {

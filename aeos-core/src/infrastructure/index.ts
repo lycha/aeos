@@ -4,3 +4,4 @@ export * from './filesystem/index.js';
 export * from './git/index.js';
 export * from './executor/index.js';
 export * from './spec-loader/index.js';
+export * from './checks/shell-checks-runner.adapter.js';

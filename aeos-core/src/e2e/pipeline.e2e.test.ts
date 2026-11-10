@@ -209,4 +209,70 @@ describe('stub end-to-end pipeline', () => {
 
     expect(ticketState(epic)).toMatchObject({ column: 'PRODUCT_SCOPING', subState: 'ESCALATED' });
   });
+
+  it('runs the project checks before the reviewer, and skips the reviewer when one fails', async () => {
+    await runCli('install');
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const setChecks = (command: string): void => {
+      const file = path.join(aeosDir, 'project.json');
+      const config = JSON.parse(fs.readFileSync(file, 'utf-8')) as object;
+      const checks = [{ name: 'gate', command, timeoutSeconds: 30 }];
+      fs.writeFileSync(file, JSON.stringify({ ...config, checks }), 'utf-8');
+    };
+    const runsOf = (ticketId: string): RunRecord[] => {
+      const dir = path.join(aeosDir, 'tickets', ticketId, 'runs');
+      return fs
+        .readdirSync(dir)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8')) as RunRecord);
+    };
+    const briefOf = (record: RunRecord): string =>
+      fs.readFileSync(path.join(aeosDir, record.brief!.path), 'utf-8');
+
+    // Passing: the reviewer is briefed with the checks table.
+    setChecks('node -e "process.exit(0)"');
+    const green = createStandaloneTask('A task with green checks');
+    await runCli('ticket', 'approve', green);
+    await runCli('ticket', 'run', green);
+
+    expect(ticketState(green)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
+    const greenRuns = runsOf(green);
+    // Run ids sort by second, so the order within one run is not fixed.
+    expect(greenRuns.map((record) => record.role).sort()).toEqual([
+      'checks',
+      'preflight',
+      'reviewer',
+      'worker',
+    ]);
+    expect(briefOf(greenRuns.find((record) => record.role === 'reviewer')!)).toMatch(
+      /\| gate \| passed \| [\d.]+s \|/,
+    );
+
+    // Failing: no reviewer run for the attempt, and the output reaches the retry.
+    setChecks(`node -e "console.log('gate is red'); process.exit(1)"`);
+    const red = createStandaloneTask('A task with red checks');
+    await runCli('ticket', 'approve', red);
+    await runCli('ticket', 'run', red);
+
+    expect(ticketState(red)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'ESCALATED' });
+    const redRuns = runsOf(red);
+    expect(redRuns.filter((record) => record.role === 'reviewer')).toEqual([]);
+    const redChecks = redRuns.filter((record) => record.role === 'checks');
+    expect(redChecks.length).toBeGreaterThan(0);
+    for (const record of [...greenRuns, ...redRuns]) {
+      expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
+    }
+    for (const record of redChecks) {
+      expect(record).toMatchObject({ verdict: 'CHECKS_FAILED', executor: 'shell' });
+    }
+    const retry = redRuns.find((record) => record.role === 'worker' && record.attempt === 2)!;
+    expect(briefOf(retry)).toContain('gate is red');
+
+    // Every run record is committed, and so is the table the reviewer relied on.
+    const aeosGit = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: aeosDir, encoding: 'utf-8' });
+    expect(aeosGit('status', '--porcelain', '--', 'tickets/*/runs')).toBe('');
+    expect(aeosGit('ls-files', `tickets/${green}/${green}-checks.md`)).not.toBe('');
+  });
 });

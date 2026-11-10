@@ -24,6 +24,11 @@ import type { ExecutorInvocation } from '../domain/model/executor-invocation.js'
 import type { TicketRunEvent } from '../domain/model/ticket-run-event.js';
 import type { RunRecord } from '../domain/model/run-record.js';
 import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
+import type { ChecksRunner } from '../domain/ports/driven/checks-runner.port.js';
+import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
+import type { Check } from '../domain/model/check.js';
+import type { CheckConfig } from '../domain/model/project-executor-config.js';
+import { CheckRegistry } from './checks/check-registry.js';
 
 // --- Mock factories ---
 
@@ -267,6 +272,9 @@ describe('TicketRunUseCase', () => {
   let configStore: ConfigStore;
   let runRecordStore: ReturnType<typeof createMockRunRecordStore>;
   let buildPromptFn: (context: AssembledContext, agentSpec: AgentSpec) => string;
+  let projectChecks: CheckConfig[] | undefined;
+  let checksRunner: { run: ReturnType<typeof vi.fn> };
+  let checkRegistry: CheckRegistry;
   let useCase: TicketRunUseCase;
 
   beforeEach(() => {
@@ -286,6 +294,16 @@ describe('TicketRunUseCase', () => {
     executorConfigResolver = createMockExecutorConfigResolver();
     configStore = createMockConfigStore();
     runRecordStore = createMockRunRecordStore();
+    projectChecks = undefined;
+    checksRunner = {
+      run: vi
+        .fn()
+        .mockResolvedValue({ exitCode: 0, durationMs: 1200, timedOut: false, outputTail: 'fine' }),
+    };
+    checkRegistry = new CheckRegistry(
+      { readExecutorConfig: () => ({ checks: projectChecks }) } as unknown as ProjectRepository,
+      checksRunner as ChecksRunner,
+    );
     buildPromptFn = vi.fn().mockReturnValue('assembled prompt') as unknown as (
       context: AssembledContext,
       agentSpec: AgentSpec,
@@ -315,6 +333,7 @@ describe('TicketRunUseCase', () => {
       executorConfigResolver,
       configStore,
       runRecordStore,
+      checkRegistry,
     );
   }
 
@@ -1470,6 +1489,245 @@ describe('TicketRunUseCase', () => {
           `/runs/${record.run_id}.json`,
         ],
         `[${TICKET_ID}][QUESTIONS][v1][preflight][blocked]`,
+      );
+    });
+  });
+
+  describe('checks stage', () => {
+    const CHECKS: CheckConfig[] = [
+      { name: 'typecheck', command: 'npm run typecheck', timeoutSeconds: 120 },
+      { name: 'lint', command: 'npm run lint', timeoutSeconds: 120 },
+      { name: 'test', command: 'npm test', timeoutSeconds: 600 },
+    ];
+    const failing = { exitCode: 1, durationMs: 300, timedOut: false, outputTail: 'TS2322: no' };
+
+    beforeEach(() => {
+      projectChecks = CHECKS;
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ runChecks: true }),
+      );
+    });
+
+    const reviewerCalls = (): unknown[] =>
+      (executor.run as ReturnType<typeof vi.fn>).mock.calls.filter((call) =>
+        (call[0] as ExecutorInvocation).outputPath.endsWith('-review.md'),
+      );
+    const workerContexts = (): AssembledContext[] =>
+      (buildPromptFn as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0] as AssembledContext,
+      );
+    const checksRecords = (): RunRecord[] =>
+      writtenRuns()
+        .map((run) => run.record)
+        .filter((record) => record.role === 'checks');
+
+    it('never invokes the reviewer when a check fails', async () => {
+      checksRunner.run.mockResolvedValue(failing);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(reviewerCalls()).toHaveLength(0);
+      expect(result.status).toBe('escalated');
+    });
+
+    it('gives the failing output to the next worker attempt as previous-checks.md', async () => {
+      checksRunner.run.mockResolvedValueOnce(failing);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'success', attempts: 2 });
+      // Prompts: worker 1, worker 2, reviewer 2. The failed attempt has no reviewer prompt.
+      const [first, retry] = workerContexts();
+      expect(first!.priorArtifacts.some((a) => a.name === 'previous-checks.md')).toBe(false);
+      const feedback = retry!.priorArtifacts.find((a) => a.name === 'previous-checks.md');
+      expect(feedback?.content).toContain('typecheck');
+      expect(feedback?.content).toContain('TS2322: no');
+    });
+
+    it('escalates, not fails, when checks fail up to the iteration cap', async () => {
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ runChecks: true, maxIterations: 2 }),
+      );
+      // A different check each attempt, so the cap ends the loop, not stall detection.
+      checksRunner.run
+        .mockResolvedValueOnce(failing)
+        .mockResolvedValueOnce({ exitCode: 0, durationMs: 1, timedOut: false, outputTail: '' })
+        .mockResolvedValueOnce(failing);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({
+        status: 'escalated',
+        reason: 'ITERATIONS_EXHAUSTED',
+        attempts: 2,
+      });
+      const subStates = (stateMachine.setSubState as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[2] as string,
+      );
+      expect(subStates).toContain('ESCALATED');
+      expect(subStates).not.toContain('FAILED');
+      expect(reviewerCalls()).toHaveLength(0);
+    });
+
+    it('stops at the first failing check', async () => {
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ runChecks: true, maxIterations: 1 }),
+      );
+      checksRunner.run
+        .mockResolvedValueOnce({ exitCode: 0, durationMs: 1, timedOut: false, outputTail: '' })
+        .mockResolvedValueOnce(failing);
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(checksRunner.run.mock.calls.map((call) => (call[0] as CheckConfig).command)).toEqual([
+        'npm run typecheck',
+        'npm run lint',
+      ]);
+    });
+
+    it('writes the checks table and commits it with the artefact before the reviewer runs', async () => {
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      const write = (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.calls.find(
+        (call) => call[2] === `${TICKET_ID}-checks.md`,
+      );
+      expect(write?.[3]).toContain('| typecheck | passed | 1.2s |');
+      expect(write?.[3]).toContain('| test | passed | 1.2s |');
+
+      const checksPath = path.join(
+        PROJECT_PATH,
+        '.aeos',
+        'tickets',
+        TICKET_ID,
+        `${TICKET_ID}-checks.md`,
+      );
+      const commits = (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock;
+      const artefactCommit = commits.calls.findIndex((call) =>
+        (call[1] as string[]).includes(checksPath),
+      );
+      expect((commits.calls[artefactCommit]![1] as string[])[0]).toMatch(/impl\.md$/);
+      expect(commits.invocationCallOrder[artefactCommit]!).toBeLessThan(
+        (executor.run as ReturnType<typeof vi.fn>).mock.invocationCallOrder[1]!,
+      );
+    });
+
+    it('records one run per checks stage', async () => {
+      checksRunner.run.mockResolvedValueOnce(failing);
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const [failed, passed] = checksRecords();
+      expect(checksRecords()).toHaveLength(2);
+      expect(failed).toMatchObject({
+        role: 'checks',
+        executor: 'shell',
+        agent: null,
+        model: null,
+        mode: null,
+        brief: null,
+        attempt: 1,
+        verdict: 'CHECKS_FAILED',
+        exit: 'failed',
+        cost_basis: 'none',
+        output: null,
+      });
+      expect(passed).toMatchObject({
+        attempt: 2,
+        verdict: 'CHECKS_PASSED',
+        exit: 'ok',
+        cost_basis: 'none',
+        error: null,
+        output: `tickets/${TICKET_ID}/${TICKET_ID}-checks.md`,
+      });
+      const failedRun = writtenRuns().find((run) => run.record === failed)!;
+      expect(failedRun.files.brief).toBeUndefined();
+      expect(failedRun.files.transcript).toContain('TS2322: no');
+    });
+
+    it('reports a check that timed out as failed', async () => {
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ runChecks: true, maxIterations: 1 }),
+      );
+      checksRunner.run.mockResolvedValue({
+        exitCode: null,
+        durationMs: 120_000,
+        timedOut: true,
+        outputTail: '',
+      });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('escalated');
+      expect(checksRecords()[0]).toMatchObject({ verdict: 'CHECKS_FAILED', exit: 'timeout' });
+      expect(reviewerCalls()).toHaveLength(0);
+    });
+
+    it('runs no checks for a column that has not opted in', async () => {
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(defaultColumnSpec());
+      checksRunner.run.mockResolvedValue(failing);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(checksRunner.run).not.toHaveBeenCalled();
+      expect(checksRecords()).toHaveLength(0);
+      const written = (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[2] as string,
+      );
+      expect(written).not.toContain(`${TICKET_ID}-checks.md`);
+    });
+
+    it('treats a failing in-process check exactly as a failing shell check', async () => {
+      projectChecks = undefined;
+      const inProcess: Check = {
+        name: 'criteria',
+        phase: 'post-worker',
+        run: vi
+          .fn()
+          .mockResolvedValueOnce({
+            name: 'criteria',
+            passed: false,
+            durationMs: 3,
+            timedOut: false,
+            outputTail: 'AC-2 has no test',
+          })
+          .mockResolvedValue({
+            name: 'criteria',
+            passed: true,
+            durationMs: 3,
+            timedOut: false,
+            outputTail: '',
+          }),
+      };
+      checkRegistry.register(inProcess);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(checksRunner.run).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ status: 'success', attempts: 2 });
+      // One review only: the failed attempt never reached the reviewer.
+      expect(reviewerCalls()).toHaveLength(1);
+      const feedback = workerContexts()[1]!.priorArtifacts.find(
+        (a) => a.name === 'previous-checks.md',
+      );
+      expect(feedback?.content).toContain('AC-2 has no test');
+      expect(checksRecords().map((record) => record.verdict)).toEqual([
+        'CHECKS_FAILED',
+        'CHECKS_PASSED',
+      ]);
+    });
+
+    it('emits the checks stage so the display can show it', async () => {
+      checksRunner.run.mockResolvedValueOnce(failing);
+      const events: TicketRunEvent[] = [];
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, undefined, {
+        onEvent: (event) => events.push(event),
+      });
+
+      expect(events.filter((event) => event.phase === 'checks').map((event) => event.type)).toEqual(
+        ['stage.started', 'stage.failed', 'stage.started', 'stage.completed'],
       );
     });
   });

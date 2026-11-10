@@ -13,3 +13,4 @@ export * from './executor-result.js';
 export * from './assembled-context.js';
 export * from './validation-result.js';
 export * from './run-record.js';
+export * from './check.js';

@@ -2,7 +2,16 @@
 
 import type { Project } from './project.js';
 
+/** One entry of the `checks` list in `.aeos/project.json`. */
+export interface CheckConfig {
+  readonly name: string;
+  readonly command: string;
+  readonly timeoutSeconds: number;
+}
+
 export interface ProjectExecutorConfig extends Project {
+  /** Run in this order before the reviewer, on columns with `runChecks`. */
+  readonly checks?: readonly CheckConfig[];
   readonly executor?: {
     readonly type?: 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli';
     readonly model?: string;

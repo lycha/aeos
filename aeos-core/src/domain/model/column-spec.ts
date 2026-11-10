@@ -12,6 +12,8 @@ export interface ColumnSpec {
    * Undefined defaults to true, so IMPLEMENTATION keeps its guarantee unstated.
    */
   readonly requiresRepoDiff?: boolean;
+  /** Run the project's checks after validation and before the reviewer. Absent means false. */
+  readonly runChecks?: boolean;
   readonly workerAgentFile: string;
   readonly reviewerAgentFile: string;
   readonly outputArtifact: string;

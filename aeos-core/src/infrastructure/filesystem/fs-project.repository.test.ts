@@ -164,6 +164,33 @@ describe('FsProjectRepository.readExecutorConfig()', () => {
     fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
     expect(repo.readExecutorConfig(tmpDir)).toBeNull();
   });
+
+  function writeChecks(checks: unknown): void {
+    fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.aeos', 'project.json'),
+      JSON.stringify({ id: 'my-project', checks }),
+      'utf-8',
+    );
+  }
+
+  it('returns the checks list in the order written', () => {
+    const checks = [
+      { name: 'lint', command: 'npm run lint', timeoutSeconds: 120 },
+      { name: 'test', command: 'npm test', timeoutSeconds: 600 },
+    ];
+    writeChecks(checks);
+
+    expect(repo.readExecutorConfig(tmpDir)?.checks).toEqual(checks);
+  });
+
+  it('throws on an invalid checks list rather than reading it as no checks', () => {
+    writeChecks([{ name: 'test' }]);
+
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "checks" in .aeos\/project.json/,
+    );
+  });
 });
 
 describe('FsProjectRepository.writeConstraintsPlaceholder()', () => {

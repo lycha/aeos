@@ -39,6 +39,8 @@ import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
 import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
 import { TicketResolveUseCase } from '../application/ticket-resolve.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
+import { CheckRegistry } from '../application/checks/check-registry.js';
+import { ShellChecksRunner } from '../infrastructure/checks/shell-checks-runner.adapter.js';
 import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
 import { TicketSignOffUseCase } from '../application/ticket-sign-off.use-case.js';
 import { TicketMoveUseCase } from '../application/ticket-move.use-case.js';
@@ -197,6 +199,7 @@ export function createContainer(): Container {
         executorConfigResolver,
         configStore,
         runRecordStore,
+        new CheckRegistry(projectRepo, new ShellChecksRunner()),
       );
     },
     get ticketApprove() {

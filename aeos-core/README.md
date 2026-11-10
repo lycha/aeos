@@ -91,10 +91,11 @@ Each column follows the same cycle:
 1. **Pre-flight** — agent checks for blocking questions; if found, ticket is `BLOCKED` until answered via `aeos ticket answer`
 2. **Agent run** — specialised worker agent executes the current column. Most columns produce a markdown artifact; `IMPLEMENTATION` can run in agentic mode and modify the repository directly, then emit a concise implementation summary.
 3. **Validation** — rule-based structural checks (for example non-empty output, required sections, and column-specific constraints). Agentic `IMPLEMENTATION` runs must also leave a real repo diff.
-4. **Review** — a reviewer agent (on a _different model_ from the worker) evaluates against column-specific rubrics and emits a machine-readable verdict: `APPROVED`, `APPROVED_WITH_WARNINGS`, or `REJECTED`. Only `BLOCKER` findings gate; warnings are recorded on the artifact and do not block.
-5. **Revision loop** — a `REJECTED` review sends the artifact back to the worker with the review attached, up to the configured cap. See [Review Loop](#review-loop).
-6. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
-7. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
+4. **Checks** — on columns with `runChecks: true` (`IMPLEMENTATION` and `INTEGRATION_REVIEW` in the templates), the project's own commands (typecheck, lint, tests) run before any reviewer. See [Checks](#checks).
+5. **Review** — a reviewer agent (on a _different model_ from the worker) evaluates against column-specific rubrics and emits a machine-readable verdict: `APPROVED`, `APPROVED_WITH_WARNINGS`, or `REJECTED`. Only `BLOCKER` findings gate; warnings are recorded on the artifact and do not block.
+6. **Revision loop** — a `REJECTED` review, or a failed check, sends the artifact back to the worker with the review or the check's output attached, up to the configured cap. See [Review Loop](#review-loop).
+7. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
+8. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
 
 ## What `project init` creates
 
@@ -224,6 +225,27 @@ AEOS supports multiple executor backends. The effective executor for a run is re
 | `opencode-cli` | Local-model or alternative agent runtime | Yes                              |
 | `ollama-cli`   | Simple local artifact generation         | No — artifact-only               |
 | `stub`         | Tests / local dry runs                   | Yes (test stub only)             |
+
+### Checks
+
+Checks run first, review agents second. List the project's checks in `.aeos/project.json`; they run in the order written, so put the fastest first:
+
+```json
+{
+  "checks": [
+    { "name": "typecheck", "command": "npm run typecheck", "timeoutSeconds": 120 },
+    { "name": "lint", "command": "npm run lint", "timeoutSeconds": 120 },
+    { "name": "test", "command": "npm test", "timeoutSeconds": 600 }
+  ]
+}
+```
+
+A column runs them when its spec says `runChecks: true`. They run in the project root after validation and before the artifact is committed, and stop at the first failure. A command passes on exit code 0; one that exceeds its timeout is killed and counts as failed.
+
+- **All pass** — `<ticket>-checks.md` (name, result, duration) is committed with the artifact and is part of the reviewer's context.
+- **One fails** — the reviewer is not invoked. The failure counts as a rejection toward `maxIterations`, and the next worker attempt receives the last 200 lines of the check's output as `previous-checks.md`. The same check failing twice in a row escalates as not converging; a ticket whose checks never pass ends `ESCALATED`, not `FAILED`, even on a column whose escalation policy is `mark_done`.
+
+Each checks stage leaves a run record with `role: checks`. With no `checks` list, or on a column without `runChecks`, nothing changes. An invalid `checks` list is an error, never silently "no checks".
 
 ### Project-level executor defaults
 

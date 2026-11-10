@@ -11,3 +11,4 @@ export * from './agent-spec-loader.port.js';
 export * from './config-store.port.js';
 export * from './rubric-loader.port.js';
 export * from './run-record-store.port.js';
+export * from './checks-runner.port.js';

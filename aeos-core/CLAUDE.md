@@ -64,12 +64,16 @@ When adding a capability, the shape is: driving port → use case → driven por
 
 ### TicketRunUseCase
 
-`src/application/ticket-run.use-case.ts` is the core. One `execute()` call runs the column cycle: eligibility → context → preflight → `WORKING` → **revision loop** → `IN_REVIEW` → `SIGNED_OFF`. The loop body (`runAttempt`) is worker → validate → commit artifact → reviewer → parse verdict; `decideNextAttempt` then says advance, retry, or escalate. It emits `ticket-run.*` events through a `TicketRunObserver`, which is what the Ink TUI renders live. Executors are injected as a `createExecutor(agentSpec)` factory, because worker and reviewer resolve to different executors within one run.
+`src/application/ticket-run.use-case.ts` is the core. One `execute()` call runs the column cycle: eligibility → context → preflight → `WORKING` → **revision loop** → `IN_REVIEW` → `SIGNED_OFF`. The loop body (`runAttempt`) is worker → validate → checks → commit artifact → reviewer → parse verdict; `decideNextAttempt` then says advance, retry, or escalate. It emits `ticket-run.*` events through a `TicketRunObserver`, which is what the Ink TUI renders live. Executors are injected as a `createExecutor(agentSpec)` factory, because worker and reviewer resolve to different executors within one run.
 
 Two invariants that were previously violated and are easy to re-break:
 
 1. **The reviewer verdict comes from a parsed trailer, never the prose.** `domain/services/verdict-parser.ts` reads an `AEOS-VERDICT` HTML comment. Substring-matching the review text misfires on the reviewer's own output-format template. A missing or unparseable trailer escalates — it is never coerced into a pass or a rejection.
 2. **Escalation is not failure.** `SubState.ESCALATED` means the pipeline worked and needs a human (preflight blockers, iteration cap, non-convergence, unparseable verdict). `FAILED` means something broke. The orchestrator and `aeos ticket show` rely on the distinction.
+
+### Checks stage
+
+On a column whose spec has `runChecks: true`, the `checks` list of `.aeos/project.json` runs after validation and before the artifact commit (`runChecks` in `TicketRunUseCase`). A check is the `Check` interface in `domain/model/check.ts`, not a command: `CheckRegistry` (`application/checks/`) builds one `ShellCheck` per configured entry and appends anything passed to `register()`, and **the stage must never assume a check is a process** — command strings and exit codes live in `ShellCheck` and the `ChecksRunner` adapter (`infrastructure/checks/`) only. That is the seam for in-process checks. A failure returns the `checks-failed` outcome: the reviewer is not invoked, `decideNextAttempt` treats it as a rejection with blocker topic `check:<name>` (and never as `mark_done`), and the next worker gets the output as `previous-checks.md`. A pass writes `<ticket>-checks.md` into the ticket directory, which is how it reaches the reviewer's re-assembled context. Each stage writes a run record (`role: checks`, `executor: shell`, no brief).
 
 ### Loop termination
 
@@ -102,7 +106,7 @@ Changing pipeline behaviour usually means editing YAML, not TypeScript. Loaders 
 
 - **SQLite at `~/.aeos/state.db`** — the source of truth for tickets, transitions, and costs. All projects share one DB, isolated by `project_id`. Path overridable via `AEOS_HOME`.
 - **`<project>/.aeos/tickets/<ticketId>/`** — artifacts, named `<ticketId>-<artifact>.md`. Ticket state is mirrored into a markdown file on disk via `syncTicketDocument`, but **git carries artifacts only** — no commit on sub-state transitions. SQLite is authoritative for state; committing every transition buried the artifact history a human actually reads. Don't reintroduce `[STATE]` commits.
-- **`<project>/.aeos/tickets/<ticketId>/runs/`** — one run record per executor invocation (`<run_id>.json`, `.brief.md`, `.log`), written by `writeRunRecord` in `TicketRunUseCase` through `RunRecordStore`, on success and failure alike. `domain/model/run-record.ts` mirrors the human-owned `run-record.schema.json` field for field; the end-to-end test validates every record against it. A record is committed with the artifact it produced (which ends with an `AEOS-RUN` link to it), or alone when there is none. Preflight is recorded by wrapping the executor handed to `PreflightService`.
+- **`<project>/.aeos/tickets/<ticketId>/runs/`** — one run record per executor invocation or checks stage (`<run_id>.json`, `.brief.md`, `.log`; a checks record has no brief), written by `writeRunRecord` in `TicketRunUseCase` through `RunRecordStore`, on success and failure alike. `domain/model/run-record.ts` mirrors the human-owned `run-record.schema.json` field for field; the end-to-end test validates every record against it. A record is committed with the artifact it produced (which ends with an `AEOS-RUN` link to it), or alone when there is none. Preflight is recorded by wrapping the executor handed to `PreflightService`.
 - `Ticket` carries `kind` (`EPIC`/`TASK`) and `parentId`. Migration v2 backfills existing rows as epics and folds retired `ARCH_SPIKE` tickets into `TECH_SPEC`. Migrations must be idempotent — `ALTER TABLE ADD COLUMN` is not, so guard with `hasColumn`.
 
 ### Executors

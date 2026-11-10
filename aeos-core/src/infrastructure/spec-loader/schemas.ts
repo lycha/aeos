@@ -7,6 +7,7 @@ export const ColumnSpecSchema = z.object({
   column: z.string().min(1),
   executorMode: z.enum(['artifact', 'agentic']).optional(),
   requiresRepoDiff: z.boolean().optional(),
+  runChecks: z.boolean().optional(),
   workerAgentFile: z.string().min(1),
   reviewerAgentFile: z.string().min(1),
   outputArtifact: z.string().min(1),
@@ -39,3 +40,12 @@ export const AgentSpecSchema = z.object({
     timeoutSeconds: z.number().int().positive().default(300),
   }),
 });
+
+/** The `checks` list of `.aeos/project.json`. */
+export const ProjectChecksSchema = z.array(
+  z.object({
+    name: z.string().min(1),
+    command: z.string().min(1),
+    timeoutSeconds: z.number().positive(),
+  }),
+);
