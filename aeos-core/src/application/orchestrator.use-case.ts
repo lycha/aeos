@@ -15,6 +15,7 @@ import {
 } from '../domain/model/column.js';
 import { OrchestratorStatus, type OrchestratorState } from '../domain/model/orchestrator-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
+import type { Ticket } from '../domain/model/ticket.js';
 import {
   decideNextAction,
   HaltReason,
@@ -135,7 +136,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
 
     // A budget supplied on this run persists, so later runs inherit the ceiling.
     const budgetUsd = options.budgetUsd ?? existing?.budgetUsd ?? null;
-    if (budgetUsd !== null) this.assertExecutorsReportCost(projectPath, epicId);
+    if (budgetUsd !== null) this.assertExecutorsReportCost(projectId, projectPath, epic);
     const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
     const steps: OrchestratorStep[] = [];
 
@@ -362,11 +363,26 @@ export class OrchestratorUseCase implements OrchestratorPort {
   }
 
   /**
-   * A budget is only a ceiling if every run reports what it cost. Refuses when
-   * any agent of any pipeline column resolves to an executor that cannot.
+   * A budget is only a ceiling if every run still to come reports what it
+   * cost. Refuses when any agent of a column still ahead resolves to an
+   * executor that cannot: the epic's current column and later ones, and each
+   * task column unless the epic is beyond decomposition and every child is
+   * past it.
    */
-  private assertExecutorsReportCost(projectPath: string, epicId: string): void {
-    for (const column of [...EPIC_COLUMN_ORDER, ...TASK_COLUMN_ORDER]) {
+  private assertExecutorsReportCost(projectId: string, projectPath: string, epic: Ticket): void {
+    const epicId = epic.id;
+    const epicAt = EPIC_COLUMN_ORDER.indexOf(epic.column as (typeof EPIC_COLUMN_ORDER)[number]);
+    const canDecompose = epicAt <= EPIC_COLUMN_ORDER.indexOf(Column.TASK_BREAKDOWN);
+    const children = this.ticketRepo.findChildren(projectId, epicId);
+    const taskOrder: readonly Column[] = TASK_COLUMN_ORDER;
+    const ahead = [
+      ...EPIC_COLUMN_ORDER.slice(Math.max(epicAt, 0)),
+      ...TASK_COLUMN_ORDER.filter(
+        (column, at) =>
+          canDecompose || children.some((child) => taskOrder.indexOf(child.column) <= at),
+      ),
+    ];
+    for (const column of ahead) {
       if (column === Column.BACKLOG || column === Column.DONE || column === Column.DOD_GATE) {
         continue;
       }
