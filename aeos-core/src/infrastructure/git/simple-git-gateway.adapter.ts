@@ -118,6 +118,58 @@ export class SimpleGitGateway implements GitGateway {
     }
   }
 
+  headCommit(dir: string): string {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  }
+
+  showFile(dir: string, commit: string, filePath: string): string {
+    // `./` makes the path relative to `dir`, not to the repository root.
+    return execFileSync('git', ['show', `${commit}:./${filePath}`], {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  }
+
+  listFiles(dir: string, commit: string, dirPath: string): string[] {
+    return execFileSync('git', ['ls-tree', '-r', '--name-only', '-z', commit, '--', dirPath], {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\0')
+      .filter(Boolean)
+      .sort();
+  }
+
+  pathChangedSince(
+    dir: string,
+    commit: string,
+    filePath: string,
+    excluding: string[] = [],
+  ): boolean {
+    const excluded = excluding.map((excludedPath) => `:(exclude)${excludedPath}`);
+    try {
+      execFileSync('git', ['diff', '--quiet', commit, 'HEAD', '--', filePath, ...excluded], {
+        cwd: dir,
+        stdio: 'ignore',
+      });
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
+  userIdentity(dir: string): string | null {
+    const name = this.read(dir, ['config', 'user.name']);
+    const email = this.read(dir, ['config', 'user.email']);
+    return name && email ? `${name} <${email}>` : null;
+  }
+
   changedFiles(dir: string): string[] {
     const git = (...args: string[]): string =>
       execFileSync('git', args, {

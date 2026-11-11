@@ -2,6 +2,7 @@
 
 import type { Column } from './column.js';
 import type { EscalationReason } from './escalation.js';
+import type { SpecPin } from './spec-pin.js';
 import type { SubStateOrNull } from './sub-state.js';
 import type { TicketKind } from './ticket-kind.js';
 
@@ -53,4 +54,9 @@ export interface Ticket {
   escalation?: TicketEscalation | null;
   /** The pull request the engine opened for this ticket, once there is one. */
   prUrl?: string | null;
+  /**
+   * The spec this epic was created from (`ticket create --spec`). A task has
+   * none of its own: resolve it through `parentId`.
+   */
+  specPin?: SpecPin | null;
 }

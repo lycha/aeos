@@ -1,5 +1,6 @@
 // Driving port — TicketCreate use case interface
 
+import type { SpecPin } from '../../model/spec-pin.js';
 import type { TicketKind } from '../../model/ticket-kind.js';
 
 export interface TicketCreateInput {
@@ -10,7 +11,7 @@ export interface TicketCreateInput {
   /**
    * Parent epic ID. Supplying one creates a TASK; omitting it creates an EPIC.
    * A task inherits its specification from the parent's tech spec and task
-   * breakdown, so it skips scoping and goes straight to the build pipeline.
+   * breakdown, so it skips spec review and goes straight to the build pipeline.
    */
   parentId?: string;
   /**
@@ -27,6 +28,12 @@ export interface TicketCreateInput {
    * placeholders instead.
    */
   body?: string;
+  /**
+   * Feature under `features/` of the artefact tree to back this epic with. The
+   * epic is pinned to the tree's current commit. Required for an epic, refused
+   * with `parentId`.
+   */
+  spec?: string;
 }
 
 export interface TicketCreateResult {
@@ -37,6 +44,8 @@ export interface TicketCreateResult {
   taskKey: string | null;
   /** True when a matching child (by key, else title) already existed under the parent. */
   alreadyExisted: boolean;
+  /** Present when the epic was created with `spec`. */
+  specPin?: SpecPin;
 }
 
 export interface TicketCreatePort {

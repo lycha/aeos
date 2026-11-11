@@ -187,6 +187,39 @@ CREATE TABLE IF NOT EXISTS orchestrator_state (
       }
     },
   },
+  {
+    version: 9,
+    description: 'Pin an epic to the spec revision it was created from',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'spec_feature')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN spec_feature TEXT DEFAULT NULL`);
+      }
+      if (!hasColumn(db, 'tickets', 'spec_commit')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN spec_commit TEXT DEFAULT NULL`);
+      }
+    },
+  },
+  {
+    version: 10,
+    description: 'Rename PRODUCT_SCOPING to SPEC_REVIEW; an epic there with no spec needs one',
+    apply: (db) => {
+      // Before the rename, so a second run finds nothing: an epic is reviewed
+      // against its pinned spec, and one created before pins has none. It is
+      // kept and handed to a person rather than run without a spec.
+      db.exec(`
+UPDATE tickets
+   SET sub_state = 'ESCALATED',
+       escalation_reason = 'SPEC_REQUIRED',
+       escalation_message = 'This epic has no spec. An epic is now built from a spec a person wrote: write one with the spec skills (prototype-harvest, gap-interrogation-solo or gap-interrogation-capture, spec-writer), create a new epic with "aeos ticket create <title> --spec <feature>", and close this one with "aeos ticket move".',
+       escalation_artifact = NULL
+ WHERE "column" = 'PRODUCT_SCOPING' AND kind = 'EPIC' AND spec_feature IS NULL;
+UPDATE tickets SET "column" = 'SPEC_REVIEW' WHERE "column" = 'PRODUCT_SCOPING';
+UPDATE transitions SET from_column = 'SPEC_REVIEW' WHERE from_column = 'PRODUCT_SCOPING';
+UPDATE transitions SET to_column = 'SPEC_REVIEW' WHERE to_column = 'PRODUCT_SCOPING';
+UPDATE cost_records SET "column" = 'SPEC_REVIEW' WHERE "column" = 'PRODUCT_SCOPING';
+      `);
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

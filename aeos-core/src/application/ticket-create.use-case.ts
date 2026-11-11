@@ -4,6 +4,8 @@ import * as path from 'node:path';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
+import type { ArtefactTree } from '../domain/ports/driven/artefact-tree.port.js';
+import type { DecisionsLint } from '../domain/ports/driven/decisions-lint.port.js';
 import type {
   TicketCreatePort,
   TicketCreateInput,
@@ -11,15 +13,44 @@ import type {
 } from '../domain/ports/driving/ticket-create.port.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import { buildInitialTicketDocument } from './services/ticket-document.js';
+import { pinSpec } from './services/spec-pin.js';
 export class TicketCreateUseCase implements TicketCreatePort {
   constructor(
     private readonly ticketRepo: TicketRepository,
     private readonly artifactStore: ArtifactStore,
     private readonly gitGateway: GitGateway,
+    private readonly artefactTree: ArtefactTree,
+    private readonly decisionsLint: DecisionsLint,
   ) {}
 
   execute(input: TicketCreateInput): TicketCreateResult {
     const { title, projectId, projectKey, projectPath, parentId, taskKey, body } = input;
+
+    if (input.spec !== undefined && parentId) {
+      throw new Error(
+        '--spec backs an epic with a spec; it cannot be combined with --parent. A task inherits the pin of its epic.',
+      );
+    }
+    if (input.spec === undefined && !parentId) {
+      throw new Error(
+        'An epic needs a spec: pass --spec <feature>. A person writes the spec; AEOS reviews it and builds from it. ' +
+          'The skills that produce one, in order: prototype-harvest (what exists), gap-interrogation-solo or ' +
+          'gap-interrogation-capture (the decisions), spec-writer (spec.md under .aeos/features/<feature>/).',
+      );
+    }
+    const specPin =
+      input.spec === undefined
+        ? null
+        : pinSpec(
+            {
+              artefactTree: this.artefactTree,
+              decisionsLint: this.decisionsLint,
+              gitGateway: this.gitGateway,
+            },
+            `${projectKey}-aeos`,
+            projectPath,
+            input.spec,
+          );
 
     // A parent makes this a task; without one it is an epic.
     const kind = parentId ? TicketKind.TASK : TicketKind.EPIC;
@@ -81,6 +112,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
         kind,
         parentId: parentId ?? null,
         taskKey: resolvedTaskKey,
+        specPin,
         column: 'BACKLOG' as const,
         subState: null,
         createdAt: now,
@@ -120,6 +152,7 @@ export class TicketCreateUseCase implements TicketCreatePort {
       parentId: parentId ?? null,
       taskKey: resolvedTaskKey,
       alreadyExisted: false,
+      ...(specPin ? { specPin } : {}),
     };
   }
 }

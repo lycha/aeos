@@ -13,6 +13,7 @@ import { registerTicketCreateCommand } from './commands/ticket-create.command.js
 import { registerTicketListCommand } from './commands/ticket-list.command.js';
 import { registerTicketShowCommand } from './commands/ticket-show.command.js';
 import { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
+import { registerTicketRepinCommand } from './commands/ticket-repin.command.js';
 import { registerTicketResolveCommand } from './commands/ticket-resolve.command.js';
 import { registerTicketRunCommand } from './commands/ticket-run.command.js';
 import { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
@@ -32,6 +33,7 @@ export { registerTicketCreateCommand } from './commands/ticket-create.command.js
 export { registerTicketListCommand } from './commands/ticket-list.command.js';
 export { registerTicketShowCommand } from './commands/ticket-show.command.js';
 export { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
+export { registerTicketRepinCommand } from './commands/ticket-repin.command.js';
 export { registerTicketResolveCommand } from './commands/ticket-resolve.command.js';
 export { registerTicketRunCommand } from './commands/ticket-run.command.js';
 export { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
@@ -63,8 +65,9 @@ export function buildProgram(): Command {
         '  aeos ticket create "Title"                Create a ticket\n' +
         '  aeos ticket run <id>                      Run the pipeline column\n' +
         '  aeos ticket approve <id>                  Advance to next column\n' +
-        '  aeos ticket sign-off <id>                 Manually mark as SIGNED_OFF\n' +
-        '  aeos ticket move <id> <status>            Move ticket to any status\n' +
+        '  aeos ticket sign-off <id> --reason <text> Manually mark as SIGNED_OFF\n' +
+        '  aeos ticket move <id> <status> --reason <text>\n' +
+        '                                            Move ticket to any status\n' +
         '  aeos ticket ready <id>                    Reset ticket sub-state to READY\n' +
         '  aeos orchestrator run <epicId>            Drive an epic autonomously\n\n' +
         'Environment variables:\n' +
@@ -80,14 +83,40 @@ export function buildProgram(): Command {
   // not at program build time. This allows `aeos install` and `aeos project init`
   // to run before .aeos/ (and state.db) exist.
   registerTicketCreateCommand(program, () => container.ticketCreate, container.projectRepo);
-  registerTicketListCommand(program, () => container.ticketList, container.projectRepo);
-  registerTicketShowCommand(program, () => container.ticketShow, container.projectRepo);
+  registerTicketListCommand(
+    program,
+    () => container.ticketList,
+    container.projectRepo,
+    container.columnLabels,
+  );
+  registerTicketShowCommand(
+    program,
+    () => container.ticketShow,
+    container.projectRepo,
+    container.columnLabels,
+  );
   registerTicketAnswerCommand(program, () => container.ticketAnswer, container.projectRepo);
+  registerTicketRepinCommand(program, () => container.ticketRepin, container.projectRepo);
   registerTicketResolveCommand(program, () => container.ticketResolve, container.projectRepo);
-  registerTicketRunCommand(program, () => container.ticketRun, container.projectRepo);
-  registerTicketApproveCommand(program, () => container.ticketApprove, container.projectRepo);
+  registerTicketRunCommand(
+    program,
+    () => container.ticketRun,
+    container.projectRepo,
+    container.columnLabels,
+  );
+  registerTicketApproveCommand(
+    program,
+    () => container.ticketApprove,
+    container.projectRepo,
+    container.columnLabels,
+  );
   registerTicketSignOffCommand(program, () => container.ticketSignOff, container.projectRepo);
-  registerTicketMoveCommand(program, () => container.ticketMove, container.projectRepo);
+  registerTicketMoveCommand(
+    program,
+    () => container.ticketMove,
+    container.projectRepo,
+    container.columnLabels,
+  );
   registerTicketReadyCommand(program, () => container.ticketReady, container.projectRepo);
   registerTicketDodApproveCommand(
     program,
@@ -96,8 +125,13 @@ export function buildProgram(): Command {
     container.rubricLoader,
     container.artifactStore,
   );
-  registerOrchestratorCommand(program, () => container.orchestrator, container.projectRepo);
-  registerCostsCommand(program, () => container.costs);
+  registerOrchestratorCommand(
+    program,
+    () => container.orchestrator,
+    container.projectRepo,
+    container.columnLabels,
+  );
+  registerCostsCommand(program, () => container.costs, container.columnLabelsOfProject);
 
   return program;
 }

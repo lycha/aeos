@@ -19,7 +19,7 @@ function templatesRoot(): string {
 }
 
 export interface TemplateFile {
-  /** Path relative to the templates root, e.g. `agents/pm-agent.yaml`. */
+  /** Path relative to the templates root, e.g. `agents/architect-agent.yaml`. */
   readonly relativePath: string;
   readonly content: string;
 }

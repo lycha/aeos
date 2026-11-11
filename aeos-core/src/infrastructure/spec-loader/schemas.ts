@@ -5,6 +5,8 @@ import { z } from 'zod';
 
 export const ColumnSpecSchema = z.object({
   column: z.string().min(1),
+  // Length and uniqueness are checked across all columns, in `labelErrors`.
+  label: z.string().optional(),
   executorMode: z.enum(['artifact', 'agentic']).optional(),
   requiresRepoDiff: z.boolean().optional(),
   runChecks: z.boolean().optional(),

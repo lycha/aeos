@@ -86,4 +86,32 @@ export interface GitGateway {
 
   /** True when the repository at `dir` has at least one remote. */
   hasRemote(dir: string): boolean;
+
+  /** The full hash of `HEAD` in the repository at `dir`. */
+  headCommit(dir: string): string;
+
+  /**
+   * The content of `path` (relative to `dir`) as it was at `commit`. Throws
+   * when the commit or the file cannot be read; never reads the working tree.
+   */
+  showFile(dir: string, commit: string, path: string): string;
+
+  /**
+   * Every file under `path` (relative to `dir`) as of `commit`, as paths
+   * relative to `dir`, sorted. Empty when the commit has no such directory;
+   * throws when the commit cannot be read.
+   */
+  listFiles(dir: string, commit: string, path: string): string[];
+
+  /**
+   * True when `path` (relative to `dir`) differs between `commit` and `HEAD`,
+   * or when `commit` cannot be read. Paths in `excluding` are not compared.
+   */
+  pathChangedSince(dir: string, commit: string, path: string, excluding?: string[]): boolean;
+
+  /**
+   * `Name <email>` from `user.name` and `user.email` as git resolves them in
+   * `dir`, or null when either is not configured.
+   */
+  userIdentity(dir: string): string | null;
 }

@@ -22,6 +22,7 @@ import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
 import type { ExecutorInvocation } from '../domain/model/executor-invocation.js';
 import type { TicketRunEvent } from '../domain/model/ticket-run-event.js';
+import type { GateRecord } from '../domain/model/gate-record.js';
 import type { RunRecord } from '../domain/model/run-record.js';
 import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
 import type { ChecksRunner } from '../domain/ports/driven/checks-runner.port.js';
@@ -45,6 +46,7 @@ function createMockTicketRepo(): TicketRepository {
     updateSubState: vi.fn(),
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
+    setSpecCommit: vi.fn(),
   };
 }
 
@@ -77,6 +79,11 @@ function createMockGitGateway(): GitGateway {
     currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
     defaultBranch: vi.fn().mockReturnValue('main'),
     hasRemote: vi.fn().mockReturnValue(true),
+    headCommit: vi.fn().mockReturnValue('c0ffee1'),
+    showFile: vi.fn().mockReturnValue(''),
+    pathChangedSince: vi.fn().mockReturnValue(false),
+    userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
+    listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn().mockReturnValue('diff --git a/src/file.ts b/src/file.ts'),
   };
 }
@@ -236,6 +243,8 @@ function defaultContext(): AssembledContext {
     settledDecisions: null,
     priorArtifacts: [],
     epicContext: [],
+    spec: [],
+    specPin: null,
     constraints: null,
     codeDiff: null,
   };
@@ -284,6 +293,7 @@ describe('TicketRunUseCase', () => {
   let projectRepo: ProjectRepository;
   let checksRunner: { run: ReturnType<typeof vi.fn> };
   let checkRegistry: CheckRegistry;
+  let gateRecords: GateRecord[];
   let useCase: TicketRunUseCase;
 
   beforeEach(() => {
@@ -304,6 +314,7 @@ describe('TicketRunUseCase', () => {
     configStore = createMockConfigStore();
     runRecordStore = createMockRunRecordStore();
     projectChecks = undefined;
+    gateRecords = [];
     protectedPaths = undefined;
     projectRepo = {
       readExecutorConfig: () => ({ checks: projectChecks, protectedPaths }),
@@ -345,6 +356,7 @@ describe('TicketRunUseCase', () => {
       runRecordStore,
       checkRegistry,
       projectRepo,
+      { append: vi.fn(), list: () => gateRecords },
     );
   }
 
@@ -358,6 +370,34 @@ describe('TicketRunUseCase', () => {
       files: call[2] as { brief: string; transcript: string },
     }));
   }
+
+  describe('drift guard', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+
+    it('refuses to start while an amendment written under the pin is not repinned', async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ specPin: PIN }),
+      );
+      gateRecords = [{ gate: 'amendment', ticket: 'AEOS-7', spec_pin: PIN } as GateRecord];
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect(result.status === 'failed' && result.error).toMatch(/AEOS-7.*aeos ticket repin/s);
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(preflight.run).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
+    });
+
+    it('runs once the pin has moved past the amendment', async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ specPin: { ...PIN, commit: 'deadbee' } }),
+      );
+      gateRecords = [{ gate: 'amendment', ticket: 'AEOS-7', spec_pin: PIN } as GateRecord];
+
+      expect((await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID)).status).toBe('success');
+    });
+  });
 
   // --- Happy path ---
 
@@ -543,11 +583,11 @@ describe('TicketRunUseCase', () => {
 
   it('should keep non-IMPLEMENTATION worker runs in artifact mode by default', async () => {
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
-      runnableTicket({ column: 'PRODUCT_SCOPING' }),
+      runnableTicket({ column: 'SPEC_REVIEW' }),
     );
     (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue({
       ...defaultColumnSpec(),
-      column: 'PRODUCT_SCOPING',
+      column: 'SPEC_REVIEW',
       phase: 'PLAN',
       outputArtifact: 'prd.md',
       executorMode: undefined,
@@ -558,7 +598,7 @@ describe('TicketRunUseCase', () => {
     expect(executor.run).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        column: 'PRODUCT_SCOPING',
+        column: 'SPEC_REVIEW',
         mode: 'artifact',
         workingDirectory: undefined,
         onChunk: expect.any(Function),
@@ -1309,6 +1349,53 @@ describe('TicketRunUseCase', () => {
   // --- Run records (I1-M1-003) ---
 
   describe('run records', () => {
+    it("assembles a child task's context against its parent epic's pin, on every assembly", async () => {
+      const specPin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+      const epic = runnableTicket({ id: 'AEOS-9', kind: 'EPIC', specPin });
+      const task = runnableTicket({ kind: 'TASK', parentId: 'AEOS-9' });
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockImplementation(
+        (_project: string, id: string) => (id === 'AEOS-9' ? epic : task),
+      );
+      (gitGateway.currentBranch as ReturnType<typeof vi.fn>).mockReturnValue('aeos/AEOS-9');
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const calls = (contextAssembler.assemble as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.length).toBeGreaterThan(1);
+      for (const call of calls) expect(call[3]).toEqual(specPin);
+    });
+
+    it('fails the run with the error when the pinned spec cannot be read', async () => {
+      (contextAssembler.assemble as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Cannot read the pinned spec AEOS-aeos@c0ffee1'),
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: expect.stringContaining('AEOS-aeos@c0ffee1'),
+      });
+      expect(executor.run).not.toHaveBeenCalled();
+    });
+
+    it('fills spec_pin on every record of a spec-backed ticket', async () => {
+      const specPin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ specPin }),
+      );
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        artifactPath: '/tmp/artifact',
+        content: `${'A '.repeat(60)}\n\n${reviewWith('APPROVED')}`,
+      });
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(writtenRuns().length).toBeGreaterThan(0);
+      for (const run of writtenRuns()) expect(run.record.spec_pin).toEqual(specPin);
+    });
+
     it('writes a record with the brief and the log for the worker and the reviewer', async () => {
       (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: true,

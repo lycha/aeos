@@ -4,11 +4,13 @@ import type { Command } from 'commander';
 import { formatCostUsd } from '../../domain/model/cost-record.js';
 import type { TicketShowPort } from '../../domain/ports/driving/ticket-show.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { withColumnLabels, type ColumnLabels } from '../../domain/services/column-labels.js';
 
 export function registerTicketShowCommand(
   program: Command,
   getTicketShowUseCase: () => TicketShowPort,
   projectRepo: ProjectRepository,
+  getLabels: (projectPath: string) => ColumnLabels,
 ): void {
   const ticketCmd =
     program.commands.find((c) => c.name() === 'ticket') ??
@@ -41,6 +43,15 @@ export function registerTicketShowCommand(
       }
 
       const project = projectRepo.read(projectPath);
+      let labels: ColumnLabels;
+      try {
+        labels = getLabels(projectPath);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        process.exitCode = 1;
+        return;
+      }
 
       // 2. Call use case (case-insensitive via ticketId uppercasing handled in repo)
       const result = getTicketShowUseCase().execute({
@@ -72,10 +83,21 @@ export function registerTicketShowCommand(
         // eslint-disable-next-line no-console
         console.log(`Parent: ${result.parent.id} — ${result.parent.title}`);
       }
+      // The one place the identifier is shown, so a person can always find it.
       // eslint-disable-next-line no-console
-      console.log(`Column: ${result.ticket.column}`);
+      console.log(`Column: ${labels[result.ticket.column]} (${result.ticket.column})`);
       // eslint-disable-next-line no-console
       console.log(`State:  ${subState}`);
+      if (result.specPin) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `Spec:   ${result.specPin.repo}@${result.specPin.commit} (${result.specPin.path})`,
+        );
+        if (result.specMoved) {
+          // eslint-disable-next-line no-console
+          console.log('        Warning: spec has moved since this epic was pinned');
+        }
+      }
       if (result.ticket.prUrl) {
         // eslint-disable-next-line no-console
         console.log(`PR:     ${result.ticket.prUrl}`);
@@ -115,7 +137,7 @@ export function registerTicketShowCommand(
           const mark = child.column === 'DONE' ? '✓' : ' ';
           // eslint-disable-next-line no-console
           console.log(
-            `  ${mark} ${child.id.padEnd(10)} ${child.column.padEnd(16)} ${child.subState ?? '—'}  ${child.title}`,
+            `  ${mark} ${child.id.padEnd(10)} ${labels[child.column].padEnd(16)} ${child.subState ?? '—'}  ${child.title}`,
           );
         }
       }
@@ -140,7 +162,7 @@ export function registerTicketShowCommand(
           const modelInfo = execution.model === 'unknown' ? '(unknown)' : execution.model;
           // eslint-disable-next-line no-console
           console.log(
-            `  • ${execution.column} (${execution.agent}): ${execution.executor} / ${modelInfo} — ${formatCostUsd(execution.costUsd)}`,
+            `  • ${withColumnLabels(execution.column, labels)} (${execution.agent}): ${execution.executor} / ${modelInfo} — ${formatCostUsd(execution.costUsd)}`,
           );
         }
       }

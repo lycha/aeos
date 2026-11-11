@@ -11,6 +11,7 @@ import type {
   TicketDodApprovePort,
   TicketDodApproveResult,
 } from '../domain/ports/driving/ticket-dod-approve.port.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 
 export class TicketDodApproveUseCase implements TicketDodApprovePort {
@@ -20,6 +21,7 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
     private readonly stateMachine: StateMachineService,
     private readonly gitGateway: GitGateway,
     private readonly costRepo: CostRepository,
+    private readonly gateRecorder: GateRecorder,
   ) {}
 
   execute(
@@ -27,6 +29,7 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
     projectPath: string,
     ticketId: string,
     approved: boolean,
+    reason?: string,
   ): TicketDodApproveResult {
     // 1. Load ticket
     const ticket = this.ticketRepo.findById(projectId, ticketId);
@@ -43,10 +46,21 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
       };
     }
 
-    // 3. If not approved, return cancelled
+    // 3. A no is a decision too: record it, and leave the ticket at the gate.
     if (!approved) {
+      this.gateRecorder.record(projectPath, ticket, {
+        gate: 'definition-of-done',
+        verdict: 'rejected',
+        reason,
+      });
       return { status: 'cancelled', ticketId };
     }
+    this.gateRecorder.record(projectPath, ticket, {
+      gate: 'definition-of-done',
+      verdict: 'approved',
+      fromColumn: Column.DOD_GATE,
+      toColumn: Column.DONE,
+    });
 
     // 4. Transition column to DONE
     const transitionResult = this.stateMachine.transition(projectId, ticketId, Column.DONE);

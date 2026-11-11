@@ -4,7 +4,7 @@ import { TicketKind } from './ticket-kind.js';
 
 export const Column = {
   BACKLOG: 'BACKLOG',
-  PRODUCT_SCOPING: 'PRODUCT_SCOPING',
+  SPEC_REVIEW: 'SPEC_REVIEW',
   TECH_SPEC: 'TECH_SPEC',
   TASK_BREAKDOWN: 'TASK_BREAKDOWN',
   IMPLEMENTATION: 'IMPLEMENTATION',
@@ -26,7 +26,7 @@ export type Column = (typeof Column)[keyof typeof Column];
  */
 export const COLUMN_ORDER = [
   Column.BACKLOG,
-  Column.PRODUCT_SCOPING,
+  Column.SPEC_REVIEW,
   Column.TECH_SPEC,
   Column.TASK_BREAKDOWN,
   Column.IMPLEMENTATION,
@@ -40,16 +40,16 @@ export const COLUMN_ORDER = [
 export type ColumnOrder = typeof COLUMN_ORDER;
 
 /**
- * An epic is scoped, specced, and decomposed — then it waits.
+ * An epic has its spec reviewed, is specced technically, and decomposed — then it waits.
  * It never implements anything itself; its child tasks do that.
  */
 export const EPIC_COLUMN_ORDER = [
   Column.BACKLOG,
-  Column.PRODUCT_SCOPING,
+  Column.SPEC_REVIEW,
   Column.TECH_SPEC,
   Column.TASK_BREAKDOWN,
   // Once every child task is DONE, the epic reviews the assembled feature diff
-  // against its own PRD and tech spec before the human DoD gate.
+  // against its pinned spec and tech spec before the human DoD gate.
   Column.INTEGRATION_REVIEW,
   Column.DOD_GATE,
   Column.DONE,

@@ -1,4 +1,5 @@
 column: TASK_BREAKDOWN
+label: Task breakdown
 # Agentic so the architect can call `aeos ticket create --parent` to decompose
 # the epic into child tasks. requiresRepoDiff is false because that work writes
 # tickets and a gitignored artifact, not a repo change — the IMPLEMENTATION

@@ -12,6 +12,7 @@ than decide.
 | `artefact-tree-init` | setup | Resolves the artefact-tree root and seeds the canonical schemas into it |
 | `prototype-harvest` | 1 | Extracts a design handoff into `feature-inventory.yaml` (screens, states, data, and, crucially, absences) |
 | `gap-interrogation-capture` | 2 | Turns a real workshop's transcript/notes into `decisions.yaml` |
+| `gap-interrogation-solo` | 2 | Simulates the workshop for one person working alone; the human still decides. Produces `decisions.yaml` |
 | `spec-writer` | 3 | Transcribes resolved decisions into `spec.md` (EARS) + `*.feature` (Gherkin) + invariants |
 
 The canonical schemas live once, here, and travel with the plugin:
@@ -21,6 +22,9 @@ schemas/
   decisions.schema.json
   feature-inventory.schema.json
   assumption-register.schema.json
+  run-record.schema.json     # written by the AEOS engine
+  gates.schema.json
+  conformance.schema.json
   lint_decisions.py          # cross-file invariants a JSON Schema can't see
 scripts/
   seed-schemas.mjs           # copies the schemas into a project's artefact tree + stamps them
@@ -44,7 +48,13 @@ node scripts/seed-schemas.mjs --tree docs/artefact-tree --check   # CI: non-zero
 node scripts/seed-schemas.mjs --tree docs/artefact-tree --force   # overwrite a diverged copy
 ```
 
-Destination resolution: `--tree`, then `$AEOS_ARTEFACT_TREE`, then `./docs/artefact-tree`.
+Destination resolution: `--tree`, then `$AEOS_ARTEFACT_TREE`, then `artefactTree` in
+`./.aeos/project.json`, then `./.aeos` when it exists, then `./docs/artefact-tree`.
+
+In an AEOS project the tree is `<project>/.aeos`, which is its own git repository and ignored by the
+code repository. `aeos project init` seeds the schemas there from the copy AEOS ships
+(`aeos-core/templates/schemas/`, generated from this directory by `npm run build`), and
+`aeos project sync` reports a stale or hand-edited copy.
 When run inside the plugin runtime, `$CLAUDE_PLUGIN_ROOT` points at the schema source.
 
 **Edit the schemas here, never in a project's tree.** The tree copy is generated; re-seed to update.
@@ -66,6 +76,7 @@ self-contained: nothing outside this directory is required.
 1. `artefact-tree-init` once per project (seeds schemas, scaffolds `features/`, `contexts/`).
 2. `prototype-harvest` on the design handoff → `feature-inventory.yaml`.
 3. Hold the gap-interrogation workshop (human), then `gap-interrogation-capture` → `decisions.yaml`.
+   Working alone: `gap-interrogation-solo` instead.
 4. `spec-writer` on the resolved decisions → `spec.md` + `*.feature`.
 
 Traceability runs end to end: `ABS-n → AC-n → INV-n → @AC-n in the .feature → test`.

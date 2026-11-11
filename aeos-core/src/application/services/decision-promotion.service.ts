@@ -48,8 +48,30 @@ interface ParsedDecision {
   notes: string | null;
 }
 
+/** A question of a structured questions file that a person has answered. */
+export interface AnsweredQuestion {
+  readonly id: string;
+  readonly question: string;
+  readonly answer: string;
+}
+
 export class DecisionPromotionService {
   constructor(private readonly artifactStore: ArtifactStore) {}
+
+  /**
+   * The answered questions of the ticket's questions file, or null for a
+   * legacy file. Reads only. Throws what `promote` reports as a validation
+   * error: a required answer is missing, or nothing is answered.
+   */
+  answered(projectPath: string, ticketId: string): AnsweredQuestion[] | null {
+    const content = this.artifactStore.readArtifact(
+      projectPath,
+      ticketId,
+      `${ticketId}-questions.md`,
+    );
+    if (extractScalar(content, 'Format-Version') !== QUESTIONS_FORMAT_VERSION) return null;
+    return answeredQuestions(content).map(({ id, question, answer }) => ({ id, question, answer }));
+  }
 
   promote(input: DecisionPromotionInput): DecisionPromotionResult {
     const questionsFilename = `${input.ticketId}-questions.md`;
@@ -73,22 +95,7 @@ export class DecisionPromotionService {
     }
 
     try {
-      const parsedQuestions = parseQuestionFile(questionsContent);
-      const missingRequiredAnswers = parsedQuestions.filter(
-        (question) => isRequired(question.required) && question.answer.trim().length === 0,
-      );
-      if (missingRequiredAnswers.length > 0) {
-        return validationError(
-          `Missing required answers for: ${missingRequiredAnswers.map((q) => q.id).join(', ')}`,
-        );
-      }
-
-      const answeredQuestions = parsedQuestions.filter(
-        (question) => question.answer.trim().length > 0,
-      );
-      if (answeredQuestions.length === 0) {
-        return validationError('No answered questions found in structured questions file.');
-      }
+      const answered = answeredQuestions(questionsContent);
 
       const existingDecisions = this.artifactStore.artifactExists(
         input.projectPath,
@@ -107,7 +114,7 @@ export class DecisionPromotionService {
       let nextDecisionNumber = getNextDecisionNumber(decisions);
       const settledAt = input.settledAt ?? new Date().toISOString();
 
-      for (const question of answeredQuestions) {
+      for (const question of answered) {
         let currentDecision = decisions.find((decision) => decision.source === question.id) ?? null;
 
         if (!currentDecision) {
@@ -185,6 +192,23 @@ function validationError(error: string): DecisionPromotionResult {
     warnings: [],
     error,
   };
+}
+
+function answeredQuestions(content: string): ParsedQuestion[] {
+  const parsedQuestions = parseQuestionFile(content);
+  const missingRequiredAnswers = parsedQuestions.filter(
+    (question) => isRequired(question.required) && question.answer.trim().length === 0,
+  );
+  if (missingRequiredAnswers.length > 0) {
+    throw new Error(
+      `Missing required answers for: ${missingRequiredAnswers.map((q) => q.id).join(', ')}`,
+    );
+  }
+  const answered = parsedQuestions.filter((question) => question.answer.trim().length > 0);
+  if (answered.length === 0) {
+    throw new Error('No answered questions found in structured questions file.');
+  }
+  return answered;
 }
 
 function parseQuestionFile(content: string): ParsedQuestion[] {

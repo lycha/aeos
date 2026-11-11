@@ -3,17 +3,19 @@
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import type { GitGateway } from '../../domain/ports/driven/git-gateway.port.js';
+import type { ArtefactTree } from '../../domain/ports/driven/artefact-tree.port.js';
 import type { AssembledContext, PriorArtifact } from '../../domain/model/assembled-context.js';
+import type { SpecPin } from '../../domain/model/spec-pin.js';
 import { Column } from '../../domain/model/column.js';
 
 /** Maximum characters before a diff is truncated. */
 export const MAX_DIFF_CHARS = 50_000;
 
 /**
- * The parent epic's specification artifacts a child task is assembled against.
- * Suffix-matched against the parent's artifact filenames (e.g. `AEOS-1-prd.md`).
+ * The parent epic's artifact a child task is assembled against, matched by
+ * suffix (`AEOS-1-tech-spec.md`). The human-written spec comes through the pin.
  */
-const EPIC_SPEC_SUFFIXES = ['-prd.md', '-tech-spec.md'] as const;
+const EPIC_TECH_SPEC_SUFFIX = '-tech-spec.md';
 
 /** Pulls the parent epic id out of the ticket document's AEOS metadata block. */
 function parentEpicId(ticketContent: string): string | null {
@@ -23,14 +25,38 @@ function parentEpicId(ticketContent: string): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * The bounded context a spec belongs to: `context:` in the front matter of
+ * spec.md, else in `meta` of decisions.yaml. Null when neither names one.
+ */
+function specContext(specMd: string, decisionsYaml: string): string | null {
+  const frontMatter = /^---\n([\s\S]*?)\n---/.exec(specMd)?.[1] ?? '';
+  const name =
+    /^context:[ \t]*(.+)$/m.exec(frontMatter)?.[1] ??
+    /^meta:\n(?:[ \t]+.*\n)*?[ \t]+context:[ \t]*(.+)$/m.exec(decisionsYaml)?.[1];
+  const context = name?.trim().replace(/^["']|["']$/g, '');
+  // The name becomes a path in the tree.
+  return context && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(context) ? context : null;
+}
+
 export class ContextAssembler {
   constructor(
     private artifactStore: ArtifactStore,
     private projectRepo: ProjectRepository,
     private gitGateway: GitGateway,
+    private artefactTree: ArtefactTree,
   ) {}
 
-  async assemble(ticketId: string, projectRoot: string, column: string): Promise<AssembledContext> {
+  /**
+   * `specPin` is the ticket's pin (its own or its parent epic's, see
+   * `resolveSpecPin`), or null for a ticket that is not spec-backed.
+   */
+  async assemble(
+    ticketId: string,
+    projectRoot: string,
+    column: string,
+    specPin: SpecPin | null = null,
+  ): Promise<AssembledContext> {
     // 1. Read ticket content
     const ticketFilename = `${ticketId}-ticket.md`;
     const ticketContent = this.artifactStore.readArtifact(projectRoot, ticketId, ticketFilename);
@@ -38,6 +64,8 @@ export class ContextAssembler {
     // 2. Detect decisions artifact and read it when present
     const decisionsFilename = `${ticketId}-decisions.md`;
     const questionsFilename = `${ticketId}-questions.md`;
+    // The gate records of a ticket with no spec: a log of decisions, not an input.
+    const gatesFilename = `${ticketId}-gates.yaml`;
     const allFilenames = this.artifactStore.listArtifacts(projectRoot, ticketId);
     const hasDecisions = allFilenames.includes(decisionsFilename);
     const settledDecisions = hasDecisions
@@ -50,6 +78,7 @@ export class ContextAssembler {
         (filename) =>
           filename !== ticketFilename &&
           filename !== decisionsFilename &&
+          filename !== gatesFilename &&
           !(hasDecisions && filename === questionsFilename),
       )
       .map((filename) => ({
@@ -57,13 +86,19 @@ export class ContextAssembler {
         content: this.artifactStore.readArtifact(projectRoot, ticketId, filename),
       }));
 
-    // 3a. For a child task, inject the parent epic's spec (PRD, tech spec) so the
-    //     task is built against — and does not contradict — the decisions that
-    //     scoped it. The task's own artifact dir never contains these.
+    // 3a. For a child task, inject the parent epic's tech spec so the task is
+    //     built against — and does not contradict — the decisions that scoped
+    //     it. The task's own artifact dir never contains it.
     const epicContext = this.gatherEpicContext(ticketContent, projectRoot);
 
-    // 4. Read constraints
-    const constraints = this.projectRepo.readConstraints(projectRoot);
+    // 3b. The pinned spec, for a spec-backed ticket.
+    const pinned = specPin ? this.readPinnedSpec(projectRoot, specPin) : null;
+
+    // 4. Read constraints: the project's first, then those of the spec's context.
+    const constraints =
+      [this.projectRepo.readConstraints(projectRoot), pinned?.constraints ?? null]
+        .filter((part) => part !== null)
+        .join('\n\n') || null;
 
     // 5. Inject a git diff for the review columns.
     //    - CODE_REVIEW reviews the working-tree diff of one task.
@@ -82,7 +117,59 @@ export class ContextAssembler {
       codeDiff = this.clampDiff(raw);
     }
 
-    return { ticketContent, settledDecisions, priorArtifacts, epicContext, constraints, codeDiff };
+    return {
+      ticketContent,
+      settledDecisions,
+      priorArtifacts,
+      epicContext,
+      spec: pinned?.spec ?? [],
+      specPin,
+      constraints,
+      codeDiff,
+    };
+  }
+
+  /**
+   * Reads the spec through git at the pinned commit, never from the working
+   * tree: a later edit must not change what an in-flight run is told.
+   */
+  private readPinnedSpec(
+    projectRoot: string,
+    pin: SpecPin,
+  ): { spec: PriorArtifact[]; constraints: string | null } {
+    const treeRoot = this.artefactTree.root(projectRoot);
+    const read = (file: string): string => {
+      try {
+        return this.gitGateway.showFile(treeRoot, pin.commit, file);
+      } catch {
+        throw new Error(
+          `Cannot read the pinned spec ${pin.repo}@${pin.commit}: ${file} is not readable at that commit in ${treeRoot}. The spec is never read from the working tree. Check that the commit still exists in the .aeos repository.`,
+        );
+      }
+    };
+    const inFeature = (name: string): PriorArtifact => ({
+      name,
+      content: read(`${pin.path}/${name}`),
+    });
+
+    const spec = [inFeature('spec.md'), inFeature('decisions.yaml')];
+    // shortcut: every scenario goes to every agent; give a task worker only the
+    // scenarios of the criteria it claims once I1-M4-001 adds claims.
+    const scenariosDir = `${pin.path}/features`;
+    for (const file of this.gitGateway.listFiles(treeRoot, pin.commit, scenariosDir)) {
+      if (file.endsWith('.feature')) spec.push(inFeature(file.slice(pin.path.length + 1)));
+    }
+
+    const context = specContext(spec[0]!.content, spec[1]!.content);
+    if (!context) return { spec, constraints: null };
+    const contextFiles = this.gitGateway.listFiles(treeRoot, pin.commit, `contexts/${context}`);
+    const glossary = `contexts/${context}/glossary.md`;
+    if (contextFiles.includes(glossary)) spec.push({ name: glossary, content: read(glossary) });
+    const constraints = `contexts/${context}/CONSTRAINTS.md`;
+    return {
+      spec,
+      constraints: contextFiles.includes(constraints) ? read(constraints) : null,
+    };
   }
 
   /** Normalizes an empty diff to a marker and truncates an oversized one. */
@@ -95,26 +182,23 @@ export class ContextAssembler {
   }
 
   /**
-   * Reads the parent epic's PRD and tech-spec artifacts for a child task.
-   * Returns [] for an epic (no parent) or when the parent has no such artifacts.
+   * Reads the parent epic's tech spec for a child task.
+   * Returns [] for an epic (no parent) or when the parent has none.
    */
   private gatherEpicContext(ticketContent: string, projectRoot: string): PriorArtifact[] {
     const epicId = parentEpicId(ticketContent);
     if (!epicId) return [];
 
-    const parentFiles = this.artifactStore.listArtifacts(projectRoot, epicId);
-    const out: PriorArtifact[] = [];
-    // Preserve EPIC_SPEC_SUFFIXES order (PRD before tech spec) rather than the
-    // directory's order.
-    for (const suffix of EPIC_SPEC_SUFFIXES) {
-      const filename = parentFiles.find((name) => name.endsWith(suffix));
-      if (filename) {
-        out.push({
-          name: filename,
-          content: this.artifactStore.readArtifact(projectRoot, epicId, filename),
-        });
-      }
-    }
-    return out;
+    const filename = this.artifactStore
+      .listArtifacts(projectRoot, epicId)
+      .find((name) => name.endsWith(EPIC_TECH_SPEC_SUFFIX));
+    return filename
+      ? [
+          {
+            name: filename,
+            content: this.artifactStore.readArtifact(projectRoot, epicId, filename),
+          },
+        ]
+      : [];
   }
 }

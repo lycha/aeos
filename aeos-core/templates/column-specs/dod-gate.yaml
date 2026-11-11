@@ -1,6 +1,7 @@
 # TODO: DOD_GATE uses human-approval flow (AEOS-20), not agent execution.
 # workerAgentFile and reviewerAgentFile are placeholders required by ColumnSpecSchema.
 column: DOD_GATE
+label: DoD gate
 phase: DEPLOY
 workerAgentFile: agents/qa-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml

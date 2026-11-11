@@ -6,12 +6,14 @@ import type {
   ExecutorOverrides,
 } from '../../domain/ports/driving/ticket-run.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { withColumnLabels, type ColumnLabels } from '../../domain/services/column-labels.js';
 import { createTicketRunDisplay } from '../ui/ticket-run-display.js';
 
 export function registerTicketRunCommand(
   program: Command,
   getTicketRunUseCase: () => TicketRunPort,
   projectRepo: ProjectRepository,
+  getLabels: (projectPath: string) => ColumnLabels,
 ): void {
   const ticketCmd =
     program.commands.find((c) => c.name() === 'ticket') ??
@@ -55,7 +57,10 @@ export function registerTicketRunCommand(
 
         const project = projectRepo.read(projectPath);
         const ticketRunUseCase = getTicketRunUseCase();
-        const display = createTicketRunDisplay(process.stdout);
+        const labels = getLabels(projectPath);
+        const display = createTicketRunDisplay(process.stdout, (column) =>
+          withColumnLabels(column, labels),
+        );
 
         const executorOverrides: ExecutorOverrides | undefined =
           options.executor || options.model

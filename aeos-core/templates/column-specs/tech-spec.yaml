@@ -1,4 +1,5 @@
 column: TECH_SPEC
+label: Tech spec
 phase: PREPARE
 workerAgentFile: agents/architect-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml

@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-[1–2 paragraph summary of what will be built. Reference the architecture spike decisions that inform this specification. State the scope — what is included and what is explicitly excluded. Identify the PRD requirements this spec addresses.]
+[1–2 paragraph summary of what will be built. Reference the architecture spike decisions that inform this specification. State the scope — what is included and what is explicitly excluded. Identify the acceptance criteria (`AC-n`) this tech spec addresses.]
 
 ## 2. Component Architecture
 
@@ -139,12 +139,12 @@ interface NotificationRecord {
 
 ### 7.3 Edge Cases
 
-[List edge cases derived from PRD acceptance criteria and error handling requirements.]
+[List edge cases derived from the spec's acceptance criteria (cite each `AC-n`) and error handling requirements.]
 
 | # | Edge Case | Expected Behaviour | Derived From |
 |---|-----------|-------------------|--------------|
-| 1 | [e.g., "Duplicate notification request within 1 second"] | [e.g., "Deduplicated — only one notification sent"] | [e.g., "PRD §AC-3"] |
-| 2 | [e.g., "Recipient has no email on file but channel is 'email'"] | [e.g., "Returns 422 RECIPIENT_NO_EMAIL"] | [e.g., "PRD §AC-7"] |
+| 1 | [e.g., "Duplicate notification request within 1 second"] | [e.g., "Deduplicated — only one notification sent"] | [e.g., "spec AC-3"] |
+| 2 | [e.g., "Recipient has no email on file but channel is 'email'"] | [e.g., "Returns 422 RECIPIENT_NO_EMAIL"] | [e.g., "spec AC-7"] |
 
 ## 8. Implementation Plan
 

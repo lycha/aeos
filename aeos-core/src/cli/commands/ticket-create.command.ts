@@ -34,10 +34,20 @@ export function registerTicketCreateCommand(
       '--body-file <path>',
       'Read the ticket description from a file (robust for multi-line markdown)',
     )
+    .option(
+      '--spec <feature>',
+      'Back this epic with the spec at .aeos/features/<feature>. Refused unless the decisions lint is clean',
+    )
     .action(
       (
         title: string,
-        options: { parent?: string; key?: string; body?: string; bodyFile?: string },
+        options: {
+          parent?: string;
+          key?: string;
+          body?: string;
+          bodyFile?: string;
+          spec?: string;
+        },
       ) => {
         try {
           const cwd = process.cwd();
@@ -79,6 +89,7 @@ export function registerTicketCreateCommand(
             parentId: options.parent,
             taskKey: options.key,
             body,
+            spec: options.spec,
           });
 
           const lineage = result.parentId ? ` (task of ${result.parentId})` : '';
@@ -90,6 +101,12 @@ export function registerTicketCreateCommand(
           } else {
             // eslint-disable-next-line no-console
             console.log(`✓ Created ${result.kind} ${result.ticketId}: "${result.title}"${lineage}`);
+            if (result.specPin) {
+              // eslint-disable-next-line no-console
+              console.log(
+                `  Spec: ${result.specPin.repo}@${result.specPin.commit} (${result.specPin.path})`,
+              );
+            }
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

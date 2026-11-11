@@ -11,6 +11,7 @@ import type {
   TicketResolveResult,
 } from '../domain/ports/driving/ticket-resolve.port.js';
 import { SubState } from '../domain/model/sub-state.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import {
   escalationFilename,
@@ -29,6 +30,7 @@ export class TicketResolveUseCase implements TicketResolvePort {
     private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
     private readonly gitGateway: GitGateway,
+    private readonly gateRecorder: GateRecorder,
   ) {}
 
   execute(input: TicketResolveInput): TicketResolveResult {
@@ -71,6 +73,11 @@ export class TicketResolveUseCase implements TicketResolvePort {
         error: `No response found in ${filename}. Write your decision in the \`## Response\` block, then re-run.`,
       };
     }
+
+    this.gateRecorder.record(projectPath, ticket, {
+      gate: 'escalation-resolution',
+      verdict: 'approved',
+    });
 
     // Persist the operator's guidance as a context artifact for the retry.
     const reason = ticket.escalation?.reason ?? 'ESCALATED';

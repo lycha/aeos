@@ -1,4 +1,5 @@
 column: QA
+label: QA
 phase: DEPLOY
 workerAgentFile: agents/qa-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml

@@ -34,6 +34,8 @@ function createMockProjectRepo(): ProjectRepository {
   };
 }
 
+const REASON = 'The reviewer misread AC-2.';
+
 describe('registerTicketSignOffCommand', () => {
   let program: Command;
   let useCase: ReturnType<typeof createMockTicketSignOffUseCase>;
@@ -61,16 +63,17 @@ describe('registerTicketSignOffCommand', () => {
   });
 
   it('passes the ticket id and project info to the use case', () => {
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1']);
+    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
     expect(useCase.execute).toHaveBeenCalledWith({
       projectId: 'proj-1',
       projectPath: '/test',
       ticketId: 'AEOS-1',
+      reason: REASON,
     });
   });
 
   it('prints a success message when manual sign-off succeeds', () => {
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1']);
+    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
     expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 signed off (previous state: FAILED)');
   });
 
@@ -80,17 +83,25 @@ describe('registerTicketSignOffCommand', () => {
       ticketId: 'AEOS-1',
       error: 'Ticket AEOS-1 is already SIGNED_OFF',
     });
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1']);
+    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
     expect(consoleErrorSpy).toHaveBeenCalledWith('Error: Ticket AEOS-1 is already SIGNED_OFF');
     expect(process.exitCode).toBe(1);
   });
 
   it('shows an error when not inside an AEOS project', () => {
     (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1']);
+    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       'Error: No AEOS project found. Run "aeos project init" first.',
     );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('is refused without --reason, and the use case is not run', () => {
+    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1']);
+
+    expect(useCase.execute).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('--reason'));
     expect(process.exitCode).toBe(1);
   });
 });

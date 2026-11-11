@@ -10,6 +10,7 @@ export * from './ticket-sign-off.command.js';
 export * from './ticket-move.command.js';
 export * from './ticket-ready.command.js';
 export * from './ticket-answer.command.js';
+export * from './ticket-repin.command.js';
 export * from './ticket-dod-approve.command.js';
 export * from './dashboard.command.js';
 export * from './costs.command.js';

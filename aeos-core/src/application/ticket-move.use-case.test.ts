@@ -2,6 +2,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TicketMoveUseCase } from './ticket-move.use-case.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
@@ -21,6 +22,7 @@ function createMockTicketRepo(): TicketRepository {
     updateSubState: vi.fn(),
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
+    setSpecCommit: vi.fn(),
   };
 }
 
@@ -42,6 +44,11 @@ function createMockGitGateway(): GitGateway {
     currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
     defaultBranch: vi.fn().mockReturnValue('main'),
     hasRemote: vi.fn().mockReturnValue(true),
+    headCommit: vi.fn().mockReturnValue('c0ffee1'),
+    showFile: vi.fn().mockReturnValue(''),
+    pathChangedSince: vi.fn().mockReturnValue(false),
+    userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
+    listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn().mockReturnValue(''),
   };
 }
@@ -65,6 +72,16 @@ function createMockStateMachine() {
   return mock as unknown as StateMachineService;
 }
 
+// Shared by every describe below: the recorder is a mock, reset per test.
+const gateRecorder = { decidedBy: vi.fn(), record: vi.fn() };
+const recorder = gateRecorder as unknown as GateRecorder;
+const callOrder = (mock: unknown): number =>
+  (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+beforeEach(() => {
+  gateRecorder.decidedBy.mockReset();
+  gateRecorder.record.mockReset();
+});
+
 const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
 const TICKET_ID = 'AEOS-1';
@@ -76,7 +93,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     title: 'Test ticket',
     kind: 'EPIC',
     parentId: null,
-    column: 'PRODUCT_SCOPING',
+    column: 'SPEC_REVIEW',
     subState: 'WORKING',
     createdAt: '2025-01-01T09:00:00Z',
     updatedAt: '2025-01-01T10:00:00Z',
@@ -96,8 +113,48 @@ describe('TicketMoveUseCase', () => {
     artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
-    useCase = new TicketMoveUseCase(ticketRepo, artifactStore, stateMachine, gitGateway);
+    useCase = new TicketMoveUseCase(ticketRepo, artifactStore, stateMachine, gitGateway, recorder);
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
+  });
+
+  describe('gate record', () => {
+    const input = {
+      projectId: PROJECT_ID,
+      projectPath: PROJECT_PATH,
+      ticketId: TICKET_ID,
+      targetColumn: 'QA' as const,
+      reason: 'Skipping ahead: built by hand.',
+    };
+
+    it('records the override with its reason before the ticket moves', () => {
+      useCase.execute(input);
+
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, makeTicket(), {
+        gate: 'move-override',
+        verdict: 'overridden',
+        fromColumn: 'SPEC_REVIEW',
+        toColumn: 'QA',
+        reason: 'Skipping ahead: built by hand.',
+      });
+      expect(callOrder(gateRecorder.record)).toBeLessThan(callOrder(stateMachine.transition));
+    });
+
+    it('does not move the ticket when the record is refused or cannot be written', () => {
+      gateRecorder.record.mockImplementation(() => {
+        throw new Error('needs a written reason');
+      });
+
+      expect(() => useCase.execute(input)).toThrow('needs a written reason');
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+      expect(gitGateway.commit).not.toHaveBeenCalled();
+    });
+
+    it('records nothing for a move to the column the ticket is already in', () => {
+      const result = useCase.execute({ ...input, targetColumn: 'SPEC_REVIEW' });
+
+      expect(result).toMatchObject({ status: 'error', error: 'Already in SPEC_REVIEW' });
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
   });
 
   it('moves a ticket to any non-terminal column and sets READY', () => {
@@ -106,11 +163,12 @@ describe('TicketMoveUseCase', () => {
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
       targetColumn: 'QA',
+      reason: 'A reason that is long enough.',
     });
     expect(result).toEqual({
       status: 'moved',
       ticketId: TICKET_ID,
-      fromColumn: 'PRODUCT_SCOPING',
+      fromColumn: 'SPEC_REVIEW',
       toColumn: 'QA',
     });
     expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'QA');
@@ -123,6 +181,7 @@ describe('TicketMoveUseCase', () => {
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
       targetColumn: 'DONE',
+      reason: 'A reason that is long enough.',
     });
     expect(ticketRepo.updateSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, null);
     expect(stateMachine.setSubState).not.toHaveBeenCalled();
@@ -134,6 +193,7 @@ describe('TicketMoveUseCase', () => {
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
       targetColumn: 'QA',
+      reason: 'A reason that is long enough.',
     });
     expect(artifactStore.writeArtifact).toHaveBeenCalledWith(
       PROJECT_PATH,
@@ -155,10 +215,11 @@ describe('TicketMoveUseCase', () => {
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
       targetColumn: 'TECH_SPEC',
+      reason: 'A reason that is long enough.',
     });
     expect(gitGateway.commit).toHaveBeenCalledWith(
       path.join(PROJECT_PATH, '.aeos'),
-      `[${TICKET_ID}][HUMAN][v1][move: PRODUCT_SCOPING → TECH_SPEC]`,
+      `[${TICKET_ID}][HUMAN][v1][move: SPEC_REVIEW → TECH_SPEC]`,
     );
   });
 
@@ -169,6 +230,7 @@ describe('TicketMoveUseCase', () => {
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
       targetColumn: 'QA',
+      reason: 'A reason that is long enough.',
     });
     expect(result).toEqual({
       status: 'error',
@@ -180,18 +242,19 @@ describe('TicketMoveUseCase', () => {
   it('returns error when transition fails', () => {
     (stateMachine.transition as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: false,
-      reason: 'Already in PRODUCT_SCOPING',
+      reason: 'Already in SPEC_REVIEW',
     });
     const result = useCase.execute({
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
-      targetColumn: 'PRODUCT_SCOPING',
+      targetColumn: 'SPEC_REVIEW',
+      reason: 'A reason that is long enough.',
     });
     expect(result).toEqual({
       status: 'error',
       ticketId: TICKET_ID,
-      error: 'Already in PRODUCT_SCOPING',
+      error: 'Already in SPEC_REVIEW',
     });
   });
 
@@ -205,6 +268,7 @@ describe('TicketMoveUseCase', () => {
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
       targetColumn: 'QA',
+      reason: 'A reason that is long enough.',
     });
     expect(result).toEqual({
       status: 'error',
@@ -223,9 +287,10 @@ describe('TicketMoveUseCase', () => {
         projectPath: PROJECT_PATH,
         ticketId: TICKET_ID,
         targetColumn: 'QA',
+        reason: 'A reason that is long enough.',
       }),
     ).toThrow('git commit failed');
-    expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'PRODUCT_SCOPING');
+    expect(stateMachine.transition).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'SPEC_REVIEW');
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'WORKING');
   });
 });

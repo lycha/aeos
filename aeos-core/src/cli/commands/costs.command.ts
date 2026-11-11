@@ -3,6 +3,7 @@
 import type { Command } from 'commander';
 import { formatCostUsd } from '../../domain/model/cost-record.js';
 import type { CostBreakdown, CostsPort } from '../../domain/ports/driving/costs.port.js';
+import { withColumnLabels, type ColumnLabels } from '../../domain/services/column-labels.js';
 
 const RULE = '─'.repeat(53);
 const AMOUNT_COLUMN = 31;
@@ -11,7 +12,12 @@ function row(indent: number, label: string, costUsd: number | null): string {
   return `${`${' '.repeat(indent)}${label}`.padEnd(AMOUNT_COLUMN)}${formatCostUsd(costUsd, 2)}`;
 }
 
-export function registerCostsCommand(program: Command, getCostsUseCase: () => CostsPort): void {
+export function registerCostsCommand(
+  program: Command,
+  getCostsUseCase: () => CostsPort,
+  /** Labels are per project, and the report spans projects. */
+  getLabels: (projectId: string) => ColumnLabels,
+): void {
   program
     .command('costs')
     .description('Report model spend')
@@ -66,9 +72,12 @@ export function registerCostsCommand(program: Command, getCostsUseCase: () => Co
       );
       for (const project of report.byProject) {
         out.push(row(2, project.projectId, project.totalUsd));
+        const labels = getLabels(project.projectId);
         for (const ticket of project.byTicket) {
           out.push(row(4, ticket.ticketId, ticket.totalUsd));
-          breakdownRows(ticket.byColumn);
+          for (const [column, costUsd] of Object.entries(ticket.byColumn)) {
+            out.push(row(6, withColumnLabels(column, labels), costUsd));
+          }
           breakdownRows(ticket.byRole);
         }
       }

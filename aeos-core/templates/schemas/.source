@@ -1,0 +1,7 @@
+{
+  "plugin": "artefact-tree-pipeline",
+  "version": "0.1.0",
+  "sha256": "62ada1c05347850c5a411c3f8a719ace6e077cc18e1c900e247e79526f6e544a",
+  "seeded_at": "2026-11-10T21:41:12.227Z",
+  "note": "Seeded by artefact-tree-pipeline. Edit schemas in the plugin, not here; re-seed to update."
+}

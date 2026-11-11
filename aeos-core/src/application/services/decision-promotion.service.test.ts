@@ -270,4 +270,55 @@ describe('DecisionPromotionService', () => {
       expect.stringContaining('Supersedes: D-001'),
     );
   });
+
+  describe('answered', () => {
+    const questions = (answer: string): string =>
+      [
+        '# AEOS Questions',
+        'Format-Version: 2',
+        'Ticket: AEOS-1',
+        '',
+        '## Q-001',
+        'Status: OPEN',
+        'Topic: night-greeting',
+        'Required: yes',
+        '',
+        '### Question',
+        TEXT_FENCE,
+        'What greets a visitor at night?',
+        END_FENCE,
+        '',
+        '### Answer',
+        TEXT_FENCE,
+        ...(answer ? [answer] : []),
+        END_FENCE,
+      ].join('\n');
+
+    it('returns each answered question with its answer, writing nothing', () => {
+      (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
+        questions('The same greeting.'),
+      );
+
+      expect(service.answered('/project', 'AEOS-1')).toEqual([
+        {
+          id: 'Q-001',
+          question: 'What greets a visitor at night?',
+          answer: 'The same greeting.',
+        },
+      ]);
+      expect(artifactStore.writeArtifact).not.toHaveBeenCalled();
+    });
+
+    it('is null for a legacy questions file', () => {
+      (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue('1. Which one?');
+
+      expect(service.answered('/project', 'AEOS-1')).toBeNull();
+    });
+
+    it('throws when a required answer is missing', () => {
+      (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(questions(''));
+
+      expect(() => service.answered('/project', 'AEOS-1')).toThrow(/Missing required answers/);
+    });
+  });
 });

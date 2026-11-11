@@ -64,7 +64,7 @@ describe('OllamaCliExecutor', () => {
       prompt: 'Test prompt',
       outputPath: path.join(tmpDir, 'output.md'),
       ticketId: 'T-55',
-      column: Column.PRODUCT_SCOPING,
+      column: Column.SPEC_REVIEW,
       ...overrides,
     };
   }

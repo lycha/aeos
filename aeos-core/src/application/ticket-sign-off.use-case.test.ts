@@ -2,6 +2,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TicketSignOffUseCase } from './ticket-sign-off.use-case.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
@@ -21,6 +22,7 @@ function createMockTicketRepo(): TicketRepository {
     updateSubState: vi.fn(),
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
+    setSpecCommit: vi.fn(),
   };
 }
 function createMockArtifactStore(): ArtifactStore {
@@ -51,6 +53,11 @@ function createMockGitGateway(): GitGateway {
     currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
     defaultBranch: vi.fn().mockReturnValue('main'),
     hasRemote: vi.fn().mockReturnValue(true),
+    headCommit: vi.fn().mockReturnValue('c0ffee1'),
+    showFile: vi.fn().mockReturnValue(''),
+    pathChangedSince: vi.fn().mockReturnValue(false),
+    userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
+    listFiles: vi.fn().mockReturnValue([]),
     diff: vi.fn(),
   };
 }
@@ -61,6 +68,16 @@ function createMockStateMachine() {
   };
   return mock as unknown as StateMachineService;
 }
+
+// Shared by every describe below: the recorder is a mock, reset per test.
+const gateRecorder = { decidedBy: vi.fn(), record: vi.fn() };
+const recorder = gateRecorder as unknown as GateRecorder;
+const callOrder = (mock: unknown): number =>
+  (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
+beforeEach(() => {
+  gateRecorder.decidedBy.mockReset();
+  gateRecorder.record.mockReset();
+});
 
 const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
@@ -93,8 +110,46 @@ describe('TicketSignOffUseCase', () => {
     artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
-    useCase = new TicketSignOffUseCase(ticketRepo, artifactStore, stateMachine);
+    useCase = new TicketSignOffUseCase(ticketRepo, artifactStore, stateMachine, recorder);
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
+  });
+
+  describe('gate record', () => {
+    const input = {
+      projectId: PROJECT_ID,
+      projectPath: PROJECT_PATH,
+      ticketId: TICKET_ID,
+      reason: 'The reviewer misread AC-2.',
+    };
+
+    it('records the override with its reason before the ticket is signed off', () => {
+      useCase.execute(input);
+
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, makeTicket(), {
+        gate: 'sign-off-override',
+        verdict: 'overridden',
+        reason: 'The reviewer misread AC-2.',
+      });
+      expect(callOrder(gateRecorder.record)).toBeLessThan(callOrder(stateMachine.setSubState));
+    });
+
+    it('leaves the ticket as it is when the record is refused or cannot be written', () => {
+      gateRecorder.record.mockImplementation(() => {
+        throw new Error('needs a written reason');
+      });
+
+      expect(() => useCase.execute(input)).toThrow('needs a written reason');
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
+    });
+
+    it('records nothing for a sign-off that is refused', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        makeTicket({ subState: 'SIGNED_OFF' }),
+      );
+
+      expect(useCase.execute(input).status).toBe('error');
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
   });
 
   it('marks a ticket SIGNED_OFF and mirrors it to disk without committing', () => {
@@ -102,6 +157,7 @@ describe('TicketSignOffUseCase', () => {
       projectId: PROJECT_ID,
       projectPath: PROJECT_PATH,
       ticketId: TICKET_ID,
+      reason: 'A reason that is long enough.',
     });
     expect(result).toEqual({
       status: 'signed_off',
@@ -122,7 +178,12 @@ describe('TicketSignOffUseCase', () => {
   it('returns an error when the ticket is not found', () => {
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(null);
     expect(
-      useCase.execute({ projectId: PROJECT_ID, projectPath: PROJECT_PATH, ticketId: TICKET_ID }),
+      useCase.execute({
+        projectId: PROJECT_ID,
+        projectPath: PROJECT_PATH,
+        ticketId: TICKET_ID,
+        reason: 'A reason that is long enough.',
+      }),
     ).toEqual({
       status: 'error',
       ticketId: TICKET_ID,
@@ -135,7 +196,12 @@ describe('TicketSignOffUseCase', () => {
       makeTicket({ column: 'BACKLOG', subState: null }),
     );
     expect(
-      useCase.execute({ projectId: PROJECT_ID, projectPath: PROJECT_PATH, ticketId: TICKET_ID }),
+      useCase.execute({
+        projectId: PROJECT_ID,
+        projectPath: PROJECT_PATH,
+        ticketId: TICKET_ID,
+        reason: 'A reason that is long enough.',
+      }),
     ).toEqual({
       status: 'error',
       ticketId: TICKET_ID,
@@ -148,7 +214,12 @@ describe('TicketSignOffUseCase', () => {
       makeTicket({ subState: 'SIGNED_OFF' }),
     );
     expect(
-      useCase.execute({ projectId: PROJECT_ID, projectPath: PROJECT_PATH, ticketId: TICKET_ID }),
+      useCase.execute({
+        projectId: PROJECT_ID,
+        projectPath: PROJECT_PATH,
+        ticketId: TICKET_ID,
+        reason: 'A reason that is long enough.',
+      }),
     ).toEqual({
       status: 'error',
       ticketId: TICKET_ID,
@@ -162,7 +233,12 @@ describe('TicketSignOffUseCase', () => {
       reason: 'Ticket not found',
     });
     expect(
-      useCase.execute({ projectId: PROJECT_ID, projectPath: PROJECT_PATH, ticketId: TICKET_ID }),
+      useCase.execute({
+        projectId: PROJECT_ID,
+        projectPath: PROJECT_PATH,
+        ticketId: TICKET_ID,
+        reason: 'A reason that is long enough.',
+      }),
     ).toEqual({
       status: 'error',
       ticketId: TICKET_ID,

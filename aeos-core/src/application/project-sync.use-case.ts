@@ -21,6 +21,17 @@ import type {
   SyncStatus,
 } from '../domain/ports/driving/project-sync.port.js';
 
+/**
+ * Templates AEOS shipped once and no longer does. A project's copy is reported
+ * and never deleted: nothing loads it, but a person may have edited it.
+ */
+const RETIRED_TEMPLATES = [
+  'column-specs/product-scoping.yaml',
+  'agents/pm-agent.yaml',
+  'rubrics/structure/prd-structure.md',
+  'rubrics/templates/prd-template.md',
+];
+
 export class ProjectSyncUseCase implements ProjectSyncPort {
   constructor(private readonly catalog: TemplateCatalog) {}
 
@@ -60,6 +71,19 @@ export class ProjectSyncUseCase implements ProjectSyncPort {
         templateContent: template.content,
         projectContent,
       });
+    }
+
+    for (const relativePath of RETIRED_TEMPLATES) {
+      const projectContent = this.catalog.readProjectCopy(projectPath, relativePath);
+      if (projectContent !== null) {
+        files.push({
+          relativePath,
+          status: 'obsolete',
+          action: 'none',
+          templateContent: '',
+          projectContent,
+        });
+      }
     }
 
     return { files };

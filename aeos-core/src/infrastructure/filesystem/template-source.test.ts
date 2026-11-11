@@ -21,7 +21,16 @@ describe('readTemplates', () => {
   it('ships templates under the expected top-level directories', () => {
     const dirs = new Set(readTemplates().map((t) => t.relativePath.split(path.sep)[0]));
 
-    expect(dirs).toEqual(new Set(['column-specs', 'agents', 'rubrics']));
+    expect(dirs).toEqual(new Set(['column-specs', 'agents', 'rubrics', 'schemas']));
+  });
+
+  it('has no agent that drafts requirements: a person writes the spec', () => {
+    for (const template of readTemplates()) {
+      expect(template.content, template.relativePath).not.toMatch(
+        /Product Requirements Document|\bPRD\b/,
+      );
+    }
+    expect(readTemplates().map((t) => t.relativePath)).not.toContain('agents/pm-agent.yaml');
   });
 });
 
@@ -68,23 +77,33 @@ describe('scaffolded project integrity', () => {
     }
   });
 
+  it('has the code reviewer of a single task check fidelity to the spec', () => {
+    repo.scaffoldDefaults(tmpDir);
+
+    const rubrics = new YamlColumnSpecLoader().load(Column.CODE_REVIEW, tmpDir).reviewerRubrics;
+
+    expect(rubrics).toContain('rubrics/drift/spec-fidelity.md');
+    const rubric = fs.readFileSync(path.join(tmpDir, '.aeos', 'rubrics/drift/spec-fidelity.md'));
+    expect(rubric.toString()).toMatch(/^## When reviewing a single task/m);
+  });
+
   it('reports what it created', () => {
     const created = repo.scaffoldDefaults(tmpDir);
 
-    expect(created).toContain('agents/pm-agent.yaml');
+    expect(created).toContain('agents/spec-reviewer-agent.yaml');
     expect(created.some((p) => p.startsWith('column-specs/'))).toBe(true);
     expect(created.some((p) => p.startsWith('rubrics/'))).toBe(true);
   });
 
   it('never overwrites a file the user has edited', () => {
     repo.scaffoldDefaults(tmpDir);
-    const edited = path.join(tmpDir, '.aeos', 'agents', 'pm-agent.yaml');
+    const edited = path.join(tmpDir, '.aeos', 'agents', 'spec-reviewer-agent.yaml');
     fs.writeFileSync(edited, 'name: my-own-agent\n', 'utf-8');
 
     const created = repo.scaffoldDefaults(tmpDir);
 
     expect(fs.readFileSync(edited, 'utf-8')).toBe('name: my-own-agent\n');
-    expect(created).not.toContain('agents/pm-agent.yaml');
+    expect(created).not.toContain('agents/spec-reviewer-agent.yaml');
   });
 
   it('restores only what is missing on a re-run', () => {

@@ -17,12 +17,14 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "npm run schemas && tsc --project tsconfig.json",
     "dev": "tsc --watch --project tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint 'src/**/*.{ts,tsx}' && prettier --check src/",
+    "schemas": "node ../plugins/artefact-tree-pipeline/scripts/seed-schemas.mjs --tree templates --force",
+    "schemas:check": "node ../plugins/artefact-tree-pipeline/scripts/seed-schemas.mjs --tree templates --check",
+    "lint": "npm run schemas:check && eslint 'src/**/*.{ts,tsx}' && prettier --check src/",
     "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix && prettier --write src/",
     "typecheck": "tsc --noEmit",
     "smoke-test": "npx tsx src/infrastructure/executor/claude-cli-executor.smoke-test.ts",

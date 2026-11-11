@@ -2,7 +2,9 @@
 // the task commit message and the pull request body.
 
 import { formatCostUsd } from '../../domain/model/cost-record.js';
+import type { SpecPin } from '../../domain/model/spec-pin.js';
 import type { Ticket } from '../../domain/model/ticket.js';
+import { formatSpecPin } from './spec-pin.js';
 
 /**
  * `[AEOS-12] Title`, then `Ticket:` and, for a child task, `Epic:` trailers.
@@ -34,6 +36,8 @@ export interface PullRequestBodyInput {
   readonly checksTable: string | null;
   /** One entry per recorded run; null where the cost is unknown. */
   readonly costs: readonly (number | null)[];
+  /** The pinned spec of a spec-backed ticket. */
+  readonly specPin?: SpecPin | null;
 }
 
 export function buildPullRequestBody(input: PullRequestBodyInput): string {
@@ -58,7 +62,9 @@ export function buildPullRequestBody(input: PullRequestBodyInput): string {
     '## Spec',
     '',
     '<!-- aeos:spec-pin -->',
-    '_Spec pin: not recorded yet._',
+    input.specPin
+      ? `Spec: \`${formatSpecPin(input.specPin)}\`, \`${input.specPin.path}\``
+      : '_Spec pin: not recorded yet._',
     '',
     '## Review',
     '',

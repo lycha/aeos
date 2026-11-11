@@ -50,8 +50,8 @@ Evaluates whether the artifact is written for the correct audience and respects 
 | Grade | Definition |
 |-------|------------|
 | **PASS** | The artifact's depth, terminology, and assumptions match the expected audience for this pipeline column. It builds on prior-column outputs where applicable and does not duplicate or contradict them. |
-| **WARN** | The artifact is generally appropriate but makes assumptions about context not established in the ticket or prior artifacts — e.g., referencing decisions that were never made, or writing implementation details in a scoping artifact. |
-| **FAIL** | The artifact is written for the wrong audience or pipeline stage — e.g., a PRD that reads like a tech spec, or a code review that re-architects the solution. The content may be valid in isolation but is misplaced relative to the ticket's column. |
+| **WARN** | The artifact is generally appropriate but makes assumptions about context not established in the ticket or prior artifacts — e.g., referencing decisions that were never made, or writing implementation details in a spec review. |
+| **FAIL** | The artifact is written for the wrong audience or pipeline stage — e.g., a spec review that reads like a tech spec, or a code review that re-architects the solution. The content may be valid in isolation but is misplaced relative to the ticket's column. |
 
 ---
 
@@ -59,11 +59,11 @@ Evaluates whether the artifact is written for the correct audience and respects 
 
 **Ticket:** "Add dark mode toggle — allow users to switch between light and dark themes via a toggle in the settings page."
 
-**Drifted PRD excerpt:**
+**Drifted tech spec excerpt:**
 
 > **Title:** Comprehensive Theming Engine
 >
-> This PRD defines a full theming engine supporting unlimited custom themes,
+> This tech spec defines a full theming engine supporting unlimited custom themes,
 > a theme marketplace where users can publish and download community themes,
 > a CSS variable pipeline for runtime token injection, and a theme migration
 > tool for converting legacy stylesheets. The settings page will be redesigned
@@ -74,6 +74,6 @@ Evaluates whether the artifact is written for the correct audience and respects 
 | 1. Scope Creep | **FAIL** | The ticket asks for a light/dark toggle. The artifact designs a full theming engine with a marketplace, custom themes, and a migration tool — far exceeding the requested scope. |
 | 2. Problem–Solution Alignment | **WARN** | The artifact is in the general domain (theming) but reframes the problem from "add a toggle" to "build an extensible theming platform." The original problem is buried. |
 | 3. Stated Deliverable Coverage | **FAIL** | The ticket's deliverable is a toggle in the settings page. The artifact never specifies a simple toggle — it replaces it with a theme gallery, omitting the explicit ask. |
-| 4. Audience & Context Fidelity | **WARN** | The PRD is reasonable in format but assumes a level of infrastructure investment not established by the ticket, introducing decisions and context that were never scoped. |
+| 4. Audience & Context Fidelity | **WARN** | The tech spec is reasonable in format but assumes a level of infrastructure investment not established by the ticket, introducing decisions and context that were never scoped. |
 
 **Result:** Criteria 1 and 3 trigger FAIL, confirming the rubric catches intent drift.

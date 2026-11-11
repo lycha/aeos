@@ -46,6 +46,9 @@ import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { SpecPin } from '../domain/model/spec-pin.js';
+import { pendingAmendment, resolveSpecPin } from './services/spec-pin.js';
+import type { GateRecordStore } from '../domain/ports/driven/gate-record-store.port.js';
 import type {
   TicketRunPort,
   TicketRunResult,
@@ -101,6 +104,8 @@ interface RunContext {
   readonly reviewAbsPath: string;
   /** Globs no executor invocation of this run may touch. */
   readonly protectedGlobs: readonly string[];
+  /** The ticket's spec pin (its own or its epic's), written into every run record. */
+  readonly specPin: SpecPin | null;
 }
 
 /** One executor invocation, as much as the call site knows about it. */
@@ -162,6 +167,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly runRecordStore: RunRecordStore,
     private readonly checkRegistry: CheckRegistry,
     private readonly projectRepo: ProjectRepository,
+    private readonly gateRecordStore: GateRecordStore,
   ) {}
 
   async execute(
@@ -179,6 +185,18 @@ export class TicketRunUseCase implements TicketRunPort {
       const eligibility = this.checkEligibility(projectId, ticketId);
       if (!eligibility.ok) return eligibility.result;
       let mirroredTicket = eligibility.ticket;
+
+      // Drift guard: an amendment means the pinned spec no longer says what was
+      // decided. Nothing runs against it until someone comes forward.
+      const specPin = resolveSpecPin(this.ticketRepo, mirroredTicket);
+      const amendment = specPin && pendingAmendment(this.gateRecordStore, projectPath, specPin);
+      if (amendment) {
+        return {
+          status: 'failed',
+          ticketId,
+          error: `The spec ${ticketId} is pinned to was amended from ${amendment.ticket} (${amendment.id}) and has not been repinned. Update spec.md, commit, then run \`aeos ticket repin ${amendment.ticket}\`.`,
+        };
+      }
 
       const branchError = this.isolateTask(projectPath, mirroredTicket);
       if (branchError) return { status: 'failed', ticketId, error: branchError };
@@ -249,11 +267,21 @@ export class TicketRunUseCase implements TicketRunPort {
       const aeosDir = path.join(projectPath, '.aeos');
 
       this.emitStageEvent(emitter, 'stage.started', 'context', 'Assembling ticket context');
-      const baseContext = await this.contextAssembler.assemble(
-        ticketId,
-        projectPath,
-        columnSpec.column,
-      );
+      let baseContext: AssembledContext;
+      try {
+        baseContext = await this.contextAssembler.assemble(
+          ticketId,
+          projectPath,
+          columnSpec.column,
+          specPin,
+        );
+      } catch (err) {
+        // Nothing has run yet and the ticket is still READY: a pinned spec that
+        // cannot be read fails the run here instead of crashing the caller.
+        const message = err instanceof Error ? err.message : String(err);
+        emitter.emit({ type: 'ticket-run.failed', phase: 'complete', payload: { message } });
+        return { status: 'failed', ticketId, error: message };
+      }
       this.emitStageEvent(emitter, 'stage.completed', 'context', 'Context assembled');
 
       const workerExecutor = this.createExecutor(resolvedWorkerAgentSpec);
@@ -285,6 +313,7 @@ export class TicketRunUseCase implements TicketRunPort {
         protectedGlobs: protectedGlobs(
           this.projectRepo.readExecutorConfig(projectPath)?.protectedPaths,
         ),
+        specPin,
       };
 
       // ── Preflight ────────────────────────────────────────────────
@@ -545,7 +574,12 @@ export class TicketRunUseCase implements TicketRunPort {
     // review file dropped so a review appears once.
     let workerContext = ctx.baseContext;
     if (feedback) {
-      const fresh = await this.contextAssembler.assemble(ticketId, projectPath, columnSpec.column);
+      const fresh = await this.contextAssembler.assemble(
+        ticketId,
+        projectPath,
+        columnSpec.column,
+        ctx.specPin,
+      );
       workerContext = this.withExtraArtifact(
         {
           ...fresh,
@@ -837,7 +871,7 @@ export class TicketRunUseCase implements TicketRunPort {
       usage: null,
       cost_usd: 0,
       cost_basis: 'none',
-      spec_pin: null,
+      spec_pin: ctx.specPin,
       error: failed ? `Check '${failed.name}' ${describe(failed)}` : null,
     };
     const files = this.runRecordStore.write(projectPath, record, {
@@ -911,6 +945,7 @@ export class TicketRunUseCase implements TicketRunPort {
       ticketId,
       projectPath,
       ctx.columnSpec.column,
+      ctx.specPin,
     );
     const enrichedContext =
       rubricContents.length > 0
@@ -1242,7 +1277,7 @@ export class TicketRunUseCase implements TicketRunPort {
         result: {
           status: 'failed',
           ticketId,
-          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to PRODUCT_SCOPING first.`,
+          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to SPEC_REVIEW first.`,
         },
       };
     }
@@ -1510,7 +1545,7 @@ export class TicketRunUseCase implements TicketRunPort {
       cost_usd: costUsd,
       cost_basis:
         costUsd === null ? 'unknown' : run.executor === 'stub' ? 'none' : 'executor-estimate',
-      spec_pin: null,
+      spec_pin: ctx.specPin,
       error,
     };
 

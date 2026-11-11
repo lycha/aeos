@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lycha/aeos/schemas/run-record/0",
+  "title": "Run record",
+  "description": "One record per executor, check or generator invocation (task I1-M1-003). Written to .aeos/tickets/<ticket>/runs/<run_id>.json and committed with the artefact it produced. Beside it: <run_id>.brief.md (the exact prompt) and <run_id>.log (the raw executor output — the reasoning log).",
+  "type": "object",
+  "required": [
+    "schema_version", "run_id", "project", "ticket", "column", "role", "attempt",
+    "executor", "started_at", "ended_at", "duration_ms", "exit", "cost_usd", "cost_basis"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 0 },
+    "run_id": { "type": "string", "pattern": "^RUN-[0-9A-Za-z-]+$" },
+    "project": { "type": "string" },
+    "ticket": { "type": "string" },
+    "column": { "type": "string" },
+    "role": { "enum": ["preflight", "worker", "checks", "reviewer", "generator"] },
+    "agent": { "type": ["string", "null"], "description": "Agent spec name. Null for checks and generators." },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "executor": { "type": "string", "description": "claude-cli, auggie-cli, opencode-cli, ollama-cli, stub — or 'shell' for checks and generators." },
+    "model": { "type": ["string", "null"] },
+    "mode": { "enum": ["artifact", "agentic", null] },
+    "brief": {
+      "description": "The exact prompt the agent was given. Null for checks and generators.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["path", "sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
+    "output": { "type": ["string", "null"], "description": "Path of the artefact this run wrote." },
+    "transcript": { "type": ["string", "null"], "description": "Path of the raw executor output." },
+    "verdict": {
+      "enum": ["APPROVED", "APPROVED_WITH_WARNINGS", "REJECTED", "UNPARSEABLE", "CHECKS_PASSED", "CHECKS_FAILED", null],
+      "description": "Reviewer verdict from the AEOS-VERDICT trailer, or the checks outcome. Null for workers."
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "exit": { "enum": ["ok", "failed", "interrupted", "timeout"] },
+    "usage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["input_tokens", "output_tokens"],
+          "additionalProperties": false,
+          "properties": {
+            "input_tokens": { "type": "integer", "minimum": 0 },
+            "output_tokens": { "type": "integer", "minimum": 0 },
+            "cache_creation_input_tokens": { "type": "integer", "minimum": 0 },
+            "cache_read_input_tokens": { "type": "integer", "minimum": 0 }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
+    "cost_usd": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Null means unknown. Never 0 for unknown (decision D5)."
+    },
+    "cost_basis": {
+      "enum": ["executor-estimate", "computed", "none", "unknown"],
+      "description": "executor-estimate = reported by the executor (for Claude Code this is a client-side estimate, not billing data); computed = tokens times a price table; none = no model was called (checks, generators, stub); unknown = the executor cannot report."
+    },
+    "spec_pin": {
+      "description": "The spec revision the run was briefed against, when the ticket is spec-backed.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["repo", "commit", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "repo": { "type": "string" },
+            "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+            "path": { "type": "string" }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
+    "error": { "type": ["string", "null"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "cost_basis": { "const": "unknown" } } },
+      "then": { "properties": { "cost_usd": { "type": "null" } } }
+    }
+  ]
+}

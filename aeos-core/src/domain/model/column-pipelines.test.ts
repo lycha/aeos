@@ -14,7 +14,7 @@ describe('column pipelines', () => {
   it('routes an epic through scoping, spec, and decomposition — never implementation', () => {
     expect([...EPIC_COLUMN_ORDER]).toEqual([
       'BACKLOG',
-      'PRODUCT_SCOPING',
+      'SPEC_REVIEW',
       'TECH_SPEC',
       'TASK_BREAKDOWN',
       'INTEGRATION_REVIEW',
@@ -36,7 +36,7 @@ describe('column pipelines', () => {
       'QA',
       'DONE',
     ]);
-    expect(isColumnInPipeline(TicketKind.TASK, Column.PRODUCT_SCOPING)).toBe(false);
+    expect(isColumnInPipeline(TicketKind.TASK, Column.SPEC_REVIEW)).toBe(false);
     expect(isColumnInPipeline(TicketKind.TASK, Column.TECH_SPEC)).toBe(false);
     expect(isColumnInPipeline(TicketKind.TASK, Column.TASK_BREAKDOWN)).toBe(false);
   });

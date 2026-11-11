@@ -10,6 +10,7 @@ export * from './ticket-sign-off.port.js';
 export * from './ticket-move.port.js';
 export * from './ticket-ready.port.js';
 export * from './ticket-answer.port.js';
+export * from './ticket-repin.port.js';
 export * from './ticket-dod-approve.port.js';
 export * from './dashboard.port.js';
 export * from './costs.port.js';

@@ -1,4 +1,5 @@
 column: IMPLEMENTATION
+label: Implementation
 phase: BUILD
 executorMode: agentic
 # Run the `checks` of .aeos/project.json before the reviewer.

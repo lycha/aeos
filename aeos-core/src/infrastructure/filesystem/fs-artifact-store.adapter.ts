@@ -19,8 +19,8 @@ export function validatePathComponent(value: string, name: string): void {
  * Pattern: <projectRoot>/.aeos/tickets/<ticketId>/<ticketId>-<artifactName>
  *
  * Example:
- *   artifactPath('AEOS-1', 'prd.md')
- *   → '/path/to/project/.aeos/tickets/AEOS-1/AEOS-1-prd.md'
+ *   artifactPath('AEOS-1', 'tech-spec.md')
+ *   → '/path/to/project/.aeos/tickets/AEOS-1/AEOS-1-tech-spec.md'
  */
 export function artifactPath(ticketId: string, artifactName: string, root?: string): string {
   validatePathComponent(ticketId, 'ticketId');

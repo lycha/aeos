@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { SimpleGitGateway } from './simple-git-gateway.adapter.js';
 
@@ -271,6 +271,89 @@ describe('SimpleGitGateway branches and remotes', () => {
 
   afterEach(() => {
     fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('reads HEAD, and a file as it was at a commit', () => {
+    const pinned = gateway.headCommit(repo);
+    expect(pinned).toBe(
+      execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf-8' }).trim(),
+    );
+
+    fs.writeFileSync(path.join(repo, 'a.md'), 'edited\n');
+    git('commit', '-am', 'edit');
+
+    expect(gateway.showFile(repo, pinned, 'a.md')).toBe('a\n');
+    expect(gateway.showFile(repo, gateway.headCommit(repo), 'a.md')).toBe('edited\n');
+  });
+
+  it('lists the files under a directory as they were at a commit', () => {
+    fs.mkdirSync(path.join(repo, 'features', 'x', 'features'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'spec.md'), 'v1\n');
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'features', 'a.feature'), 'Feature: A\n');
+    git('add', '.');
+    git('commit', '-m', 'spec');
+    const pinned = gateway.headCommit(repo);
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'features', 'b.feature'), 'Feature: B\n');
+    git('add', '.');
+    git('commit', '-m', 'later');
+
+    expect(gateway.listFiles(repo, pinned, 'features/x')).toEqual([
+      'features/x/features/a.feature',
+      'features/x/spec.md',
+    ]);
+    expect(gateway.listFiles(repo, pinned, 'contexts/none')).toEqual([]);
+    expect(() => gateway.listFiles(repo, 'deadbeef', 'features/x')).toThrow();
+  });
+
+  it('throws when the commit or the file cannot be read', () => {
+    expect(() => gateway.showFile(repo, 'deadbeef', 'a.md')).toThrow();
+    expect(() => gateway.showFile(repo, gateway.headCommit(repo), 'missing.md')).toThrow();
+  });
+
+  it('says whether a path changed after a commit, ignoring other paths', () => {
+    fs.mkdirSync(path.join(repo, 'features', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'spec.md'), 'v1\n');
+    git('add', '.');
+    git('commit', '-m', 'spec');
+    const pinned = gateway.headCommit(repo);
+
+    fs.writeFileSync(path.join(repo, 'a.md'), 'elsewhere\n');
+    git('commit', '-am', 'elsewhere');
+    expect(gateway.pathChangedSince(repo, pinned, 'features/x')).toBe(false);
+
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'spec.md'), 'v2\n');
+    git('commit', '-am', 'spec moved');
+    expect(gateway.pathChangedSince(repo, pinned, 'features/x')).toBe(true);
+  });
+
+  it('can leave paths out when asking whether a path changed', () => {
+    fs.mkdirSync(path.join(repo, 'features', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'spec.md'), 'v1\n');
+    git('add', '.');
+    git('commit', '-m', 'spec');
+    const pinned = gateway.headCommit(repo);
+
+    fs.writeFileSync(path.join(repo, 'features', 'x', 'gates.yaml'), 'records:\n');
+    git('add', '.');
+    git('commit', '-m', 'a gate record');
+
+    expect(gateway.pathChangedSince(repo, pinned, 'features/x')).toBe(true);
+    expect(gateway.pathChangedSince(repo, pinned, 'features/x', ['features/x/gates.yaml'])).toBe(
+      false,
+    );
+  });
+
+  it("reads the repository's git identity, and has none without a name and an email", () => {
+    // Keep the developer's own global identity out of the answer.
+    vi.stubEnv('GIT_CONFIG_GLOBAL', path.join(repo, 'no-global-config'));
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    try {
+      expect(gateway.userIdentity(repo)).toBe('Test <test@test.com>');
+      git('config', '--unset', 'user.email');
+      expect(gateway.userIdentity(repo)).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('reports the current branch', () => {

@@ -8,7 +8,16 @@ export interface TicketAnswerInput {
 }
 
 export type TicketAnswerResult =
-  | { ok: true; ticketId: string; warnings?: string[] }
+  | {
+      ok: true;
+      ticketId: string;
+      warnings?: string[];
+      /**
+       * Ids of the decisions the answers added to the spec's decision log.
+       * When present the ticket is still BLOCKED, until `ticket repin`.
+       */
+      amendedDecisions?: string[];
+    }
   | { ok: false; needsConfirmation: true; reason: string }
   | { ok: false; needsConfirmation?: false; error: string };
 

@@ -3,11 +3,13 @@
 import type { Command } from 'commander';
 import type { TicketApprovePort } from '../../domain/ports/driving/ticket-approve.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { withColumnLabels, type ColumnLabels } from '../../domain/services/column-labels.js';
 
 export function registerTicketApproveCommand(
   program: Command,
   getTicketApproveUseCase: () => TicketApprovePort,
   projectRepo: ProjectRepository,
+  getLabels: (projectPath: string) => ColumnLabels,
 ): void {
   const ticketCmd =
     program.commands.find((c) => c.name() === 'ticket') ??
@@ -30,6 +32,7 @@ export function registerTicketApproveCommand(
         }
 
         const project = projectRepo.read(projectPath);
+        const labels = getLabels(projectPath);
 
         const result = getTicketApproveUseCase().execute(project.id, projectPath, ticketId);
 
@@ -39,16 +42,18 @@ export function registerTicketApproveCommand(
             console.log(
               // READY, not BLOCKED — approve resets the new column to READY so
               // it awaits its first `ticket run`.
-              `✓ Ticket ${result.ticketId} advanced: ${result.fromColumn} → ${result.toColumn} (sub-state: READY)`,
+              `✓ Ticket ${result.ticketId} advanced: ${labels[result.fromColumn]} → ${labels[result.toColumn]} (sub-state: READY)`,
             );
             break;
           case 'already_done':
             // eslint-disable-next-line no-console
-            console.log(`Ticket ${result.ticketId} is already DONE — nothing to advance.`);
+            console.log(
+              `Ticket ${result.ticketId} is already ${labels.DONE} — nothing to advance.`,
+            );
             break;
           case 'error':
             // eslint-disable-next-line no-console
-            console.error(`Error: ${result.error}`);
+            console.error(`Error: ${withColumnLabels(result.error, labels)}`);
             process.exitCode = 1;
             break;
         }

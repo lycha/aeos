@@ -13,6 +13,7 @@ An AI-assisted development pipeline that takes a ticket from idea to code review
   - `opencode` — [install](https://opencode.ai/docs/cli/)
   - `ollama` — [install](https://docs.ollama.com/cli)
 - **GitHub CLI (`gh`)**, authenticated, and a git remote — for the pull requests AEOS opens. Not needed with `"pullRequests": { "enabled": false }` (see [Branches and pull requests](#branches-and-pull-requests)).
+- **Python 3 with `PyYAML` and `jsonschema`** — only for `aeos ticket create --spec`, which runs `lint_decisions.py` (see [Spec-backed epics](#spec-backed-epics)).
 - macOS or Linux
 
 ## Install
@@ -36,8 +37,9 @@ aeos install
 #    column specs, agent specs, and reviewer rubrics
 aeos project init --name "My Project" --key MYPRJ
 
-# 2. Create a ticket
-aeos ticket create "Add user authentication"
+# 2. Write the spec (a person does this; see "Spec-backed epics"), commit it
+#    in .aeos/, and create an epic from it
+aeos ticket create "Add user authentication" --spec user-authentication
 
 # 3. Edit the ticket description
 $EDITOR .aeos/MYPRJ-1-ticket.md
@@ -52,7 +54,7 @@ aeos ticket run MYPRJ-1 --executor opencode-cli --model ollama/qwen2.5-coder:14b
 aeos ticket approve MYPRJ-1
 
 # Optional: move a ticket directly to any workflow status
-aeos ticket move MYPRJ-1 QA
+aeos ticket move MYPRJ-1 QA --reason "Built by hand; skipping to QA."
 
 # 6. Repeat steps 4–5 for each column, then final approval
 aeos ticket dod-approve MYPRJ-1
@@ -63,14 +65,14 @@ aeos ticket dod-approve MYPRJ-1
 A ticket is either an **epic** or a **task**, and each follows its own pipeline.
 
 ```
-EPIC   BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN ──→ INTEGRATION_REVIEW → DOD_GATE → DONE
-                 PM Agent          Architect    Architect          Integration Reviewer  Human
+EPIC   BACKLOG → SPEC_REVIEW → TECH_SPEC → TASK_BREAKDOWN ──→ INTEGRATION_REVIEW → DOD_GATE → DONE
+                 Spec Reviewer     Architect    Architect          Integration Reviewer  Human
                  ↓                 ↓            ↓                    ↓                      ▲
-                 PRD               Tech Spec    tasks.md            integration-review.md  │
+                 spec-review.md    Tech Spec    tasks.md            integration-review.md  │
                  ↓                 ↓            ↓                    ↓                      │
                  Reviewer          Reviewer     Reviewer            Reviewer               │
                                                 │                   (whole-feature diff    │
-                                   fans out into child tasks         vs PRD/tech spec)     │
+                                   fans out into child tasks         vs spec/tech spec)    │
                                                              all children DONE ────────────┘
                                                 ▼                           │
 TASK   BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE ───────────────────┘
@@ -81,11 +83,16 @@ TASK   BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE ────�
                  Reviewer          Reviewer      Reviewer
 ```
 
-An epic is scoped, specced, and decomposed — it never implements anything itself.
+An epic starts from a spec a person wrote. `SPEC_REVIEW` does not draft
+requirements: an agent reads the pinned spec and reports gaps, ambiguities,
+contradictions and untestable criteria in `spec-review.md`, each finding citing
+the `AC-n`, `INV-n` or decision id it concerns. Approving the epic out of
+`SPEC_REVIEW` is the **spec gate**. The epic is then specced technically and
+decomposed — it never implements anything itself.
 Its child tasks do that, and the epic cannot leave `TASK_BREAKDOWN` until every
 child reaches `DONE`. It then runs `INTEGRATION_REVIEW`, which reviews the whole
-assembled feature (the epic branch's `base..HEAD` diff) against the PRD and tech
-spec — the check per-task review cannot make — before the human `DOD_GATE`.
+assembled feature (the epic branch's `base..HEAD` diff) against the pinned spec
+and tech spec — the check per-task review cannot make — before the human `DOD_GATE`.
 
 Each column follows the same cycle:
 
@@ -96,7 +103,7 @@ Each column follows the same cycle:
 5. **Review** — a reviewer agent (on a _different model_ from the worker) evaluates against column-specific rubrics and emits a machine-readable verdict: `APPROVED`, `APPROVED_WITH_WARNINGS`, or `REJECTED`. Only `BLOCKER` findings gate; warnings are recorded on the artifact and do not block.
 6. **Revision loop** — a `REJECTED` review, or a failed check, sends the artifact back to the worker with the review or the check's output attached, up to the configured cap. See [Review Loop](#review-loop).
 7. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
-8. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
+8. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move --reason`). Either way the decision is written to the gate records (see [Gate records](#gate-records))
 
 ## What `project init` creates
 
@@ -106,8 +113,18 @@ Each column follows the same cycle:
 ├── CONSTRAINTS.md         placeholder for your architecture/style/security rules
 ├── column-specs/          one YAML per pipeline column
 ├── agents/                worker and reviewer agent specs
-└── rubrics/               reviewer rubrics and artifact templates
+├── rubrics/               reviewer rubrics and artifact templates
+├── schemas/               artefact schemas and lint_decisions.py, with a .source stamp
+├── features/              one directory per feature: its human-written spec
+└── contexts/              one directory per bounded context: glossary, constraints
 ```
+
+`.aeos/` is the project's **artefact tree**: its own git repository, ignored by the
+code repository, so the specification keeps a history separate from the code. To keep
+the tree elsewhere, set `"artefactTree"` in `project.json` to a path relative to the
+project root. `schemas/` is a seeded copy of `plugins/artefact-tree-pipeline/schemas/`;
+do not edit it. `aeos project sync` reports a stale or hand-edited copy and only
+overwrites it with `--force`.
 
 Everything under `column-specs/`, `agents/`, and `rubrics/` is scaffolded from the
 templates shipped with AEOS and is **yours to edit** — changing pipeline behaviour
@@ -115,6 +132,34 @@ usually means editing this YAML, not TypeScript.
 
 Re-running `aeos project init` is the repair path: it restores anything missing and
 never overwrites a file you have edited.
+
+### Column names
+
+A column has an **identifier** (`TECH_SPEC`), which is fixed: it is what the database,
+the transition log, gate records and run records store. What you see is its **label**,
+which you can change:
+
+```yaml
+# .aeos/column-specs/tech-spec.yaml
+column: TECH_SPEC
+label: Shaping
+```
+
+```json
+// .aeos/project.json: BACKLOG and DONE have no column spec
+{ "labels": { "BACKLOG": "Inbox", "DONE": "Shipped" } }
+```
+
+With no label a column shows its identifier in sentence case (`SPEC_REVIEW` → `Spec review`).
+`ticket list`, `ticket show`, `ticket move`, `ticket approve`, `ticket run`, the orchestrator
+and `aeos costs` show labels; `ticket show` also prints the identifier
+(`Column: Shaping (TECH_SPEC)`). `ticket move <id> <status>` and `ticket list --column`
+accept an identifier or a label, in any case; an identifier wins if both match.
+
+Labels are checked whenever a column spec is loaded: unique within the project whatever
+the case, not empty, at most 40 characters, and not the identifier of another column. A
+clash fails the command and names both files. Renaming a column changes nothing that is
+stored. Column **order** is not configurable yet.
 
 ## Ticket State Machine
 
@@ -131,11 +176,11 @@ The forward order depends on the ticket's kind:
 
 | Kind   | Pipeline                                                                   |
 | ------ | -------------------------------------------------------------------------- |
-| `EPIC` | `BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE` |
+| `EPIC` | `BACKLOG → SPEC_REVIEW → TECH_SPEC → TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE` |
 | `TASK` | `BACKLOG → IMPLEMENTATION → CODE_REVIEW → QA → DONE`                       |
 
 `aeos ticket approve` uses the kind to pick the next column, so a task never
-visits `PRODUCT_SCOPING` and an epic never visits `IMPLEMENTATION`.
+visits `SPEC_REVIEW` and an epic never visits `IMPLEMENTATION`.
 
 ### Sub-states
 
@@ -182,7 +227,7 @@ Every non-terminal column allows the same set:
 | Column            | Kind | Allowed sub-state values |
 | ----------------- | ---- | ------------------------ |
 | `BACKLOG`         | both | `null` only              |
-| `PRODUCT_SCOPING` | epic | all eight                |
+| `SPEC_REVIEW`     | epic | all eight                |
 | `TECH_SPEC`       | epic | all eight                |
 | `TASK_BREAKDOWN`  | epic | all eight                |
 | `IMPLEMENTATION`  | task | all eight                |
@@ -203,10 +248,35 @@ In other words:
 Operators can deliberately override the normal path:
 
 - `aeos ticket ready <id>` sets any non-`BACKLOG`, non-`DONE` ticket to `READY`
-- `aeos ticket sign-off <id>` manually marks any non-`BACKLOG`, non-`DONE` ticket as `SIGNED_OFF`
-- `aeos ticket move <id> <status>` moves a ticket to any column; non-terminal targets are reset to `READY`, while `BACKLOG` and `DONE` use `null`
+- `aeos ticket sign-off <id> --reason <text>` manually marks any non-`BACKLOG`, non-`DONE` ticket as `SIGNED_OFF`
+- `aeos ticket move <id> <status> --reason <text>` moves a ticket to any column; non-terminal targets are reset to `READY`, while `BACKLOG` and `DONE` use `null`
 
 So the domain state machine is intentionally permissive for operator control, while the normal workflow policy is enforced by the higher-level ticket commands.
+
+### Gate records
+
+Every human decision at a gate is appended, as a structured record, to a YAML file in the `.aeos` repository and committed there, **before** the ticket changes state. If the record cannot be written, the command fails and the ticket stays where it was.
+
+| Command | `gate` | `verdict` |
+| --- | --- | --- |
+| `ticket approve` out of `SPEC_REVIEW` | `spec` | `approved` |
+| `ticket approve` anywhere else | `column-approval` | `approved` |
+| `ticket dod-approve` (yes / no) | `definition-of-done` | `approved` / `rejected` |
+| `ticket sign-off` | `sign-off-override` | `overridden` |
+| `ticket move` | `move-override` | `overridden` |
+| `ticket answer` | `answer` | `approved` |
+| `ticket answer` on a spec-backed ticket | `amendment` | `approved` |
+| `ticket repin` | `repin` | `approved` |
+| `ticket resolve` | `escalation-resolution` | `approved` |
+
+- **Late answers amend the spec.** On a spec-backed ticket, `ticket answer` writes each answered question into `.aeos/features/<feature>/decisions.yaml` as a `DECIDED` entry (`NEW-<n>`, becoming the next `AC-<n>`, citing the ticket and its questions file), runs the decisions lint, and commits `decide(<feature>): amendment from <ticket>`. If the lint fails, nothing is written and the ticket stays `BLOCKED`. Otherwise the ticket also stays `BLOCKED`: add the criterion to `spec.md` (the `spec-writer` skill), commit, then run `aeos ticket repin <ticket>`. That re-checks the feature as `--spec` does, moves the epic's pin to the `.aeos` `HEAD` (its tasks follow), and sets the ticket `READY`. Until then `ticket run` refuses every ticket pinned to that spec, and a second amendment is refused. The `amendment` record carries the column the ticket was in; the `repin` record's reason names both commits. A ticket with no spec is unblocked as before.
+- **Where.** A spec-backed ticket (its own pin or its epic's): `.aeos/features/<feature>/gates.yaml`. Any other ticket: `.aeos/tickets/<id>/<id>-gates.yaml`. Ids are `GATE-1`, `GATE-2`, … within a file; records are appended and never rewritten. The format is `schemas/gates.schema.json`.
+- **Who.** `decided_by` is `user.name <user.email>` of the project repository. With neither configured, the command is refused and tells you to set them.
+- **Why.** `ticket move` and `ticket sign-off` require `--reason <text>`, at least ten characters. `ticket dod-approve` asks for one when the answer is no. Existing scripts that call `move` or `sign-off` without `--reason` now fail.
+- **What was overridden.** A `sign-off-override` names, in `overrides`, the run id of the latest review or checks verdict of that column.
+- **Evidence.** Each record cites the review, the checks table and the run records of the column decided, and the spec pin in force.
+
+When the orchestrator advances an `advanceMode: auto` column, no person decided, and nothing is recorded.
 
 ## Executors
 
@@ -307,14 +377,15 @@ Notes:
 | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | `aeos install`                                               | One-time global setup (`~/.aeos/`, global gitignore)                       |
 | `aeos project init [--name] [--key]`                         | Initialise `.aeos/` in the current directory                               |
-| `aeos ticket create <title> [--parent <epicId>]`             | Create a ticket in BACKLOG — an epic by default, a task with `--parent`    |
+| `aeos ticket create <title> [--parent <epicId>] [--spec <feature>]` | Create a ticket in BACKLOG — an epic with `--spec` (required for an epic), a task with `--parent` |
 | `aeos ticket list [--column]`                                | List tickets, optionally filtered by column                                |
 | `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, recorded executions, and run ids |
 | `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |
 | `aeos ticket approve <id>`                                   | Advance a SIGNED_OFF ticket to the next column                             |
-| `aeos ticket sign-off <id>`                                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
-| `aeos ticket move <id> <status>`                             | Human override — move a ticket directly to any workflow status             |
+| `aeos ticket sign-off <id> --reason <text>`                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
+| `aeos ticket move <id> <status> --reason <text>`             | Human override — move a ticket directly to any workflow status             |
 | `aeos ticket answer <id>`                                    | Unblock a `BLOCKED` ticket after answering pre-flight questions            |
+| `aeos ticket repin <id>`                                     | Move a spec-backed ticket's pin to the current spec after an amendment     |
 | `aeos ticket resolve <id>`                                   | Resume an `ESCALATED` ticket after writing a decision in its `escalation.md` |
 | `aeos ticket dod-approve <id>`                               | Final human gate — mark ticket as DONE _(not yet implemented)_             |
 | `aeos dashboard`                                             | Cross-project Kanban summary _(not yet implemented)_                       |
@@ -322,16 +393,17 @@ Notes:
 
 ## Epics and Tasks
 
-A ticket created without a parent is an **epic**. It carries a requirement through
-scoping, spec, and decomposition, and its `TASK_BREAKDOWN` artifact (`tasks.md`)
+A ticket created without a parent is an **epic**, and it must be backed by a
+spec (`--spec`, see [Spec-backed epics](#spec-backed-epics)). It carries that spec through
+spec review, tech spec, and decomposition, and its `TASK_BREAKDOWN` artifact (`tasks.md`)
 lists the atomic tasks that will implement it.
 
 ```bash
 # 1. An epic
-aeos ticket create "Add user authentication"        # → AEOS-1 (EPIC)
+aeos ticket create "Add user authentication" --spec user-authentication   # → AEOS-1 (EPIC)
 
-# 2. Run it through scoping, spec, and breakdown
-aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # PRD
+# 2. Run it through spec review, tech spec, and breakdown
+aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # spec-review.md
 aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tech spec
 aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tasks.md
 
@@ -346,7 +418,7 @@ aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation
 
 # 5. Only once every task is DONE can the epic advance
 aeos ticket approve AEOS-1                             # → INTEGRATION_REVIEW
-aeos ticket run AEOS-1                                 # reviews the whole feature vs PRD/spec
+aeos ticket run AEOS-1                                 # reviews the whole feature vs spec/tech spec
 aeos ticket approve AEOS-1                             # → DOD_GATE, and opens the pull request
 ```
 
@@ -356,6 +428,43 @@ is unfinished reports which tasks are outstanding and refuses the transition.
 
 > Creating child tickets from `tasks.md` is a manual step today. Automating that
 > decomposition belongs with the orchestrator, which owns scheduling.
+
+## Spec-backed epics
+
+An epic is always created from a human-written spec in the artefact tree and pinned to the exact revision of it. `aeos ticket create` without `--spec` (and without `--parent`) is refused. The spec is a person's work; the skills in `plugins/artefact-tree-pipeline/` help write it: `prototype-harvest`, `gap-interrogation-solo` or `gap-interrogation-capture`, then `spec-writer`.
+
+```bash
+aeos ticket create "Checkout flow" --spec checkout     # reads .aeos/features/checkout/
+```
+
+The epic is refused, with the reason, unless all of this holds, checked in this order:
+
+1. `.aeos/features/<feature>/` exists and contains `spec.md` and `decisions.yaml`.
+2. `decisions.yaml` matches `.aeos/schemas/decisions.schema.json`.
+3. `.aeos/schemas/lint_decisions.py` exits clean. It needs `feature-inventory.yaml` in the feature too.
+4. No decision, conflict or question has the outcome `ESCALATED`.
+5. The feature directory has no uncommitted changes in the `.aeos` repository.
+
+Steps 2 and 3 are one run of the linter, which needs `python3` with the `PyYAML` and `jsonschema` modules; a missing one is named in the error. `--spec` cannot be combined with `--parent`.
+
+The pin is the triple `{ repo, commit, path }`: `<project key>-aeos`, the `HEAD` of the `.aeos` repository at creation, and `features/<feature>`. A task has no pin of its own; it uses its epic's. `aeos ticket show` prints the pin for both, and warns `spec has moved since this epic was pinned` once the feature has later commits (gate records, which live in the same directory, do not count). The pin is also written to every run record (`spec_pin`), to the pull request body, and to each task commit as a `Spec:` trailer.
+
+Every prompt for a spec-backed epic and for its tasks (preflight, worker and reviewer) opens its context with a `## Specification (pinned <repo>@<commit>)` section: `spec.md`, `decisions.yaml` and every `features/*.feature`, plus `contexts/<context>/glossary.md` when the front matter of `spec.md` (or `meta` of `decisions.yaml`) names a `context`. That context's `CONSTRAINTS.md` is appended to the project's `.aeos/CONSTRAINTS.md`. All of it is read through git at the pinned commit, never from the working tree, so editing the spec does not change what a running epic is told; a pinned commit that can no longer be read fails the run. A task still receives its epic's tech spec as before. A ticket with no pin gets exactly the prompt it got before.
+
+### Spec fidelity at code review
+
+`CODE_REVIEW` of a single task now applies `rubrics/drift/spec-fidelity.md` as well as the
+structure and intent-drift rubrics, so the reviewer checks the task's diff against the pinned
+spec's acceptance criteria and the tech spec's decisions (the rubric says how each criterion
+scopes down to one task). A new project has this from `aeos project init`. In an existing
+project `aeos project sync` reports `column-specs/code-review.yaml` and the rubric as drifted:
+`aeos project sync --force` takes the new versions (each old file is kept as `.bak`), or add
+`- rubrics/drift/spec-fidelity.md` to `reviewerRubrics` by hand. `--apply` alone only adds
+missing files and will not change a file you already have.
+
+### Projects created before `SPEC_REVIEW`
+
+The column `PRODUCT_SCOPING` is now `SPEC_REVIEW`; the database is migrated on the next command. An epic that was in that column with no spec is kept, set `ESCALATED`, and says why in `aeos ticket show`: create a new epic with `--spec` and close the old one with `aeos ticket move`. In the project, `aeos project sync` lists `column-specs/spec-review.yaml`, `agents/spec-reviewer-agent.yaml` and `rubrics/structure/spec-review-structure.md` as missing (`--apply` adds them) and the retired `product-scoping.yaml`, `pm-agent.yaml` and PRD rubrics as obsolete; it never deletes those. The reworded agents and rubrics show as drifted (`--force` overwrites, with a backup).
 
 ## Branches and pull requests
 
@@ -374,7 +483,10 @@ A finished task becomes one commit, with trailers:
 
 Ticket: AEOS-12
 Epic: AEOS-10
+Spec: AEOS-aeos@4f9c1a2b7d3e5f60a1b2c3d4e5f60718293a4b5c
 ```
+
+`Spec:` is there only for a task of a [spec-backed epic](#spec-backed-epics).
 
 `aeos ticket approve` then opens the pull request against the default branch: for an epic when it is approved out of `INTEGRATION_REVIEW`, for a standalone task when it is approved to `DONE`. It pushes the `aeos/<id>` branch to `origin` and runs `gh pr create`; if the branch already has an open pull request, that one is used. The body carries the ticket, the path of the integration (or code) review with its verdict, the checks table and the total recorded cost; artifact paths are not links because `.aeos/` has no remote. The URL is stored on the ticket and shown by `aeos ticket show`. Merging stays yours.
 
@@ -396,9 +508,9 @@ aeos orchestrator run AEOS-1 --budget 25
 ```
 
 ```
-  AEOS-1: advanced BACKLOG → PRODUCT_SCOPING
+  AEOS-1: advanced BACKLOG → SPEC_REVIEW
   AEOS-1: run succeeded in 1 attempt(s)
-  AEOS-1: advanced PRODUCT_SCOPING → TECH_SPEC
+  AEOS-1: advanced SPEC_REVIEW → TECH_SPEC
   AEOS-1: run succeeded in 2 attempt(s)
   ...
 

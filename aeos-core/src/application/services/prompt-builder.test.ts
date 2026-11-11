@@ -21,11 +21,56 @@ function createContext(overrides: Partial<AssembledContext> = {}): AssembledCont
     settledDecisions: null,
     priorArtifacts: [],
     epicContext: [],
+    spec: [],
+    specPin: null,
     constraints: null,
     codeDiff: null,
     ...overrides,
   };
 }
+
+describe('buildContextSection — pinned specification', () => {
+  const specPin = {
+    repo: 'AEOS-aeos',
+    commit: 'c0ffee1234567890c0ffee1234567890c0ffee12',
+    path: 'features/checkout',
+  };
+  const spec = [
+    { name: 'spec.md', content: '# Checkout\nAC-1 ...' },
+    { name: 'features/pay.feature', content: 'Feature: Pay' },
+  ];
+
+  it('renders the spec, pinned, with the instruction, before the prior artefacts', () => {
+    const section = buildContextSection(
+      createContext({
+        spec,
+        specPin,
+        priorArtifacts: [{ name: 'AEOS-1-tech-spec.md', content: 'tech' }],
+      }),
+    );
+
+    expect(section).toContain(
+      [
+        '## Specification (pinned AEOS-aeos@c0ffee1)',
+        'This specification is authoritative. Where it is silent, raise a preflight question; do not invent behaviour.',
+        '',
+        '### spec.md',
+        '# Checkout',
+        'AC-1 ...',
+        '',
+        '### features/pay.feature',
+        'Feature: Pay',
+      ].join('\n'),
+    );
+    expect(section.indexOf('## Specification')).toBeLessThan(section.indexOf('## Prior Artifacts'));
+  });
+
+  it('is byte-identical to before for a ticket with no pin', () => {
+    expect(buildContextSection(createContext({ constraints: 'Rule' }))).toBe(
+      '[CONTEXT]\n\n## Ticket\n# AEOS-1\nImplement feature X\n\n## Constraints\nRule',
+    );
+  });
+});
 
 describe('buildPrompt', () => {
   it('produces all 5 sections in correct order for a full context', () => {

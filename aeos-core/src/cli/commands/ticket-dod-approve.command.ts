@@ -8,13 +8,13 @@ import { formatCostUsd } from '../../domain/model/cost-record.js';
 import type { RubricLoader } from '../../domain/ports/driven/rubric-loader.port.js';
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
 
-/** Prompt Y/N interactively. Returns true for 'y'/'Y', false otherwise. */
-function promptYesNo(question: string): Promise<boolean> {
+/** Asks one question on the terminal and returns the trimmed answer. */
+function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       rl.close();
-      resolve(answer.trim().toLowerCase() === 'y');
+      resolve(answer.trim());
     });
   });
 }
@@ -73,12 +73,17 @@ export function registerTicketDodApproveCommand(
         }
 
         // 3. Prompt for confirmation
-        const approved = await promptYesNo(
+        const answer = await prompt(
           `All DoD criteria above must be met. Approve ticket ${ticketId} as DONE? [y/N] `,
         );
+        const approved = answer.toLowerCase() === 'y';
+        // A no is recorded as a gate decision, and a rejection needs its reason.
+        const reason = approved
+          ? undefined
+          : await prompt('Why not? (recorded with the decision, at least ten characters) ');
 
         // 4. Execute use case
-        const result = getUseCase().execute(project.id, projectPath, ticketId, approved);
+        const result = getUseCase().execute(project.id, projectPath, ticketId, approved, reason);
 
         switch (result.status) {
           case 'approved':
@@ -89,7 +94,7 @@ export function registerTicketDodApproveCommand(
             break;
           case 'cancelled':
             // eslint-disable-next-line no-console
-            console.log('DoD approval cancelled.');
+            console.log('DoD approval declined; the decision is recorded.');
             break;
           case 'error':
             // eslint-disable-next-line no-console

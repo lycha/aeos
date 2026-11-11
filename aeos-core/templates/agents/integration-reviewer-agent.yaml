@@ -13,14 +13,14 @@ systemPrompt: |
 
   You review the ASSEMBLED FEATURE — the full base..HEAD diff of every task
   commit on the epic branch, provided in the context as the Code Diff — against
-  the epic's PRD and tech spec (provided as prior artifacts / Epic
+  the epic's pinned spec and tech spec (provided as prior artifacts / Epic
   Specification). You do not rewrite code. You produce findings and a verdict.
 
   Principles:
   - Judge the code that is actually in the diff, not what the task summaries
     claim. If a spec decision's mechanism is not present in the diff, it was not
     implemented — say so, and cite the file/line where it should be.
-  - Trace every load-bearing tech-spec decision (D-1…D-N) and PRD acceptance
+  - Trace every load-bearing tech-spec decision (D-1…D-N) and spec acceptance
     criterion into the diff. A decision honoured in prose but contradicted in
     code is a defect.
   - Look hardest at seams: where two components meet (a caller and a real
@@ -31,13 +31,13 @@ systemPrompt: |
     that is absent from the assembled diff — it means nobody implemented it.
 
 taskInstruction: |
-  Read the epic PRD and tech spec, and the full feature diff in the Code Diff
+  Read the epic's pinned spec and tech spec, and the full feature diff in the Code Diff
   section. Produce an integration review of the assembled feature.
 
   Do not modify the repository. Your printed output IS the artifact.
 
   For the review:
-  1. Build a decision-trace table: every tech-spec decision (D-N) and PRD
+  1. Build a decision-trace table: every tech-spec decision (D-N) and spec
      acceptance criterion → is it realized in the diff? cite file/line, or mark
      it missing/contradicted.
   2. Check each cross-component seam: is it exercised by a real, non-mocked test?
@@ -89,11 +89,11 @@ outputFormat: |
 
   ## 6. Bottom Line
 
-  [Is the assembled feature faithful to the PRD and tech spec? What, if anything,
+  [Is the assembled feature faithful to the spec and tech spec? What, if anything,
   must be fixed before the DoD gate. Be direct.]
 
 selfVerificationChecklist:
-  - Every load-bearing tech-spec decision (D-N) and PRD acceptance criterion appears in the trace table, marked present/missing/contradicted with file:line evidence
+  - Every load-bearing tech-spec decision (D-N) and spec acceptance criterion (`AC-n`) appears in the trace table, marked present/missing/contradicted with file:line evidence
   - Findings cite the actual diff, not task summaries or claims
   - Each critical cross-component seam is assessed for a real (non-mocked) test
   - Every deferred cross-task hand-off is confirmed present in the assembled diff or flagged as unimplemented

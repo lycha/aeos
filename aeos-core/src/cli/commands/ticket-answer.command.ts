@@ -32,7 +32,10 @@ export function registerTicketAnswerCommand(
       try {
         const cwd = process.cwd();
         const projectPath = projectRepo.findRoot(cwd);
-        const successMsg = `✓ Ticket ${ticketId} unblocked — sub-state set to READY`;
+        const successMsg = (amended?: string[]): string =>
+          amended
+            ? `Decision recorded as ${amended.join(', ')}. Update spec.md (spec-writer), commit, then run \`aeos ticket repin ${ticketId}\`.`
+            : `✓ Ticket ${ticketId} unblocked — sub-state set to READY`;
 
         if (!projectPath) {
           // eslint-disable-next-line no-console
@@ -78,7 +81,7 @@ export function registerTicketAnswerCommand(
           });
 
           // eslint-disable-next-line no-console
-          console.log(successMsg);
+          console.log(successMsg(retryResult.amendedDecisions));
           return;
         }
 
@@ -95,7 +98,7 @@ export function registerTicketAnswerCommand(
         });
 
         // eslint-disable-next-line no-console
-        console.log(successMsg);
+        console.log(successMsg(result.amendedDecisions));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         // eslint-disable-next-line no-console

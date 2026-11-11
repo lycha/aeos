@@ -56,6 +56,18 @@ describe('buildPullRequestBody', () => {
     expect(body).toContain('<!-- aeos:conformance -->');
   });
 
+  it('fills the spec-pin placeholder for a spec-backed ticket', () => {
+    const body = buildPullRequestBody({
+      ...base,
+      specPin: { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' },
+    });
+
+    expect(body).toContain(
+      '<!-- aeos:spec-pin -->\nSpec: `AEOS-aeos@c0ffee1`, `features/checkout`',
+    );
+    expect(body).not.toContain('Spec pin: not recorded yet');
+  });
+
   it('says so when there is no review, no checks table and no known cost', () => {
     const body = buildPullRequestBody({
       ...base,

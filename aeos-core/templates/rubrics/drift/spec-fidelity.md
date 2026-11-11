@@ -2,12 +2,15 @@
 
 Applied by the reviewer in **INTEGRATION_REVIEW** to grade the integration
 review of an assembled feature. It checks that the review actually verified the
-whole feature against the epic's PRD and tech spec — the check that per-task
+whole feature against the epic's pinned spec and tech spec — the check that per-task
 review structurally cannot perform.
 
 The reviewer applies each criterion independently. Any **FAIL** blocks
-advancement; **WARN** must be flagged but does not block. The epic PRD, tech
+advancement; **WARN** must be flagged but does not block. The pinned spec, tech
 spec, and the base..HEAD feature diff are all in context.
+
+It is also applied in **CODE_REVIEW**, to the review of one task. The criteria
+are the same; "When reviewing a single task", below, says how far each reaches.
 
 ---
 
@@ -15,7 +18,7 @@ spec, and the base..HEAD feature diff are all in context.
 
 | Grade | Definition |
 |-------|------------|
-| **PASS** | The integration review traces every load-bearing tech-spec decision (`D-N`) and every PRD acceptance criterion to the assembled diff, marking each present / missing / contradicted with file:line evidence. Nothing load-bearing is left unaddressed. |
+| **PASS** | The integration review traces every load-bearing tech-spec decision (`D-N`) and every acceptance criterion of the spec (by its `AC-n` id) to the assembled diff, marking each present / missing / contradicted with file:line evidence. Nothing load-bearing is left unaddressed. |
 | **WARN** | The trace covers most decisions but omits one minor item, or cites evidence loosely. |
 | **FAIL** | The review does not trace decisions/criteria to the diff, or asserts the feature is complete without citing where each decision is realized. A spec decision could be silently dropped and this review would not show it. |
 
@@ -48,6 +51,26 @@ spec, and the base..HEAD feature diff are all in context.
 | **PASS** | For every behaviour a task deferred to another ("out of scope, see T-NNN"), the review confirms it is present in the assembled diff, or flags it as implemented by nobody. |
 | **WARN** | Deferrals are noted but not all are confirmed present. |
 | **FAIL** | Deferred hand-offs are ignored, so a behaviour every task assumed someone else built could be absent with no finding. |
+
+---
+
+## When reviewing a single task
+
+In **CODE_REVIEW** the artifact is the code review of one task, and the diff in
+context is that task's working-tree diff, not the assembled feature. Apply each
+criterion at that scope:
+
+- **1. Decision trace.** Only the acceptance criteria (`AC-n`) and tech-spec
+  decisions (`D-N`) this task is there to realize, as its ticket states them. A
+  criterion that belongs to another task is not missing here; do not grade it.
+- **2. Evidence from the diff.** Unchanged. The task's diff is the evidence, not
+  its implementation summary.
+- **3. Seams.** Only the seams this task's diff touches. Where the other side of
+  a seam is another task's work it cannot be exercised yet: say so. That is a
+  WARN at most; the integration review checks it on the assembled feature.
+- **4. Deferred hand-offs.** Whether a deferred behaviour exists cannot be judged
+  from one task. Check only that each deferral names the task it defers to; the
+  integration review confirms someone built it.
 
 ---
 

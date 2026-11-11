@@ -1,7 +1,10 @@
 // Driving port — ProjectSync use case interface
 
-/** How a project's copy compares to the current template. */
-export type SyncStatus = 'missing' | 'drifted' | 'unchanged';
+/**
+ * How a project's copy compares to the current template. `obsolete`: the
+ * project has a file AEOS no longer ships; it is reported and left alone.
+ */
+export type SyncStatus = 'missing' | 'drifted' | 'unchanged' | 'obsolete';
 
 /** What sync did about it on this run. */
 export type SyncAction = 'added' | 'updated' | 'none';

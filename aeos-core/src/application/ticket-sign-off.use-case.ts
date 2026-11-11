@@ -10,6 +10,7 @@ import type {
   TicketSignOffPort,
   TicketSignOffResult,
 } from '../domain/ports/driving/ticket-sign-off.port.js';
+import type { GateRecorder } from './services/gate-recorder.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 
 export class TicketSignOffUseCase implements TicketSignOffPort {
@@ -17,10 +18,11 @@ export class TicketSignOffUseCase implements TicketSignOffPort {
     private readonly ticketRepo: TicketRepository,
     private readonly artifactStore: ArtifactStore,
     private readonly stateMachine: StateMachineService,
+    private readonly gateRecorder: GateRecorder,
   ) {}
 
   execute(input: TicketSignOffInput): TicketSignOffResult {
-    const { projectId, projectPath, ticketId } = input;
+    const { projectId, projectPath, ticketId, reason } = input;
     const ticket = this.ticketRepo.findById(projectId, ticketId);
 
     if (!ticket) {
@@ -40,6 +42,12 @@ export class TicketSignOffUseCase implements TicketSignOffPort {
         error: `Ticket ${ticketId} is already SIGNED_OFF`,
       };
     }
+
+    this.gateRecorder.record(projectPath, ticket, {
+      gate: 'sign-off-override',
+      verdict: 'overridden',
+      reason,
+    });
 
     const result = this.stateMachine.setSubState(projectId, ticketId, SubState.SIGNED_OFF);
     if (!result.ok) {

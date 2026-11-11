@@ -18,7 +18,9 @@
 // Destination tree root resolution, in order:
 //   1. --tree <path>
 //   2. $AEOS_ARTEFACT_TREE
-//   3. ./docs/artefact-tree        (in-repo default)
+//   3. `artefactTree` in ./.aeos/project.json (relative to the project root)
+//   4. ./.aeos                     (an AEOS project: .aeos/ is its own git repository)
+//   5. ./docs/artefact-tree        (in-repo default)
 //
 // --check  exit non-zero if the tree is unseeded or diverged (for CI); writes nothing.
 // --force  overwrite a diverged seeded copy with the shipped schemas.
@@ -43,6 +45,9 @@ const SCHEMA_FILES = [
   "decisions.schema.json",
   "feature-inventory.schema.json",
   "assumption-register.schema.json",
+  "run-record.schema.json",
+  "gates.schema.json",
+  "conformance.schema.json",
   "lint_decisions.py",
 ];
 
@@ -62,7 +67,15 @@ function parseArgs(argv) {
 }
 
 function resolveTree(arg) {
-  return resolve(arg || process.env.AEOS_ARTEFACT_TREE || "docs/artefact-tree");
+  if (arg) return resolve(arg);
+  if (process.env.AEOS_ARTEFACT_TREE) return resolve(process.env.AEOS_ARTEFACT_TREE);
+  try {
+    const configured = JSON.parse(readFileSync(join(".aeos", "project.json"), "utf8")).artefactTree;
+    if (configured) return resolve(configured);
+  } catch {
+    /* no AEOS project config here */
+  }
+  return resolve(existsSync(".aeos") ? ".aeos" : "docs/artefact-tree");
 }
 
 function hashSet(dir, files) {
