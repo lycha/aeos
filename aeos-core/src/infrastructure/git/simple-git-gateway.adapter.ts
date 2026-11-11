@@ -133,6 +133,10 @@ export class SimpleGitGateway implements GitGateway {
     }
   }
 
+  commitOf(dir: string, ref: string): string | null {
+    return this.read(dir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]) || null;
+  }
+
   headCommit(dir: string): string {
     return execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: dir,

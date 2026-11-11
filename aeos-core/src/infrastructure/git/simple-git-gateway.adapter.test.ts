@@ -374,6 +374,15 @@ describe('SimpleGitGateway branches and remotes', () => {
   const rev = (ref: string): string =>
     execFileSync('git', ['rev-parse', ref], { cwd: repo, encoding: 'utf-8' }).trim();
 
+  it('resolves a tag to its commit, and an unknown ref to null', () => {
+    git('tag', 'aeos-base/AEOS-1');
+    fs.writeFileSync(path.join(repo, 'a.md'), 'later\n');
+    git('commit', '-am', 'later');
+
+    expect(gateway.commitOf(repo, 'aeos-base/AEOS-1')).toBe(rev('HEAD~1'));
+    expect(gateway.commitOf(repo, 'aeos-base/AEOS-2')).toBeNull();
+  });
+
   it('cuts a new branch from the default branch, wherever HEAD is', () => {
     git('checkout', '-b', 'aeos/AEOS-1');
     fs.writeFileSync(path.join(repo, 'one.md'), 'one\n');

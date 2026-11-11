@@ -91,6 +91,9 @@ export interface GitGateway {
   /** The full hash of `HEAD` in the repository at `dir`. */
   headCommit(dir: string): string;
 
+  /** The full hash of the commit `ref` (a tag, a branch) points at, or null when it does not resolve. */
+  commitOf(dir: string, ref: string): string | null;
+
   /**
    * The content of `path` (relative to `dir`) as it was at `commit`. Throws
    * when the commit or the file cannot be read; never reads the working tree.

@@ -49,15 +49,19 @@ export class ConformanceService {
     }
 
     const testReport = this.projectRepo.readExecutorConfig(projectPath)?.criteria?.testReport;
+    // Absent when nothing isolated the epic on a branch (no tag).
+    const base = this.gitGateway.commitOf(projectPath, `aeos-base/${epic.id}`);
     const report = buildConformanceReport({
       feature: featureOf(pin),
       epic: epic.id,
       trace: this.criteriaCollector.collect(projectPath, epic, pin),
       tests: testReport ? await this.runTests(projectPath, testReport) : [],
       spec: pin,
-      // shortcut: no `base`; nothing resolves the `aeos-base/<epic>` tag to a
-      // commit yet. Add it when a reader of the report needs the range.
-      code: { repo: project.id, commit: this.gitGateway.headCommit(projectPath) },
+      code: {
+        repo: project.id,
+        commit: this.gitGateway.headCommit(projectPath),
+        ...(base ? { base } : {}),
+      },
       generatedAt: new Date().toISOString(),
       evidence: testReport?.path,
     });

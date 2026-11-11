@@ -21,6 +21,7 @@ const testReport = {
 };
 
 describe('ConformanceService', () => {
+  const commitOf = vi.fn<(dir: string, ref: string) => string | null>(() => null);
   let config: object | null;
   let found: Ticket | null;
   let runner: { run: ReturnType<typeof vi.fn> };
@@ -61,7 +62,7 @@ describe('ConformanceService', () => {
       collector as unknown as CriteriaCollector,
       runner as ChecksRunner,
       reader as TestReportReader,
-      { headCommit: () => 'deadbee' } as unknown as GitGateway,
+      { headCommit: () => 'deadbee', commitOf } as unknown as GitGateway,
     );
   });
 
@@ -103,6 +104,17 @@ describe('ConformanceService', () => {
     expect(report.summary).toEqual({ total: 3, pass: 1, fail: 1, unverified: 1 });
     expect(yaml).toContain('schema_version: 0');
     expect(markdown).toContain('| AC-1 | pass |');
+  });
+
+  it('records the commit the epic branch started from, and omits it when there is no base tag', async () => {
+    commitOf.mockReturnValueOnce('abc1234');
+    const tagged = await service.buildConformance(PROJECT, 'EE-1');
+    expect(commitOf).toHaveBeenCalledWith(PROJECT, 'aeos-base/EE-1');
+    expect(tagged.report.meta.code).toEqual({ repo: 'shop', commit: 'deadbee', base: 'abc1234' });
+    expect(tagged.yaml).toContain('base: "abc1234"');
+
+    const untagged = await service.buildConformance(PROJECT, 'EE-1');
+    expect(untagged.report.meta.code).toEqual({ repo: 'shop', commit: 'deadbee' });
   });
 
   it('leaves every criterion unverified when no test report is configured', async () => {
