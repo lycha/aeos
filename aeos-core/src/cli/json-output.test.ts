@@ -442,7 +442,7 @@ describe('prompts', () => {
   });
 
   it('ticket dod-approve without a terminal is needs_human and records nothing', async () => {
-    const useCase = { review: vi.fn(), execute: vi.fn() };
+    const useCase = { refusal: vi.fn().mockReturnValue(null), review: vi.fn(), execute: vi.fn() };
 
     const ran = await cli(
       { ticketDodApprove: useCase },
@@ -455,6 +455,29 @@ describe('prompts', () => {
     expect(useCase.review).not.toHaveBeenCalled();
     expect(useCase.execute).not.toHaveBeenCalled();
     expect(silent.ask).not.toHaveBeenCalled();
+  });
+
+  it('ticket dod-approve gives the real reason before it asks for a terminal', async () => {
+    const useCase = {
+      refusal: vi
+        .fn()
+        .mockReturnValue(
+          'Ticket AEOS-1 is not in DOD_GATE (current column: QA). Only DOD_GATE tickets can be approved via dod-approve.',
+        ),
+      review: vi.fn(),
+      execute: vi.fn(),
+    };
+
+    const ran = await cli(
+      { ticketDodApprove: useCase },
+      ['ticket', 'dod-approve', 'AEOS-1', '--json'],
+      silent,
+    );
+
+    expect(ran.exit).toBe(1);
+    expect(ran.envelope()).toMatchObject({ error: { code: 'NOT_AT_FINAL_GATE' } });
+    expect(useCase.review).not.toHaveBeenCalled();
+    expect(useCase.execute).not.toHaveBeenCalled();
   });
 
   it('ticket answer on an unmodified file without a terminal needs --yes', async () => {
@@ -589,6 +612,7 @@ describe('prompts', () => {
   it('a command that asks under --json still writes one JSON object to stdout', async () => {
     const person = answering('y');
     const useCase = {
+      refusal: vi.fn().mockReturnValue(null),
       review: vi.fn().mockResolvedValue({ ok: true, review: { report: null, prUrl: null } }),
       execute: vi.fn().mockReturnValue({
         status: 'approved',

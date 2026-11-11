@@ -46,6 +46,11 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
     private readonly columnSpecLoader: ColumnSpecLoader,
   ) {}
 
+  refusal(projectId: string, projectPath: string, ticketId: string): string | null {
+    const found = this.atTheGate(projectId, projectPath, ticketId);
+    return found.ok ? null : found.error;
+  }
+
   async review(
     projectId: string,
     projectPath: string,

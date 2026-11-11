@@ -552,7 +552,7 @@ The exit code tells a script what happened ([vocabulary](#exit-code-vocabulary))
 
 Parameter values are checked against the contract before anything runs (an executor name, a `--key`, a date, a budget above zero): a bad one exits `2` with `error.code` `INVALID_ARGUMENT`, naming the parameter.
 
-**Questions.** Three commands can ask one, always on stderr. When stdin is not a terminal none does: `ticket answer` and `ticket resolve` exit `2` unless `--yes` is given (at a terminal `--yes` skips the question), and `ticket dod-approve` exits `3` with `CONFIRMATION_REQUIRED`, records nothing and has no `--yes`, because the release decision is a person's.
+**Questions.** Three commands can ask one, always on stderr. When stdin is not a terminal none does: `ticket answer` and `ticket resolve` exit `2` unless `--yes` is given (at a terminal `--yes` skips the question), and `ticket dod-approve` exits `3` with `CONFIRMATION_REQUIRED`, records nothing and has no `--yes`, because the release decision is a person's. It checks the ticket first: one that does not exist or is not at the final gate exits `1` with that reason, terminal or not.
 
 ### Breaking changes
 

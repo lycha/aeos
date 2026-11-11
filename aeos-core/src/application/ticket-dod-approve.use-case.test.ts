@@ -549,6 +549,22 @@ describe('TicketDodApproveUseCase', () => {
     });
   });
 
+  it('says why a ticket cannot be decided, without reviewing or recording anything', () => {
+    expect(useCase.refusal(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toBeNull();
+
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...dodGateTicket(),
+      column: 'QA',
+    });
+    expect(useCase.refusal(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toContain('is not in DOD_GATE');
+
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    expect(useCase.refusal(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toBe(
+      `Ticket ${TICKET_ID} not found`,
+    );
+    expect(gateRecorder.record).not.toHaveBeenCalled();
+  });
+
   it('should return error when ticket is not in DOD_GATE column', () => {
     const ticket = dodGateTicket();
     ticket.column = 'QA';

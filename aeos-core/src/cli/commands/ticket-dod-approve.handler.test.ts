@@ -32,7 +32,7 @@ const review = { report, prUrl: 'https://github.com/o/r/pull/7' };
 
 describe('the ticket dod-approve handler', () => {
   let program: Command;
-  let useCase: { review: ReturnType<typeof vi.fn>; execute: ReturnType<typeof vi.fn> };
+  let useCase: Record<'refusal' | 'review' | 'execute', ReturnType<typeof vi.fn>>;
   const run = (...args: string[]): Promise<Command> =>
     program.parseAsync(['node', 'aeos', 'ticket', 'dod-approve', 'AEOS-1', ...args]);
 
@@ -42,6 +42,7 @@ describe('the ticket dod-approve handler', () => {
     program = new Command();
     program.exitOverride();
     useCase = {
+      refusal: vi.fn().mockReturnValue(null),
       review: vi.fn().mockResolvedValue({ ok: true, review }),
       execute: vi.fn().mockReturnValue({ status: 'approved', ticketId: 'AEOS-1', totalCostUsd: 0 }),
     };
