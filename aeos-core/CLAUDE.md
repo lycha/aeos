@@ -108,7 +108,7 @@ Changing pipeline behaviour usually means editing YAML, not TypeScript. Loaders 
 
 Only `claude-cli`, `auggie-cli`, `opencode-cli`, and `stub` support agentic `IMPLEMENTATION`; `ollama-cli` is artifact-only and is rejected for those runs. Agentic implementation runs must leave a real git diff or validation fails.
 
-Set `AEOS_EXECUTOR=stub` to exercise the pipeline without real LLM calls. The stub is role-aware by output path: it answers `NO_BLOCKERS` for preflight, emits an `AEOS-VERDICT` trailer for reviews, and pads its artifact past `minWordCount`. If you change the verdict contract or raise a word count, update the stub too — otherwise `AEOS_EXECUTOR=stub` silently stops working, and no unit test will catch it because they all mock the executor.
+Set `AEOS_EXECUTOR=stub` to exercise the pipeline without real LLM calls. The stub is role-aware by output path: it answers `NO_BLOCKERS` for preflight, emits an `AEOS-VERDICT` trailer for reviews, and pads its artifact past `minWordCount`. If you change the verdict contract or raise a word count, update the stub too — otherwise `AEOS_EXECUTOR=stub` stops working. Unit tests mock the executor and will not notice; `src/e2e/pipeline.e2e.test.ts` will. It drives an epic, its tasks and a standalone task to `DONE` through the real CLI with the stub, in a temp `AEOS_HOME` and project, and runs in `npm test`. Build new end-to-end cases on `src/e2e/harness.ts`. The stub itself writes no repository change, so the harness wraps it to add one on `IMPLEMENTATION` runs; without that wrapper a stub `IMPLEMENTATION` run fails the git-diff guarantee.
 
 ## Conventions
 

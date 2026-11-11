@@ -10,7 +10,14 @@
 
     "meta": {
       "type": "object",
-      "required": ["feature", "context", "artefact_tree", "sources", "source_precedence", "harvested_at"],
+      "required": [
+        "feature",
+        "context",
+        "artefact_tree",
+        "sources",
+        "source_precedence",
+        "harvested_at"
+      ],
       "properties": {
         "feature": { "type": "string" },
         "context": { "type": "string" },
@@ -23,7 +30,9 @@
             "required": ["id", "kind", "repo", "path"],
             "properties": {
               "id": { "$ref": "#/$defs/srcId" },
-              "kind": { "enum": ["prd", "stories", "prototype", "codebase", "conventions", "api-contract"] },
+              "kind": {
+                "enum": ["prd", "stories", "prototype", "codebase", "conventions", "api-contract"]
+              },
               "repo": { "type": "string" },
               "commit": { "type": ["string", "null"], "pattern": "^[0-9a-f]{7,40}$" },
               "path": { "type": "string" },
@@ -46,11 +55,30 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "topic", "kind", "severity", "positions", "why_it_matters", "evidence", "requires_human"],
+        "required": [
+          "id",
+          "topic",
+          "kind",
+          "severity",
+          "positions",
+          "why_it_matters",
+          "evidence",
+          "requires_human"
+        ],
         "properties": {
           "id": { "$ref": "#/$defs/conId" },
           "topic": { "type": "string" },
-          "kind": { "enum": ["vocabulary", "behaviour", "scope", "data-shape", "state", "permission", "stale"] },
+          "kind": {
+            "enum": [
+              "vocabulary",
+              "behaviour",
+              "scope",
+              "data-shape",
+              "state",
+              "permission",
+              "stale"
+            ]
+          },
           "severity": { "$ref": "#/$defs/severity" },
           "positions": {
             "type": "array",
@@ -95,7 +123,9 @@
         "properties": {
           "id": { "type": "string", "pattern": "^SCR-[0-9]+-S[0-9]+$" },
           "screen": { "$ref": "#/$defs/scrId" },
-          "kind": { "enum": ["default", "empty", "loading", "error", "success", "partial", "disabled"] },
+          "kind": {
+            "enum": ["default", "empty", "loading", "error", "success", "partial", "disabled"]
+          },
           "description": { "type": "string" },
           "source": { "$ref": "#/$defs/srcId" },
           "evidence": { "type": "string" },
@@ -108,7 +138,16 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "screen", "control", "label", "action", "source", "evidence", "confidence"],
+        "required": [
+          "id",
+          "screen",
+          "control",
+          "label",
+          "action",
+          "source",
+          "evidence",
+          "confidence"
+        ],
         "properties": {
           "id": { "type": "string", "pattern": "^INT-[0-9]+$" },
           "screen": { "$ref": "#/$defs/scrId" },
@@ -128,14 +167,39 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "screen", "label", "glossary_term", "kind", "format", "source", "evidence", "confidence"],
+        "required": [
+          "id",
+          "screen",
+          "label",
+          "glossary_term",
+          "kind",
+          "format",
+          "source",
+          "evidence",
+          "confidence"
+        ],
         "properties": {
           "id": { "type": "string", "pattern": "^DAT-[0-9]+$" },
           "screen": { "$ref": "#/$defs/scrId" },
           "label": { "type": "string" },
-          "glossary_term": { "type": "string", "description": "A glossary term or the literal UNMAPPED" },
+          "glossary_term": {
+            "type": "string",
+            "description": "A glossary term or the literal UNMAPPED"
+          },
           "kind": { "enum": ["display", "input", "both"] },
-          "format": { "enum": ["text", "number", "date", "datetime", "currency", "count", "enum", "file", "other"] },
+          "format": {
+            "enum": [
+              "text",
+              "number",
+              "date",
+              "datetime",
+              "currency",
+              "count",
+              "enum",
+              "file",
+              "other"
+            ]
+          },
           "constraints_visible": { "type": "array", "items": { "type": "string" } },
           "sample_values": { "type": "array", "items": { "type": "string" } },
           "source": { "$ref": "#/$defs/srcId" },
@@ -228,9 +292,19 @@
     },
     "absCategory": {
       "enum": [
-        "empty-state", "error-state", "loading-state", "permission", "concurrency",
-        "boundary", "lifecycle", "notification", "time", "offline", "accessibility",
-        "role-variation", "undo"
+        "empty-state",
+        "error-state",
+        "loading-state",
+        "permission",
+        "concurrency",
+        "boundary",
+        "lifecycle",
+        "notification",
+        "time",
+        "offline",
+        "accessibility",
+        "role-variation",
+        "undo"
       ]
     }
   }

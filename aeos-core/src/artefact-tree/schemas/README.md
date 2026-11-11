@@ -2,7 +2,7 @@
 
 Normative contracts for everything in the artefact tree. Lives at `<artefact-tree>/schemas/`.
 
-**These are the single source of truth for structure.** Skills do not carry their own copies — they carry *semantics* guides explaining what the values mean, and validate against these.
+**These are the single source of truth for structure.** Skills do not carry their own copies — they carry _semantics_ guides explaining what the values mean, and validate against these.
 
 ```
 <artefact-tree>/schemas/
@@ -40,10 +40,10 @@ Wire it into the artefact-tree pre-commit hook alongside the schema check.
 
 ## Why here and not in the skills
 
-| Concern | Where | Why |
-|---|---|---|
-| **Structure** — fields, enums, required-ness | Artefact tree | Evolves with the artefacts it describes; needs the same version history; must be identical for every producer |
-| **Semantics** — what ASSUMED means, what makes a good `revisit_when` | Skill `references/` | Facilitation guidance, not data |
+| Concern                                                              | Where               | Why                                                                                                           |
+| -------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Structure** — fields, enums, required-ness                         | Artefact tree       | Evolves with the artefacts it describes; needs the same version history; must be identical for every producer |
+| **Semantics** — what ASSUMED means, what makes a good `revisit_when` | Skill `references/` | Facilitation guidance, not data                                                                               |
 
 Two skills produce `decisions.yaml`. A copy of the contract in each guarantees drift — the shape changed three times while it was being designed. One copy in the tree, versioned alongside the files it governs, cannot drift.
 
@@ -87,7 +87,7 @@ Things previously left to a checklist, now unfalsifiable:
 - All references are `{repo, commit, path}` triples
 - `workshop-captured` requires `source_artefact`; `solo-simulated` requires `posture`
 
-What the schema *cannot* enforce, and stays a skill responsibility:
+What the schema _cannot_ enforce, and stays a skill responsibility:
 
 - Every `RECLASSIFIED` question's `becomes` ID actually resolves somewhere in the file
 - Every `blocking` absence in the inventory appears here

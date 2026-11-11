@@ -1,7 +1,7 @@
 {
   "name": "aeos",
   "version": "1.0.0",
-  "description": "",
+  "description": "An AI-assisted development pipeline that takes a ticket from idea to code review using specialised LLM agents",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -31,7 +31,15 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lycha/aeos.git",
+    "directory": "aeos-core"
+  },
+  "bugs": {
+    "url": "https://github.com/lycha/aeos/issues"
+  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
