@@ -556,7 +556,7 @@ For anyone scripting on "non-zero means failed, and it is always `1`":
 - **Exit codes mean something now.** `3` is not a failure. A wrapper that loops while the exit code is `0` should stop cleanly on `3` and treat only `1` as broken. `orchestrator run` used to exit `0` on `HUMAN_GATE` and `AWAITING_APPROVAL` and `1` on the other early halts; all of them are `3` now. `ticket run` used to exit `0` on a block and `1` on an escalation; both are `3`, and an interrupted run is `130`.
 - **Usage errors exit `2`**, including Commander's own (a missing argument, an unknown option), which used to exit `1`. An unknown `ticket list --column`, an invalid ticket id, `--body` with `--body-file` and a reason shorter than ten characters are usage errors too.
 - **A missing resource exits `4`** (no project, no `aeos install`, an unknown `costs --project`), not `1`.
-- **`ticket approve` on a ticket that is already done exits `1`** (`ALREADY_DONE`); it used to print the same line and exit `0`. Declining the confirmation of `ticket answer` or `ticket resolve` exits `1` (`CONFIRMATION_DECLINED`), not `0`.
+- **`ticket approve` on a ticket that is already done exits `1`** (`ALREADY_DONE`); it used to print the same line and exit `0`. Declining the confirmation of `ticket answer` or `ticket resolve` exits `0`, as it always did: nothing went wrong and nothing changed (`data` is `{ ticketId, declined: true }`).
 - **Questions are on stderr**, and so is the conformance report `ticket dod-approve` shows before asking. Without a terminal no command waits on stdin any more (see above).
 - **Two error messages are reworded**: an executor that is not one of the four, and a `--key` that is not 2–4 uppercase letters, are now reported by the generated parameter check (`--executor must be one of …, got 'x'.`). All other text output is what it was.
 
@@ -699,7 +699,7 @@ Requires: `project`, `state_db`.
 
 Exit codes:
 
-- `0` The ticket is unblocked and its answers are promoted to decisions.
+- `0` The ticket is unblocked and its answers are promoted to decisions. Or the person declined the confirmation, and nothing changed.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
 - `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
@@ -719,7 +719,7 @@ Requires: `project`, `state_db`.
 
 Exit codes:
 
-- `0` The ticket can be run again.
+- `0` The ticket can be run again. Or the person declined the confirmation, and nothing changed.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
 - `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).

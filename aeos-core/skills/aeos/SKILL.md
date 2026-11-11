@@ -269,7 +269,7 @@ Requires: `project`, `state_db`.
 
 Exit codes:
 
-- `0` The ticket is unblocked and its answers are promoted to decisions.
+- `0` The ticket is unblocked and its answers are promoted to decisions. Or the person declined the confirmation, and nothing changed.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
 - `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
@@ -289,7 +289,7 @@ Requires: `project`, `state_db`.
 
 Exit codes:
 
-- `0` The ticket can be run again.
+- `0` The ticket can be run again. Or the person declined the confirmation, and nothing changed.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
 - `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).

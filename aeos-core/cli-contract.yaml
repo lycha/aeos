@@ -283,6 +283,14 @@ components:
       properties:
         ticketId: { $ref: "#/components/schemas/TicketId" }
         subState: { $ref: "#/components/schemas/SubState" }
+    ConfirmationDeclined:
+      description: The person answered no to the command's confirmation. Nothing changed.
+      type: object
+      additionalProperties: false
+      required: [ticketId, declined]
+      properties:
+        ticketId: { $ref: "#/components/schemas/TicketId" }
+        declined: { const: true }
     TicketRunResult:
       type: object
       additionalProperties: false
@@ -561,16 +569,18 @@ commands:
       - $ref: "#/components/parameters/yes"
     responses:
       "0":
-        description: The ticket is unblocked and its answers are promoted to decisions.
+        description: The ticket is unblocked and its answers are promoted to decisions. Or the person declined the confirmation, and nothing changed.
         data:
-          type: object
-          additionalProperties: false
-          required: [ticketId, promoted, amendedDecisions, specPin]
-          properties:
-            ticketId: { $ref: "#/components/schemas/TicketId" }
-            promoted: { $ref: "#/components/schemas/StringList" }
-            amendedDecisions: { $ref: "#/components/schemas/StringList" }
-            specPin: { $ref: "#/components/schemas/NullableSpecPin" }
+          anyOf:
+            - type: object
+              additionalProperties: false
+              required: [ticketId, promoted, amendedDecisions, specPin]
+              properties:
+                ticketId: { $ref: "#/components/schemas/TicketId" }
+                promoted: { $ref: "#/components/schemas/StringList" }
+                amendedDecisions: { $ref: "#/components/schemas/StringList" }
+                specPin: { $ref: "#/components/schemas/NullableSpecPin" }
+            - $ref: "#/components/schemas/ConfirmationDeclined"
       "1": { $ref: "#/components/responses/failure" }
       "4": { $ref: "#/components/responses/missingResource" }
 
@@ -586,8 +596,11 @@ commands:
       - $ref: "#/components/parameters/yes"
     responses:
       "0":
-        description: The ticket can be run again.
-        data: { $ref: "#/components/schemas/SubStateChange" }
+        description: The ticket can be run again. Or the person declined the confirmation, and nothing changed.
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/SubStateChange"
+            - $ref: "#/components/schemas/ConfirmationDeclined"
       "1": { $ref: "#/components/responses/failure" }
       "4": { $ref: "#/components/responses/missingResource" }
 

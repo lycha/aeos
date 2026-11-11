@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { programWith } from './commands/program.fixture.js';
 import type { Container } from './container.js';
+import { outputProblems } from './contract/contract-output.fixture.js';
+import { loadContract } from './contract/load-contract.js';
 import type { ResourceName } from './generated/resources.gen.js';
 import { runCli } from './index.js';
 import type { Prompt } from './prompt.js';
@@ -518,6 +520,47 @@ describe('prompts', () => {
       silent,
     );
     expect(refused.exit).toBe(2);
+  });
+
+  it.each([
+    ['answer', 'ticketAnswer'],
+    ['resolve', 'ticketResolve'],
+  ])(
+    'ticket %s: declining at a terminal is success, changes nothing, and is valid output',
+    async (verb, useCase) => {
+      const execute = vi.fn().mockReturnValue({ ok: false, needsConfirmation: true, reason: '' });
+      const container = { [useCase]: { execute } };
+
+      const ran = await cli(container, ['ticket', verb, 'AEOS-1', '--json'], answering('n'));
+
+      expect(ran.exit).toBe(0);
+      expect(ran.envelope()).toMatchObject({
+        ok: true,
+        data: { ticketId: 'AEOS-1', declined: true },
+        error: null,
+      });
+      expect(outputProblems(loadContract(), `ticket ${verb}`, ran.out.join('\n'), 0)).toEqual([]);
+      // Asked once, never confirmed.
+      expect(execute).toHaveBeenCalledTimes(1);
+
+      const text = await cli(container, ['ticket', verb, 'AEOS-1'], answering('n'));
+      expect(text.exit).toBe(0);
+      expect(text.out).toEqual(['Aborted.']);
+    },
+  );
+
+  it('ticket approve on a ticket that is already done is still a failure', async () => {
+    const execute = vi.fn().mockReturnValue({ status: 'already_done', ticketId: 'AEOS-1' });
+
+    const ran = await cli({ ticketApprove: { execute } }, [
+      'ticket',
+      'approve',
+      'AEOS-1',
+      '--json',
+    ]);
+
+    expect(ran.exit).toBe(1);
+    expect(ran.envelope()).toMatchObject({ error: { code: 'ALREADY_DONE' } });
   });
 
   it('a command that asks under --json still writes one JSON object to stdout', async () => {

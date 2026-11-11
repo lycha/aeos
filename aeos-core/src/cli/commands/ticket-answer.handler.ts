@@ -32,7 +32,8 @@ export const ticketAnswer: Handlers['ticketAnswer'] = async (
       'Warning: questions file does not appear to have been modified. Continue anyway? [y/N] ',
     );
     if (answer.toLowerCase() !== 'y') {
-      return stopped('error', 'CONFIRMATION_DECLINED', 'Aborted.', { text: 'Aborted.' });
+      // Nothing went wrong: the person said no, and nothing changed.
+      return done({ ticketId, declined: true }, 'Aborted.');
     }
     result = run(true);
   }
