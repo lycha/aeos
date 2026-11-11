@@ -227,8 +227,7 @@ export class TicketRunUseCase implements TicketRunPort {
         };
       }
 
-      const branchError = this.isolateTask(projectPath, mirroredTicket);
-      if (branchError) return { status: 'failed', ticketId, error: branchError };
+      this.isolateTask(projectPath, mirroredTicket);
 
       const columnSpec = this.columnSpecLoader.load(mirroredTicket.column, projectPath);
       const workerAgentSpec = this.agentSpecLoader.load(columnSpec.workerAgentFile, projectPath);
@@ -1825,27 +1824,21 @@ export class TicketRunUseCase implements TicketRunPort {
   }
 
   /**
-   * Keeps a task's commits off the default branch. A standalone task gets its
-   * own `aeos/<taskId>` branch and base tag, as the orchestrator gives an
-   * epic; a child task belongs on its epic's branch, which the orchestrator
-   * set up, so one found on the default branch is refused. Returns the refusal.
+   * Keeps a task's commits off the default branch: a child task goes onto its
+   * epic's `aeos/<epicId>` branch, a standalone task onto its own, each with
+   * its base tag, as the orchestrator gives an epic.
    */
-  private isolateTask(projectPath: string, ticket: Ticket): string | null {
+  private isolateTask(projectPath: string, ticket: Ticket): void {
     if (
       ticket.kind !== TicketKind.TASK ||
       process.env.AEOS_GIT_ISOLATION === 'none' ||
       !this.gitGateway.isRepo(projectPath)
     ) {
-      return null;
+      return;
     }
-    if (ticket.parentId === null) {
-      this.gitGateway.ensureOnBranch(projectPath, `aeos/${ticket.id}`);
-      this.gitGateway.tagHere(projectPath, `aeos-base/${ticket.id}`);
-      return null;
-    }
-    const defaultBranch = this.gitGateway.defaultBranch(projectPath);
-    if (this.gitGateway.currentBranch(projectPath) !== defaultBranch) return null;
-    return `Refusing to run task ${ticket.id} on the default branch '${defaultBranch}'. Drive it with \`aeos orchestrator run ${ticket.parentId}\`, or check out \`aeos/${ticket.parentId}\` first.`;
+    const owner = ticket.parentId ?? ticket.id;
+    this.gitGateway.ensureOnBranch(projectPath, `aeos/${owner}`);
+    this.gitGateway.tagHere(projectPath, `aeos-base/${owner}`);
   }
 
   /**

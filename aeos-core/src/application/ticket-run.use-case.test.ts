@@ -1724,30 +1724,18 @@ describe('TicketRunUseCase', () => {
       expect(order(gitGateway.tagHere)).toBeLessThan(order(executor.run));
     });
 
-    it('refuses to run a child task while HEAD is the default branch', async () => {
+    it("puts a child task on its epic's tagged branch before any executor runs", async () => {
       running({ parentId: 'AEOS-9' });
       onDefaultBranch();
 
       const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-      expect(result).toMatchObject({ status: 'failed' });
-      const { error } = result as { error: string };
-      expect(error).toContain("default branch 'main'");
-      expect(error).toContain('aeos/AEOS-9');
-      expect(executor.run).not.toHaveBeenCalled();
-      expect(preflight.run).not.toHaveBeenCalled();
-      expect(stateMachine.setSubState).not.toHaveBeenCalled();
-      expect(gitGateway.ensureOnBranch).not.toHaveBeenCalled();
-    });
-
-    it("runs a child task on its epic's branch without switching", async () => {
-      running({ parentId: 'AEOS-9' });
-      (gitGateway.currentBranch as ReturnType<typeof vi.fn>).mockReturnValue('aeos/AEOS-9');
-
-      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
-
       expect(result.status).toBe('success');
-      expect(gitGateway.ensureOnBranch).not.toHaveBeenCalled();
+      expect(gitGateway.ensureOnBranch).toHaveBeenCalledWith(PROJECT_PATH, 'aeos/AEOS-9');
+      expect(gitGateway.tagHere).toHaveBeenCalledWith(PROJECT_PATH, 'aeos-base/AEOS-9');
+      expect(order(gitGateway.ensureOnBranch)).toBeLessThan(order(gitGateway.tagHere));
+      expect(order(gitGateway.tagHere)).toBeLessThan(order(preflight.run));
+      expect(order(gitGateway.tagHere)).toBeLessThan(order(executor.run));
     });
 
     it('leaves an epic where it is', async () => {

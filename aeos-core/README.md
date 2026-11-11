@@ -1050,8 +1050,7 @@ aeos ticket create "Add password hashing" --parent AEOS-1   # → AEOS-2 (TASK)
 aeos ticket create "Add session middleware" --parent AEOS-1 # → AEOS-3 (TASK)
 
 # 4. Each task runs its own build pipeline, on the epic's branch
-git checkout -b aeos/AEOS-1                            # `orchestrator run` does this for you
-aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation
+aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation; switches to aeos/AEOS-1
 ...
 
 # 5. Only once every task is DONE can the epic advance
@@ -1139,7 +1138,7 @@ The column `PRODUCT_SCOPING` is now `SPEC_REVIEW`; the database is migrated on t
 Nothing the engine writes goes onto the default branch.
 
 - **Epic** — `aeos orchestrator run` puts the epic on `aeos/<epicId>` and tags its base `aeos-base/<epicId>`. Its tasks commit there.
-- **Child task** — runs on its epic's branch. `aeos ticket run` refuses a child task while `HEAD` is the default branch.
+- **Child task** — runs on its epic's branch. `aeos ticket run` switches to `aeos/<epicId>`, creating it and the tag `aeos-base/<epicId>` when the orchestrator has not.
 - **Standalone task** (no parent) — `aeos ticket run` switches to `aeos/<taskId>`, creating it and the tag `aeos-base/<taskId>` on the first run.
 
 The default branch is the remote's `HEAD` when there is one, otherwise a local `main`, then `master`. `AEOS_GIT_ISOLATION=none` turns the branch handling off.

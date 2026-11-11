@@ -134,15 +134,13 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       await createTicket('First task', '--parent', epic, '--key', 'T-001', '--implements', 'AC-1'),
       await createTicket('Second task', '--parent', epic, '--key', 'T-002'),
     ];
-    // A child task is refused on the default branch. `orchestrator run` would
-    // have put the epic on its own branch; the test plays that part too.
+    // A child task run from the default branch moves to its epic's branch,
+    // as `orchestrator run` would have put it.
     await runCli('ticket', 'approve', tasks[0]!);
-    const refused = await runCli('ticket', 'run', tasks[0]!);
-    expect(refused.output).toContain(`on the default branch '${defaultBranch}'`);
-    expect(ticketState(tasks[0]!)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'READY' });
-    git('tag', `aeos-base/${epic}`);
-    git('checkout', '-b', `aeos/${epic}`);
+    expect(git('branch', '--show-current').trim()).toBe(defaultBranch);
     for (let i = 0; i < 3; i++) await driveColumn(tasks[0]!);
+    expect(git('branch', '--show-current').trim()).toBe(`aeos/${epic}`);
+    expect(git('tag', '--list', `aeos-base/${epic}`).trim()).toBe(`aeos-base/${epic}`);
     await driveTaskToDone(tasks[1]!);
 
     // Epic: TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE
