@@ -186,7 +186,7 @@ describe('pipelines file', { timeout: 30_000 }, () => {
       writeTaskPipeline('BACKLOG', 'CODE_REVIEW', 'IMPLEMENTATION', 'DONE');
 
       const refused = await runCli('ticket', 'run', task);
-      expect(refused.exitCode).toBe(1);
+      expect(refused.exitCode).toBe(3);
       expect(refused.output).toContain(`${task} (CODE_REVIEW)`);
       expect(refused.output).toContain('BACKLOG, IMPLEMENTATION, CODE_REVIEW, QA, DONE');
       expect(ticketState(task)).toMatchObject({ column: 'CODE_REVIEW', subState: 'READY' });

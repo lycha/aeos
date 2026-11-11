@@ -104,9 +104,12 @@ export function tokenizeCommandLine(input: string): string[] {
   return tokens;
 }
 
+/** Builds the command tree; told each command's exit code, so it never reaches the process. */
+export type BuildProgram = (setExit: (code: number) => void) => Command;
+
 export async function executeShellCommand(
   commandLine: string,
-  buildProgram: () => Command,
+  buildProgram: BuildProgram,
 ): Promise<ShellCommandResult> {
   let argv = tokenizeCommandLine(commandLine.trim());
   if (argv[0] === 'aeos') {
@@ -240,12 +243,14 @@ function parseTicketRunRequest(argv: string[], commandLine: string): ShellComman
 
 async function executeCommanderCommand(
   argv: string[],
-  buildProgram: () => Command,
+  buildProgram: BuildProgram,
 ): Promise<{ lines: string[]; exitCode: number }> {
   /* eslint-disable no-console */
   const lines: string[] = [];
-  const program = buildProgram();
-  const savedExitCode = process.exitCode;
+  let exitCode = 0;
+  const program = buildProgram((code) => {
+    exitCode = code;
+  });
   const savedConsole = {
     log: console.log,
     error: console.error,
@@ -258,16 +263,12 @@ async function executeCommanderCommand(
     writeErr: (text) => appendOutput(lines, text),
   });
 
-  process.exitCode = undefined;
   console.log = (...args: unknown[]) => appendOutput(lines, format(...args));
   console.error = (...args: unknown[]) => appendOutput(lines, format(...args));
   console.warn = (...args: unknown[]) => appendOutput(lines, format(...args));
 
-  let exitCode = 0;
-
   try {
     await program.parseAsync(['node', 'aeos', ...argv]);
-    exitCode = typeof process.exitCode === 'number' ? process.exitCode : 0;
   } catch (error) {
     exitCode = getCommanderExitCode(error);
     if (lines.length === 0 && error instanceof Error && error.message.length > 0) {
@@ -277,7 +278,6 @@ async function executeCommanderCommand(
     console.log = savedConsole.log;
     console.error = savedConsole.error;
     console.warn = savedConsole.warn;
-    process.exitCode = savedExitCode as number | undefined;
   }
   /* eslint-enable no-console */
 

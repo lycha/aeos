@@ -17,8 +17,8 @@ describe('aeos costs', () => {
   const report = (value: CostReport): void => {
     execute.mockReturnValue({ ok: true, report: value });
   };
-  const run = (...args: string[]): string => {
-    program.parse(['node', 'aeos', 'costs', ...args]);
+  const run = async (...args: string[]): Promise<string> => {
+    await program.parseAsync(['node', 'aeos', 'costs', ...args]);
     return lines.join('\n');
   };
 
@@ -52,11 +52,11 @@ describe('aeos costs', () => {
     process.exitCode = undefined;
   });
 
-  it('says so when nothing is recorded', () => {
-    expect(run()).toBe('No cost data recorded yet.');
+  it('says so when nothing is recorded', async () => {
+    expect(await run()).toBe('No cost data recorded yet.');
   });
 
-  it('shows each project with its total, and each ticket by column and by role', () => {
+  it('shows each project with its total, and each ticket by column and by role', async () => {
     report({
       totalUsd: 4.63,
       unknownRecords: 0,
@@ -77,7 +77,7 @@ describe('aeos costs', () => {
       ],
     });
 
-    const output = run();
+    const output = await run();
 
     expect(output).toContain('AEOS Cost Report');
     expect(output).toContain('client-side estimates');
@@ -92,7 +92,7 @@ describe('aeos costs', () => {
     expect(output).not.toContain('unknown');
   });
 
-  it('shows unknown for an all-unknown ticket and counts unknown records in a footer', () => {
+  it('shows unknown for an all-unknown ticket and counts unknown records in a footer', async () => {
     report({
       totalUsd: 0.4,
       unknownRecords: 1,
@@ -108,15 +108,15 @@ describe('aeos costs', () => {
       ],
     });
 
-    const output = run();
+    const output = await run();
 
     expect(output).toMatch(/^ {4}AEOS-1 +\$0\.40$/m);
     expect(output).toMatch(/^ {4}AEOS-2 +unknown$/m);
     expect(output).toContain('1 record(s) with unknown cost are not included');
   });
 
-  it('passes its options to the use case', () => {
-    const output = run(
+  it('passes its options to the use case', async () => {
+    const output = await run(
       '--project',
       'AEOS',
       '--epic',
@@ -136,31 +136,34 @@ describe('aeos costs', () => {
     expect(output).toBe('No cost data recorded yet.');
   });
 
-  it('names the period when --since is given', () => {
+  it('names the period when --since is given', async () => {
     report({
       totalUsd: 1,
       unknownRecords: 0,
       byProject: [{ projectId: 'a', totalUsd: 1, byTicket: [] }],
     });
 
-    expect(run('--since', '2026-11-01')).toContain('Period: since 2026-11-01');
+    expect(await run('--since', '2026-11-01')).toContain('Period: since 2026-11-01');
   });
 
-  it('rejects a --since that is not a date', () => {
-    expect(run('--since', 'yesterday')).toContain('Error: --since must be a date as YYYY-MM-DD');
-    expect(process.exitCode).toBe(1);
+  it('rejects a --since that is not a date', async () => {
+    expect(await run('--since', 'yesterday')).toContain(
+      "Error: --since must be a date as YYYY-MM-DD, got 'yesterday'.",
+    );
+    expect(process.exitCode).toBe(2);
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it('reports an unknown project', () => {
+  it('reports an unknown project', async () => {
     execute.mockReturnValue({ ok: false, reason: 'PROJECT_NOT_FOUND' });
 
-    expect(run('--project', 'NOPE')).toContain("Error: Project 'NOPE' not found");
-    expect(process.exitCode).toBe(1);
+    expect(await run('--project', 'NOPE')).toContain("Error: Project 'NOPE' not found");
+    // The project is a resource that is not there.
+    expect(process.exitCode).toBe(4);
   });
 
-  it('shows its own help', () => {
-    expect(() => run('--help')).toThrow();
+  it('shows its own help', async () => {
+    await expect(run('--help')).rejects.toThrow();
 
     const help = lines.join('\n');
     expect(help).toContain('Usage: aeos costs');

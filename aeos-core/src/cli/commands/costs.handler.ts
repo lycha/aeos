@@ -1,6 +1,7 @@
 // CLI command — aeos costs
 
 import type { Handlers } from '../generated/commands.gen.js';
+import { done, stopped } from '../result.js';
 import { formatCostUsd } from '../../domain/model/cost-record.js';
 import type { CostBreakdown } from '../../domain/ports/driving/costs.port.js';
 import { withColumnLabels } from '../../domain/services/column-labels.js';
@@ -14,13 +15,6 @@ function row(indent: number, label: string, costUsd: number | null): string {
 
 export const costs: Handlers['costs'] = async (_args, options, context) => {
   const out: string[] = [];
-  // Not a full calendar check: the value is only compared against timestamps.
-  if (options.since && !/^\d{4}-\d{2}-\d{2}$/.test(options.since)) {
-    // eslint-disable-next-line no-console
-    console.error(`Error: --since must be a date as YYYY-MM-DD, got '${options.since}'.`);
-    process.exitCode = 1;
-    return;
-  }
 
   // Reads the global database, so it does not need a project directory.
   const result = context.container.costs.execute({
@@ -30,18 +24,16 @@ export const costs: Handlers['costs'] = async (_args, options, context) => {
     since: options.since,
   });
   if (!result.ok) {
-    // eslint-disable-next-line no-console
-    console.error(`Error: Project '${options.project}' not found in the AEOS registry.`);
-    process.exitCode = 1;
-    return;
+    return stopped(
+      'missing-resource',
+      'PROJECT_NOT_FOUND',
+      `Project '${options.project}' not found in the AEOS registry.`,
+      { resource: 'project' },
+    );
   }
 
   const { report } = result;
-  if (report.byProject.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log('No cost data recorded yet.');
-    return;
-  }
+  if (report.byProject.length === 0) return done(report, 'No cost data recorded yet.');
 
   const breakdownRows = (breakdown: CostBreakdown): void => {
     for (const [name, costUsd] of Object.entries(breakdown)) out.push(row(6, name, costUsd));
@@ -72,6 +64,5 @@ export const costs: Handlers['costs'] = async (_args, options, context) => {
   if (report.unknownRecords > 0) {
     out.push(`${report.unknownRecords} record(s) with unknown cost are not included`);
   }
-  // eslint-disable-next-line no-console
-  console.log(out.join('\n'));
+  return done(report, out.join('\n'));
 };

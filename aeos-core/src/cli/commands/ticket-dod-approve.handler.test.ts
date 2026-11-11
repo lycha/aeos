@@ -9,15 +9,13 @@ import { programWith } from './program.fixture.js';
 // What the person types, in order; every question asked is logged with the output.
 const answers: string[] = [];
 const printed: string[] = [];
-vi.mock('node:readline', () => ({
-  createInterface: () => ({
-    question: (question: string, answer: (line: string) => void) => {
-      printed.push(question);
-      answer(answers.shift() ?? '');
-    },
-    close: () => {},
-  }),
-}));
+const person = {
+  interactive: true,
+  ask: async (question: string): Promise<string> => {
+    printed.push(question);
+    return answers.shift() ?? '';
+  },
+};
 
 const report = {
   criteria: [
@@ -56,6 +54,7 @@ describe('the ticket dod-approve handler', () => {
         } as unknown as ProjectRepository,
       },
       program,
+      person,
     );
     for (const method of ['log', 'error'] as const) {
       vi.spyOn(console, method).mockImplementation((...parts) => printed.push(parts.join(' ')));
@@ -73,7 +72,9 @@ describe('the ticket dod-approve handler', () => {
     await run('--reason', 'AC-2 is accepted as a known gap.', '--verified', 'AC-2, AC-3');
 
     expect(useCase.review).toHaveBeenCalledWith('proj-1', '/test', 'AEOS-1', ['AC-2', 'AC-3']);
-    const position = (text: string): number => printed.findIndex((line) => line.includes(text));
+    // The report is shown with the question, on stderr: nothing before the answer is on stdout.
+    expect(printed[0]).toContain('Approve ticket AEOS-1 as DONE? [y/N] ');
+    const position = (text: string): number => printed[0].indexOf(text);
     expect(position('1 pass, 0 fail, 1 unverified of 2.')).toBeGreaterThanOrEqual(0);
     expect(position('| AC-1 | pass | test: a.test.ts: AC-1 (pass)')).toBeGreaterThanOrEqual(0);
     expect(position('https://github.com/o/r/pull/7')).toBeGreaterThan(position('| AC-1 | pass'));
@@ -88,7 +89,7 @@ describe('the ticket dod-approve handler', () => {
     );
   });
 
-  it('asks why on a no, and exits 1 when the decision is refused', async () => {
+  it('asks why on a no, and exits needs_human when the decision is refused', async () => {
     answers.push('n', 'AC-2 is not demonstrated.');
     useCase.execute.mockReturnValue({
       status: 'error',
@@ -107,7 +108,7 @@ describe('the ticket dod-approve handler', () => {
       review,
     );
     expect(printed.join('\n')).toContain('needs --reason');
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(3);
   });
 
   it('asks nothing when the report cannot be shown', async () => {

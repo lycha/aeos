@@ -1,10 +1,9 @@
 // CLI command — aeos project sync
 
 import type { Handlers } from '../generated/commands.gen.js';
+import { done } from '../result.js';
 import type { SyncFileOutcome } from '../../domain/ports/driving/project-sync.port.js';
 import { formatLineDiff } from '../../application/services/line-diff.js';
-
-/* eslint-disable no-console */
 
 export const projectSync: Handlers['projectSync'] = async (_args, options, context) => {
   const { projectPath } = context;
@@ -18,48 +17,54 @@ export const projectSync: Handlers['projectSync'] = async (_args, options, conte
   const unchanged = result.files.filter((f) => f.status === 'unchanged');
   const obsolete = result.files.filter((f) => f.status === 'obsolete');
 
-  console.log('Comparing .aeos/ against the current templates...\n');
+  const out = ['Comparing .aeos/ against the current templates...\n'];
 
   for (const file of result.files) {
     if (file.status === 'unchanged') continue;
-    console.log(`  ${label(file)}  ${file.relativePath}`);
+    out.push(`  ${label(file)}  ${file.relativePath}`);
     if (options.diff && file.status === 'drifted' && file.projectContent !== null) {
       const diff = formatLineDiff(file.projectContent, file.templateContent);
-      console.log(indent(diff));
+      out.push(indent(diff));
     }
   }
 
-  console.log(
+  out.push(
     `\nSummary: ${unchanged.length} up-to-date, ${drifted.length} drifted, ${missing.length} missing, ${obsolete.length} obsolete.`,
   );
   if (obsolete.length > 0) {
-    console.log(
+    out.push(
       '\nObsolete files are no longer used by AEOS. Sync leaves them in place; delete them once you have kept anything you need.',
     );
   }
 
   // Guidance depends on what was left unaddressed.
-  const addedNow = result.files.some((f) => f.action !== 'none');
+  const written = result.files.filter((f) => f.action !== 'none');
   if (!apply && !force && (missing.length > 0 || drifted.length > 0)) {
     const hints: string[] = [];
     if (missing.length > 0) hints.push('`aeos project sync --apply` to add missing files');
     if (drifted.length > 0)
       hints.push('`aeos project sync --force` to overwrite drifted files (backed up first)');
-    console.log(`\nDry run — nothing changed. Run ${hints.join(', or ')}.`);
-    console.log('Use --diff to inspect drift before overwriting.');
-  } else if (addedNow) {
-    console.log('');
+    out.push(`\nDry run — nothing changed. Run ${hints.join(', or ')}.`);
+    out.push('Use --diff to inspect drift before overwriting.');
+  } else if (written.length > 0) {
+    out.push('');
     for (const f of result.files) {
-      if (f.action === 'added') console.log(`  + added   ${f.relativePath}`);
+      if (f.action === 'added') out.push(`  + added   ${f.relativePath}`);
       if (f.action === 'updated')
-        console.log(`  ~ updated ${f.relativePath}  (backup: ${f.backupPath})`);
+        out.push(`  ~ updated ${f.relativePath}  (backup: ${f.backupPath})`);
     }
     if (drifted.length > 0 && !force) {
-      console.log(
+      out.push(
         `\n${drifted.length} drifted file(s) left untouched — run with --force to overwrite them.`,
       );
     }
   }
+
+  const paths = (files: SyncFileOutcome[]): string[] => files.map((f) => f.relativePath);
+  return done(
+    { missing: paths(missing), drifted: paths(drifted), written: paths(written) },
+    out.join('\n'),
+  );
 };
 
 function label(file: SyncFileOutcome): string {

@@ -422,7 +422,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // Columns advance manually, so the run stops for approval after one column.
     expect(run.output).toContain(`${epic} — AWAITING_APPROVAL`);
-    expect(run.exitCode).toBe(0);
+    expect(run.exitCode).toBe(3);
     expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'SIGNED_OFF' });
     const aeosDir = path.join(project.projectPath, '.aeos');
     expect(fs.existsSync(path.join(aeosDir, 'tickets', epic, `${epic}-spec-review.md`))).toBe(true);
@@ -481,10 +481,10 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // Overrides need a reason, and say what they overrode.
     const noReason = await runCli('ticket', 'move', epic, 'QA');
-    expect(noReason.exitCode).toBe(1);
+    expect(noReason.exitCode).toBe(2);
     expect(noReason.output).toContain('--reason');
     const tooShort = await runCli('ticket', 'sign-off', epic, '--reason', 'because');
-    expect(tooShort.exitCode).toBe(1);
+    expect(tooShort.exitCode).toBe(2);
     expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'ESCALATED' });
 
     const signOff = await runCli(
@@ -726,8 +726,8 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       '--implements',
       'ac1',
     );
-    expect(badId.exitCode).toBe(1);
-    expect(badId.output).toContain('not a criterion id');
+    expect(badId.exitCode).toBe(2);
+    expect(badId.output).toContain('--implements must match');
     await runCli(
       'ticket',
       'move',
@@ -989,14 +989,14 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
   it('stops a command whose resource is missing, with the fix from the contract', async () => {
     const early = await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
-    expect(early.exitCode).toBe(1);
+    expect(early.exitCode).toBe(4);
     expect(early.output).toContain('a required resource is not in place: aeos_home');
     expect(early.output).toContain('Run `aeos install`.');
     expect(fs.existsSync(path.join(project.projectPath, '.aeos'))).toBe(false);
 
     await runCli('install');
     const outside = await runCli('ticket', 'list');
-    expect(outside.exitCode).toBe(1);
+    expect(outside.exitCode).toBe(4);
     expect(outside.output).toContain(
       'An initialised project. `.aeos/project.json` is found from the working directory upward.',
     );

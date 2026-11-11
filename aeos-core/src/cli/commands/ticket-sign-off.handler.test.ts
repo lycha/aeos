@@ -62,8 +62,8 @@ describe('the ticket sign-off handler', () => {
     process.exitCode = savedExitCode;
   });
 
-  it('passes the ticket id and project info to the use case', () => {
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
+  it('passes the ticket id and project info to the use case', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
     expect(useCase.execute).toHaveBeenCalledWith({
       projectId: 'proj-1',
       projectPath: '/test',
@@ -72,38 +72,38 @@ describe('the ticket sign-off handler', () => {
     });
   });
 
-  it('prints a success message when manual sign-off succeeds', () => {
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
+  it('prints a success message when manual sign-off succeeds', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
     expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 signed off (previous state: FAILED)');
   });
 
-  it('shows use case errors and sets exit code 1', () => {
+  it('shows use case errors and sets exit code 1', async () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       status: 'error',
       ticketId: 'AEOS-1',
       error: 'Ticket AEOS-1 is already SIGNED_OFF',
     });
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
     expect(consoleErrorSpy).toHaveBeenCalledWith('Error: Ticket AEOS-1 is already SIGNED_OFF');
     expect(process.exitCode).toBe(1);
   });
 
-  it('shows an error when not inside an AEOS project', () => {
+  it('shows an error when not inside an AEOS project', async () => {
     (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('Run `aeos project init` in the project root.'),
     );
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(4);
   });
 
-  it('is refused without --reason, and the use case is not run', () => {
+  it('is refused without --reason, and the use case is not run', async () => {
     // Commander refuses a missing required option before the action runs.
     program.configureOutput({ writeErr: () => {} });
 
-    expect(() => program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1'])).toThrow(
-      "required option '--reason <text>' not specified",
-    );
+    await expect(
+      program.parseAsync(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1']),
+    ).rejects.toThrow("required option '--reason <text>' not specified");
     expect(useCase.execute).not.toHaveBeenCalled();
   });
 });

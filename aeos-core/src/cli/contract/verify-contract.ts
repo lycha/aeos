@@ -2,8 +2,9 @@
 //
 // Compared: which commands exist, each summary, arguments, options and flags
 // (flag text, mandatory-ness, description), and the AEOS_* variables read.
-// Not compared, until I1-M4-004b/c make them real: `requires`, `responses`,
-// `prompt` and the constraints inside parameter schemas.
+// `requires` and the constraints inside parameter schemas are generated from
+// the contract. `responses` are held to it by `contract-output.fixture.ts`,
+// in tests, because the JSON Schema validator is a dev dependency.
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';

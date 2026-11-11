@@ -9,8 +9,9 @@ import { buildProgram } from './index.js';
 import { FIXTURE_CONTRACT } from './contract/contract.fixture.js';
 import type { Handlers } from './generated/commands.gen.js';
 import { loadContract, packageRoot } from './contract/load-contract.js';
+import { done } from './result.js';
 
-const GENERATED = ['commands', 'types', 'resources', 'environment'].map(
+const GENERATED = ['commands', 'types', 'resources', 'environment', 'exit-codes'].map(
   (name) => `src/cli/generated/${name}.gen.ts`,
 );
 const DOCS = ['README.md', 'skills/aeos/SKILL.md'];
@@ -67,6 +68,29 @@ const SHAPES = `${FIXTURE_CONTRACT}
     responses:
       "0": { description: Done, data: { type: object } }
 `.replace('  gh: {', '  git: { description: A git repository, fix: Run git init }\n  gh: {');
+
+/** The fixture contract with named schemas, and a response that uses them. */
+const TYPED = FIXTURE_CONTRACT.replace(
+  '    Envelope: { type: object }',
+  `    Envelope: { type: object }
+    Kind: { enum: [EPIC, TASK] }
+    Usd: { type: [number, "null"], minimum: 0, description: US dollars }
+    Moved:
+      type: object
+      additionalProperties: false
+      required: [id, kind, tags, by, next, fixed]
+      properties:
+        id: { type: string, pattern: "^[A-Z]+-[0-9]+$" }
+        kind: { $ref: "#/components/schemas/Kind" }
+        costUsd: { $ref: "#/components/schemas/Usd" }
+        tags: { type: array, items: { type: string } }
+        by: { type: object, additionalProperties: { $ref: "#/components/schemas/Usd" } }
+        next: { anyOf: [{ $ref: "#/components/schemas/Kind" }, { type: "null" }] }
+        fixed: { const: true }`,
+).replace(
+  '"0": { description: Moved, data: { type: object } }',
+  '"0": { description: Moved, data: { $ref: "#/components/schemas/Moved" } }',
+);
 
 describe('scripts/generate-cli.mjs', () => {
   it('writes byte-identical output when run twice', () => {
@@ -175,6 +199,61 @@ describe('scripts/generate-cli.mjs', () => {
     expect(run.status).not.toBe(0);
     expect(run.output).toMatch(/costs.*no longer.*proposed/);
   });
+
+  it('adds a global parameter named as landed to every command', () => {
+    const out = tempDir();
+    const file = path.join(out, 'contract.yaml');
+    fs.writeFileSync(file, FIXTURE_CONTRACT);
+    expect(generate('--contract', file, '--landed', '--json', '--out', out).status).toBe(0);
+
+    expect(read(out, GENERATED[0])).toContain(".option('--json', 'JSON output')");
+    expect(read(out, GENERATED[1])).toContain(
+      'export interface TicketMoveOptions {\n  reason: string;\n  json?: boolean;\n}',
+    );
+  });
+
+  it('writes the exit-code vocabulary and the contract version', () => {
+    const codes = read(generateFrom(FIXTURE_CONTRACT), GENERATED[4]);
+
+    expect(codes).toContain('export const CONTRACT_VERSION = 0;');
+    expect(codes).toContain('  success: 0,\n  failure: 1,\n  usage: 2,\n  missing_resource: 4,');
+    expect(codes).toContain('export type ExitCode = (typeof EXIT)[keyof typeof EXIT];');
+  });
+
+  it('types each response data and each component schema by name', () => {
+    const types = read(generateFrom(TYPED), GENERATED[1]);
+
+    expect(types).toContain("export type Kind = 'EPIC' | 'TASK';");
+    expect(types).toContain('export type Usd = number | null;');
+    expect(types).toContain(
+      'export type Moved = { id: string; kind: Kind; costUsd?: Usd; tags: Array<string>; by: Record<string, Usd>; next: Kind | null; fixed: true };',
+    );
+    expect(types).toContain('export type TicketMoveData = Moved;');
+    expect(types).toContain('export type Envelope = Record<string, unknown>;');
+  });
+
+  it('stops on a schema keyword that describes shape and that it does not support', () => {
+    const out = tempDir();
+    const file = path.join(out, 'contract.yaml');
+    fs.writeFileSync(file, TYPED.replace('fixed: { const: true }', 'fixed: { oneOf: [] }'));
+
+    const run = generate('--contract', file, '--out', out);
+
+    expect(run.status).not.toBe(0);
+    expect(run.output).toMatch(/Moved.*oneOf/);
+  });
+
+  it('compiles the constraints of a parameter schema to checks made before the handler', () => {
+    const commands = read(generateFrom(SHAPES), GENERATED[0]);
+
+    expect(commands).toContain(
+      "['--executor', options.executor, { type: 'string', enum: ['claude-cli', 'stub'] }],",
+    );
+    expect(commands).toContain("['--budget', options.budget, { type: 'number' }],");
+    expect(commands).toContain("['--max-steps', options.maxSteps, { type: 'integer' }],");
+    // A plain string has nothing to check.
+    expect(commands).not.toContain("['--body-file'");
+  });
 });
 
 /** Every command the built CLI runs, by its path as typed. */
@@ -242,9 +321,43 @@ describe('the built CLI', () => {
       context.require('project');
       // @ts-expect-error `ticket list` declares project and state_db, not git_repo.
       context.require('git_repo');
+      return done({ tickets: [] }, '');
     };
 
     expect(handler).toBeTypeOf('function');
+  });
+
+  it('types a handler to the data its command declares', () => {
+    const ready: Handlers['ticketReady'] = async ({ id }) =>
+      done({ ticketId: id, subState: 'READY' }, '');
+    const wrong: Handlers['ticketReady'] = async ({ id }) =>
+      // @ts-expect-error `ticket ready` returns a SubStateChange, which has no `column`.
+      done({ ticketId: id, column: 'QA' }, '');
+
+    expect([ready, wrong]).toHaveLength(2);
+  });
+
+  it('assigns process.exitCode in exactly one place', () => {
+    const assignments: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== 'e2e') walk(file);
+        } else if (
+          /\.tsx?$/.test(entry.name) &&
+          !/\.(test|smoke-test|fixture)\./.test(entry.name)
+        ) {
+          for (const line of fs.readFileSync(file, 'utf-8').split('\n')) {
+            if (/process\.exitCode\s*=[^=]/.test(line))
+              assignments.push(`${entry.name}: ${line.trim()}`);
+          }
+        }
+      }
+    };
+    walk(path.join(import.meta.dirname, '..'));
+
+    expect(assignments).toEqual(['render.ts: process.exitCode = code;']);
   });
 
   it('registers no command by hand: src/cli/commands/ holds handlers only', () => {

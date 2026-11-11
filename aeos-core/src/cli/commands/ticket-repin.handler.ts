@@ -1,30 +1,21 @@
 // CLI command — aeos ticket repin
 
 import type { Handlers } from '../generated/commands.gen.js';
+import { done, failed } from '../result.js';
 
-export const ticketRepin: Handlers['ticketRepin'] = async ({ id: ticketId }, options, context) => {
-  try {
-    const { projectPath } = context;
-    const project = context.container.projectRepo.read(projectPath);
-    const result = context.container.ticketRepin.execute({
-      projectId: project.id,
-      projectPath,
-      ticketId,
-    });
-    if (!result.ok) {
-      // eslint-disable-next-line no-console
-      console.error(`Error: ${result.error}`);
-      process.exitCode = 1;
-      return;
-    }
-    // eslint-disable-next-line no-console
-    console.log(
-      `✓ ${result.epicId} repinned: ${result.fromCommit.slice(0, 7)} → ${result.toCommit.slice(0, 7)} (${result.gateRecordId})`,
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    // eslint-disable-next-line no-console
-    console.error(`Error: ${message}`);
-    process.exitCode = 1;
-  }
+export const ticketRepin: Handlers['ticketRepin'] = async ({ id: ticketId }, _options, context) => {
+  const { projectPath } = context;
+  const project = context.container.projectRepo.read(projectPath);
+  const result = context.container.ticketRepin.execute({
+    projectId: project.id,
+    projectPath,
+    ticketId,
+  });
+  if (!result.ok) return failed(result.error);
+
+  const { fromCommit, toCommit, gateRecordId } = result;
+  return done(
+    { ticketId: result.ticketId, fromCommit, toCommit, gateRecordId },
+    `✓ ${result.epicId} repinned: ${fromCommit.slice(0, 7)} → ${toCommit.slice(0, 7)} (${gateRecordId})`,
+  );
 };

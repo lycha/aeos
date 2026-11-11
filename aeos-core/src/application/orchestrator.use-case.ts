@@ -313,6 +313,10 @@ export class OrchestratorUseCase implements OrchestratorPort {
     return this.stateRepo.findByProject(projectId);
   }
 
+  spentUsd(projectId: string, epicId: string): number {
+    return this.spendFor(projectId, epicId);
+  }
+
   // ── Internals ──────────────────────────────────────────────────────
 
   private async perform(

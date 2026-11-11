@@ -142,13 +142,14 @@ export class TicketApproveUseCase implements TicketApprovePort {
       if (error) return { status: 'error', ticketId, error };
     }
 
+    let gateRecordId: string | undefined;
     if (byPerson) {
-      this.gateRecorder.record(projectPath, ticket, {
+      gateRecordId = this.gateRecorder.record(projectPath, ticket, {
         gate: role === 'spec-review' ? 'spec' : 'column-approval',
         verdict: 'approved',
         fromColumn: currentColumn,
         toColumn: nextColumn,
-      });
+      }).id;
     }
 
     const transitionResult = this.stateMachine.transition(projectId, ticketId, nextColumn);
@@ -174,7 +175,14 @@ export class TicketApproveUseCase implements TicketApprovePort {
       subState: SubState.READY,
     });
 
-    return { status: 'advanced', ticketId, fromColumn: currentColumn, toColumn: nextColumn };
+    return {
+      status: 'advanced',
+      ticketId,
+      fromColumn: currentColumn,
+      toColumn: nextColumn,
+      pullRequestUrl: this.ticketRepo.findById(projectId, ticketId)?.prUrl ?? null,
+      ...(gateRecordId ? { gateRecordId } : {}),
+    };
   }
 
   /**

@@ -43,7 +43,7 @@ export class TicketSignOffUseCase implements TicketSignOffPort {
       };
     }
 
-    this.gateRecorder.record(projectPath, ticket, {
+    const gate = this.gateRecorder.record(projectPath, ticket, {
       gate: 'sign-off-override',
       verdict: 'overridden',
       reason,
@@ -66,6 +66,11 @@ export class TicketSignOffUseCase implements TicketSignOffPort {
       subState: SubState.SIGNED_OFF,
     });
 
-    return { status: 'signed_off', ticketId, previousSubState: ticket.subState };
+    return {
+      status: 'signed_off',
+      ticketId,
+      previousSubState: ticket.subState,
+      gateRecordId: gate.id,
+    };
   }
 }

@@ -1,31 +1,26 @@
 // CLI command — aeos ticket show
 
 import type { Handlers } from '../generated/commands.gen.js';
+import { done, stopped } from '../result.js';
+import { escalationOf, knownTotal, summaryOf } from '../ticket-data.js';
 import { formatCostUsd } from '../../domain/model/cost-record.js';
-import { withColumnLabels, type ColumnLabels } from '../../domain/services/column-labels.js';
+import { withColumnLabels } from '../../domain/services/column-labels.js';
 
-export const ticketShow: Handlers['ticketShow'] = async ({ id }, options, context) => {
+export const ticketShow: Handlers['ticketShow'] = async ({ id }, _options, context) => {
   // Validate ticket ID format at CLI boundary
   if (!/^[A-Za-z]+-[0-9]+$/.test(id)) {
-    // eslint-disable-next-line no-console
-    console.error(`Error: Invalid ticket ID '${id}'. Expected format: PREFIX-123 (e.g. AEOS-1).`);
-    process.exitCode = 1;
-    return;
+    return stopped(
+      'usage',
+      'INVALID_ARGUMENT',
+      `Invalid ticket ID '${id}'. Expected format: PREFIX-123 (e.g. AEOS-1).`,
+    );
   }
 
   // 1. Resolve project root
   const { projectPath } = context;
 
   const project = context.container.projectRepo.read(projectPath);
-  let labels: ColumnLabels;
-  try {
-    labels = context.container.columnLabels(projectPath);
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    process.exitCode = 1;
-    return;
-  }
+  const labels = context.container.columnLabels(projectPath);
 
   // 2. Call use case (case-insensitive via ticketId uppercasing handled in repo)
   const result = context.container.ticketShow.execute({
@@ -36,117 +31,103 @@ export const ticketShow: Handlers['ticketShow'] = async ({ id }, options, contex
 
   // 3. Handle not-found
   if (!result.ok) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `Error: Ticket '${id}' not found. Run 'aeos ticket list' to see available tickets.`,
+    return stopped(
+      'error',
+      'TICKET_NOT_FOUND',
+      `Ticket '${id}' not found. Run 'aeos ticket list' to see available tickets.`,
     );
-    process.exitCode = 1;
-    return;
   }
 
-  // 4. Format and print structured output
+  // 4. Format the structured output
   const subState = result.ticket.subState ?? '—';
 
-  // eslint-disable-next-line no-console
-  console.log(`Ticket: ${result.ticket.id}`);
-  // eslint-disable-next-line no-console
-  console.log(`Title:  ${result.ticket.title}`);
-  // eslint-disable-next-line no-console
-  console.log(`Kind:   ${result.ticket.kind}`);
+  const out = [
+    `Ticket: ${result.ticket.id}`,
+    `Title:  ${result.ticket.title}`,
+    `Kind:   ${result.ticket.kind}`,
+  ];
   if (result.parent) {
-    // eslint-disable-next-line no-console
-    console.log(`Parent: ${result.parent.id} — ${result.parent.title}`);
+    out.push(`Parent: ${result.parent.id} — ${result.parent.title}`);
   }
   // The one place the identifier is shown, so a person can always find it.
-  // eslint-disable-next-line no-console
-  console.log(`Column: ${labels[result.ticket.column]} (${result.ticket.column})`);
-  // eslint-disable-next-line no-console
-  console.log(`State:  ${subState}`);
+  out.push(`Column: ${labels[result.ticket.column]} (${result.ticket.column})`);
+  out.push(`State:  ${subState}`);
   if (result.specPin) {
-    // eslint-disable-next-line no-console
-    console.log(`Spec:   ${result.specPin.repo}@${result.specPin.commit} (${result.specPin.path})`);
+    out.push(`Spec:   ${result.specPin.repo}@${result.specPin.commit} (${result.specPin.path})`);
     if (result.specMoved) {
-      // eslint-disable-next-line no-console
-      console.log('        Warning: spec has moved since this epic was pinned');
+      out.push('        Warning: spec has moved since this epic was pinned');
     }
   }
   if (result.ticket.prUrl) {
-    // eslint-disable-next-line no-console
-    console.log(`PR:     ${result.ticket.prUrl}`);
+    out.push(`PR:     ${result.ticket.prUrl}`);
   }
 
   // The whole point of ESCALATED/BLOCKED is "a human must look" — so tell the
   // human why, right here, instead of making them open the review artifact.
   const escalation = result.ticket.escalation;
   if (escalation) {
-    // eslint-disable-next-line no-console
-    console.log(`Reason: ${escalation.reason} — ${escalation.message}`);
+    out.push(`Reason: ${escalation.reason} — ${escalation.message}`);
     if (escalation.artifactPath) {
-      // eslint-disable-next-line no-console
-      console.log(`        See: ${escalation.artifactPath}`);
+      out.push(`        See: ${escalation.artifactPath}`);
     }
     // Point the operator at the file-based resolve flow.
     if (subState === 'ESCALATED') {
-      // eslint-disable-next-line no-console
-      console.log(
+      out.push(
         `        Respond in ${result.ticket.id}-escalation.md, then: aeos ticket resolve ${result.ticket.id}`,
       );
     } else if (subState === 'BLOCKED') {
-      // eslint-disable-next-line no-console
-      console.log(
+      out.push(
         `        Answer ${result.ticket.id}-questions.md, then: aeos ticket answer ${result.ticket.id}`,
       );
     }
   }
 
   if (result.children.length > 0) {
-    const done = result.children.filter((child) => child.column === 'DONE').length;
-    // eslint-disable-next-line no-console
-    console.log('');
-    // eslint-disable-next-line no-console
-    console.log(`Tasks (${done}/${result.children.length} done):`);
+    const finished = result.children.filter((child) => child.column === 'DONE').length;
+    out.push('', `Tasks (${finished}/${result.children.length} done):`);
     for (const child of result.children) {
       const mark = child.column === 'DONE' ? '✓' : ' ';
-      // eslint-disable-next-line no-console
-      console.log(
+      out.push(
         `  ${mark} ${child.id.padEnd(10)} ${labels[child.column].padEnd(16)} ${child.subState ?? '—'}  ${child.title}`,
       );
     }
   }
 
   if (result.artifacts.length > 0) {
-    // eslint-disable-next-line no-console
-    console.log('');
-    // eslint-disable-next-line no-console
-    console.log('Artifacts:');
+    out.push('', 'Artifacts:');
     for (const artifact of result.artifacts) {
-      // eslint-disable-next-line no-console
-      console.log(`  • ${artifact}`);
+      out.push(`  • ${artifact}`);
     }
   }
 
   if (result.executions.length > 0) {
-    // eslint-disable-next-line no-console
-    console.log('');
-    // eslint-disable-next-line no-console
-    console.log('Executions:');
+    out.push('', 'Executions:');
     for (const execution of result.executions) {
       const modelInfo = execution.model === 'unknown' ? '(unknown)' : execution.model;
-      // eslint-disable-next-line no-console
-      console.log(
+      out.push(
         `  • ${withColumnLabels(execution.column, labels)} (${execution.agent}): ${execution.executor} / ${modelInfo} — ${formatCostUsd(execution.costUsd)}`,
       );
     }
   }
 
   if (result.runs.length > 0) {
-    // eslint-disable-next-line no-console
-    console.log('');
-    // eslint-disable-next-line no-console
-    console.log('Runs:');
+    out.push('', 'Runs:');
     for (const runId of result.runs) {
-      // eslint-disable-next-line no-console
-      console.log(`  • ${runId}`);
+      out.push(`  • ${runId}`);
     }
   }
+
+  return done(
+    {
+      ticket: {
+        ...summaryOf(result.ticket, labels),
+        escalation: escalationOf(escalation),
+        specPin: result.specPin,
+        pullRequestUrl: result.ticket.prUrl ?? null,
+      },
+      artifacts: result.artifacts,
+      costUsd: knownTotal(result.executions.map((execution) => execution.costUsd)),
+    },
+    out.join('\n'),
+  );
 };

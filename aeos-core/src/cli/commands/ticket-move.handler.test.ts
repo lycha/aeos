@@ -72,8 +72,17 @@ describe('the ticket move handler', () => {
     process.exitCode = savedExitCode;
   });
 
-  it('passes an uppercased target status to the use case', () => {
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'qa', '--reason', REASON]);
+  it('passes an uppercased target status to the use case', async () => {
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'qa',
+      '--reason',
+      REASON,
+    ]);
     expect(useCase.execute).toHaveBeenCalledWith({
       projectId: 'proj-1',
       projectPath: '/test',
@@ -83,53 +92,98 @@ describe('the ticket move handler', () => {
     });
   });
 
-  it('prints a success message when the move succeeds', () => {
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA', '--reason', REASON]);
+  it('prints a success message when the move succeeds', async () => {
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'QA',
+      '--reason',
+      REASON,
+    ]);
     expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 moved: Spec review → Qa');
   });
 
-  it("hands an unknown status on as typed: the use case knows the ticket's pipeline", () => {
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'not-real', '--reason', REASON]);
+  it("hands an unknown status on as typed: the use case knows the ticket's pipeline", async () => {
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'not-real',
+      '--reason',
+      REASON,
+    ]);
     expect(useCase.execute).toHaveBeenCalledWith(
       expect.objectContaining({ targetColumn: 'not-real' }),
     );
   });
 
-  it('shows use case errors and sets exit code 1', () => {
+  it('shows use case errors and sets exit code 1', async () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       status: 'error',
       ticketId: 'AEOS-1',
       error: 'Already in QA',
     });
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA', '--reason', REASON]);
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'QA',
+      '--reason',
+      REASON,
+    ]);
     expect(consoleErrorSpy).toHaveBeenCalledWith('Error: Already in Qa');
     expect(process.exitCode).toBe(1);
   });
 
-  it('shows an error when not inside an AEOS project', () => {
+  it('shows an error when not inside an AEOS project', async () => {
     (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA', '--reason', REASON]);
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'QA',
+      '--reason',
+      REASON,
+    ]);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('Run `aeos project init` in the project root.'),
     );
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(4);
   });
 
-  it('accepts a label for the target, in any case, and passes the identifier on', () => {
-    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'shaping', '--reason', REASON]);
+  it('accepts a label for the target, in any case, and passes the identifier on', async () => {
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'shaping',
+      '--reason',
+      REASON,
+    ]);
 
     expect(useCase.execute).toHaveBeenCalledWith(
       expect.objectContaining({ targetColumn: 'TECH_SPEC' }),
     );
   });
 
-  it('is refused without --reason, and the use case is not run', () => {
+  it('is refused without --reason, and the use case is not run', async () => {
     // Commander refuses a missing required option before the action runs.
     program.configureOutput({ writeErr: () => {} });
 
-    expect(() => program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA'])).toThrow(
-      "required option '--reason <text>' not specified",
-    );
+    await expect(
+      program.parseAsync(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA']),
+    ).rejects.toThrow("required option '--reason <text>' not specified");
     expect(useCase.execute).not.toHaveBeenCalled();
   });
 });

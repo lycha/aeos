@@ -8,23 +8,29 @@ import { getDb } from '../infrastructure/persistence/database.js';
 import { aeosHome } from '../shared/config.js';
 import type { Container } from './container.js';
 import type { ResourceName } from './generated/resources.gen.js';
+import { terminalPrompt, type Prompt } from './prompt.js';
+import type { CommandResult } from './result.js';
 
 /** What a handler is given besides its arguments and options. */
 export interface CommandContext<R extends ResourceName = never> {
   readonly container: Container;
   /** The project root. For a command that requires `project`; it throws for any other. */
   readonly projectPath: string;
+  /** How the command asks a person a question, when it declares a prompt. */
+  readonly prompt: Prompt;
   /**
-   * Asks for a resource the command needs only in a stated case. False when it
-   * is not in place: the guard has said so, and the handler returns.
+   * Asks for a resource the command needs only in a stated case. Null when it
+   * is in place; otherwise the result the handler returns.
    */
-  require(resource: R): boolean;
+  require(resource: R): CommandResult<never> | null;
 }
 
 export interface Resources {
   /** Whether the resource is in place, for a command run with these options. */
   inPlace(resource: ResourceName, options: object): boolean;
-  context<R extends ResourceName>(require: (resource: R) => boolean): CommandContext<R>;
+  context<R extends ResourceName>(
+    require: (resource: R) => CommandResult<never> | null,
+  ): CommandContext<R>;
 }
 
 const EXECUTOR_BINARIES: Record<string, string> = {
@@ -45,7 +51,7 @@ function insideGitWorkTree(dir: string): boolean {
   return parent !== dir && insideGitWorkTree(parent);
 }
 
-export function createResources(container: Container): Resources {
+export function createResources(container: Container, prompt: Prompt = terminalPrompt): Resources {
   const projectRoot = (): string | null => container.projectRepo.findRoot(process.cwd());
   const checks: Record<ResourceName, (options: { executor?: string }) => boolean> = {
     aeos_home: () => fs.existsSync(aeosHome()),
@@ -79,6 +85,7 @@ export function createResources(container: Container): Resources {
         if (!root) throw new Error('No AEOS project found: this command does not require one.');
         return root;
       },
+      prompt,
       require,
     }),
   };

@@ -100,8 +100,8 @@ describe('the ticket show handler', () => {
     process.exitCode = savedExitCode;
   });
 
-  it('should display ticket details and artifacts', () => {
-    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+  it('should display ticket details and artifacts', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     expect(consoleSpy).toHaveBeenCalledWith('Ticket: AEOS-1');
     expect(consoleSpy).toHaveBeenCalledWith('Title:  Add rate limiting');
@@ -114,8 +114,8 @@ describe('the ticket show handler', () => {
     expect(consoleSpy).toHaveBeenCalledWith('  • AEOS-1-prd.md');
   });
 
-  it('shows the pull request URL once one is recorded, and no line before that', () => {
-    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+  it('shows the pull request URL once one is recorded, and no line before that', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
     expect(consoleSpy.mock.calls.flat().join('\n')).not.toContain('PR:');
 
     const shown = createMockTicketShowUseCase().execute({
@@ -127,13 +127,13 @@ describe('the ticket show handler', () => {
       ...shown,
       ticket: { ...shown.ticket, prUrl: 'https://github.com/o/r/pull/7' },
     });
-    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     expect(consoleSpy).toHaveBeenCalledWith('PR:     https://github.com/o/r/pull/7');
   });
 
-  it('shows the cost of each execution, and unknown when it is null', () => {
-    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+  it('shows the cost of each execution, and unknown when it is null', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     expect(consoleSpy).toHaveBeenCalledWith(
       '  • Spec review (worker-agent): claude-cli / claude-opus-4-6 — $0.0123',
@@ -143,7 +143,7 @@ describe('the ticket show handler', () => {
     );
   });
 
-  it('should display em-dash for null sub_state', () => {
+  it('should display em-dash for null sub_state', async () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: true,
       runs: [],
@@ -164,24 +164,24 @@ describe('the ticket show handler', () => {
       executions: [],
     });
 
-    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     expect(consoleSpy).toHaveBeenCalledWith('State:  —');
   });
 
-  it('should pass ticket ID to use case (case-insensitive)', () => {
-    program.parse(['node', 'aeos', 'ticket', 'show', 'aeos-1']);
+  it('should pass ticket ID to use case (case-insensitive)', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'aeos-1']);
 
     expect(useCase.execute).toHaveBeenCalledWith(expect.objectContaining({ ticketId: 'aeos-1' }));
   });
 
-  it('should show error when ticket is not found', () => {
+  it('should show error when ticket is not found', async () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: false,
       reason: 'NOT_FOUND',
     });
 
-    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-99']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-99']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       "Error: Ticket 'AEOS-99' not found. Run 'aeos ticket list' to see available tickets.",
@@ -189,28 +189,28 @@ describe('the ticket show handler', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('should show error for invalid ticket ID format', () => {
-    program.parse(['node', 'aeos', 'ticket', 'show', '!!!invalid']);
+  it('should show error for invalid ticket ID format', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', '!!!invalid']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       "Error: Invalid ticket ID '!!!invalid'. Expected format: PREFIX-123 (e.g. AEOS-1).",
     );
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     expect(useCase.execute).not.toHaveBeenCalled();
   });
 
-  it('should show error when not inside an AEOS project', () => {
+  it('should show error when not inside an AEOS project', async () => {
     (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
 
-    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('Run `aeos project init` in the project root.'),
     );
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(4);
   });
 
-  it('should not display artifacts section when no artifacts exist', () => {
+  it('should not display artifacts section when no artifacts exist', async () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: true,
       runs: [],
@@ -231,14 +231,14 @@ describe('the ticket show handler', () => {
       executions: [],
     });
 
-    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     const allCalls = consoleSpy.mock.calls.map((c: unknown[]) => c[0]);
     expect(allCalls).not.toContain('Artifacts:');
   });
 
-  it('should list the run ids', () => {
-    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+  it('should list the run ids', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     const allCalls = consoleSpy.mock.calls.map((c: unknown[]) => c[0]);
     expect(allCalls).toContain('Runs:');

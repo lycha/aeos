@@ -1,5 +1,7 @@
 // Driving port — TicketAnswer use case interface (unblock after preflight questions)
 
+import type { SpecPin } from '../../model/spec-pin.js';
+
 export interface TicketAnswerInput {
   projectId: string;
   projectPath: string;
@@ -12,6 +14,10 @@ export type TicketAnswerResult =
       ok: true;
       ticketId: string;
       warnings?: string[];
+      /** The decisions files the answers were promoted into, relative to the ticket directory. */
+      promoted: string[];
+      /** The ticket's spec pin: its own, or its parent epic's. */
+      specPin: SpecPin | null;
       /**
        * Ids of the decisions the answers added to the spec's decision log.
        * When present the ticket is still BLOCKED, until `ticket repin`.

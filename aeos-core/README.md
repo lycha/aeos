@@ -440,9 +440,9 @@ npm run generate:cli      # regenerate src/cli/generated/ and the command refere
 npm run verify:generated  # fail if either differs from what the contract generates
 ```
 
-Command registration is generated from the contract, not written by hand: `scripts/generate-cli.mjs` writes `src/cli/generated/` (the Commander tree, the argument and option types of every command, each command's required resources, the environment table) and the command reference under [Commands](#commands) and in `skills/aeos/SKILL.md`. Never edit generated code; it is a protected path, and CI fails when it is stale. What is hand-written is one handler per command in `src/cli/commands/` and the resource guards in `src/cli/resources.ts`. Before a handler runs, each resource its command requires is checked, and the first one missing stops the command with the contract's description and fix (exit `1` until I1-M4-004c makes it `4`). Help text is the contract's current wording; a `pending` rewording shows once the contract makes it current. An item the contract marks `proposed` is not generated, except the built ones listed as `LANDED` in the generator until the contract's markers are updated.
+Command registration is generated from the contract, not written by hand: `scripts/generate-cli.mjs` writes `src/cli/generated/` (the Commander tree, the argument and option types of every command, each command's required resources, the environment table) and the command reference under [Commands](#commands) and in `skills/aeos/SKILL.md`. Never edit generated code; it is a protected path, and CI fails when it is stale. What is hand-written is one handler per command in `src/cli/commands/` and the resource guards in `src/cli/resources.ts`. A handler prints nothing: it returns a result (exit code, `data`, error, warnings, and the text a person reads), and the generated registration writes it, as text or as the `--json` envelope (see [Output and exit codes](#output-and-exit-codes)). Before a handler runs, each parameter is checked against its schema in the contract (exit `2`), then each resource its command requires, and the first one missing stops the command with the contract's description and fix (exit `4`). The types of every command's `data` are generated from the contract's JSON Schemas, so a handler that returns another shape does not compile. Help text is the contract's current wording; a `pending` rewording shows once the contract makes it current. An item the contract marks `proposed` is not generated, except the built ones listed as `LANDED` in the generator until the contract's markers are updated.
 
-The check fails when a command, argument, option, flag, summary or description differs between the two, or when an `AEOS_*` variable is read and not declared (or declared and never read). What the contract marks `proposed` and the CLI does not have yet is listed as pending, not as an error; what it marks `proposed` or `pending` and the CLI already has is listed as landed, for a person to update the markers. It does not yet check required resources, exit codes or output shapes.
+The check fails when a command, argument, option, flag, summary or description differs between the two, or when an `AEOS_*` variable is read and not declared (or declared and never read). What the contract marks `proposed` and the CLI does not have yet is listed as pending, not as an error; what it marks `proposed` or `pending` and the CLI already has is listed as landed, for a person to update the markers. Output is checked in `npm test` rather than by this command, because the JSON Schema validator is a dev dependency: every output schema must be valid JSON Schema, and every command is run under the stub with `--json` and held to the envelope, to the exit codes its `responses` declare, and to the `data` schema of the code it exited with (`src/e2e/contract-output.e2e.test.ts`).
 
 ### Protected paths
 
@@ -499,7 +499,42 @@ Notes:
 
 ## Commands
 
-The reference below is generated from `cli-contract.yaml` (`npm run generate:cli`), so it cannot drift from the CLI. The exit codes are the contract's: until I1-M4-004c lands, every failure still exits `1` (and an interrupted orchestrator run `130`). `aeos dashboard` is in the contract and not built yet.
+The reference below is generated from `cli-contract.yaml` (`npm run generate:cli`), so it cannot drift from the CLI. `aeos dashboard` is in the contract and not built yet.
+
+### Output and exit codes
+
+Every command takes `--json`. With it, stdout carries exactly one JSON object, the contract's envelope, and nothing else; progress, warnings and questions go to stderr, and `ticket run` and `orchestrator run` draw no live view but write each run event to stderr as one JSON object per line.
+
+```json
+{
+  "ok": false,
+  "command": "ticket run",
+  "exit": 3,
+  "contractVersion": 0,
+  "data": { "ticketId": "AEOS-4", "column": "CODE_REVIEW", "subState": "ESCALATED", "attempts": 5, "artifactPath": null, "reviewPath": null, "runIds": ["RUN-…"], "costUsd": 1.42, "escalation": { "reason": "ITERATIONS_EXHAUSTED", "message": "…", "attempt": 5 } },
+  "error": { "code": "ITERATIONS_EXHAUSTED", "message": "…", "resource": null },
+  "warnings": []
+}
+```
+
+`data` has the shape the contract declares for the command and the exit code (on a non-zero code it may be `null`). `error.code` is stable: the CLI's own codes are one enum in `src/cli/error-codes.ts`, and an escalated ticket run or a halted orchestrator run reports the engine's escalation or halt reason. `error.resource` is set exactly when the exit code is `4`. `warnings` carries what did not stop the command, each with a code, such as `COST_UNKNOWN` for a run whose cost could not be read (`costUsd` is then `null`, never `0`).
+
+The exit code tells a script what happened ([vocabulary](#exit-code-vocabulary)): `0` done, `1` something broke, `2` invalid arguments or options, `3` the pipeline worked and needs a person, `4` a required resource is missing, `130` interrupted. `escalation is not failure` holds at the shell too: a ticket run that ends `ESCALATED` or `BLOCKED` exits `3`, as does an orchestrator run that halts for anything but `COMPLETE`, `FAILED` or an interrupt, a pipeline change refused while tickets are in flight, and `ticket dod-approve` without `--reason` when a criterion is failed or unverified.
+
+Parameter values are checked against the contract before anything runs (an executor name, a `--key`, a date, a budget above zero): a bad one exits `2` with `error.code` `INVALID_ARGUMENT`, naming the parameter.
+
+**Questions.** Three commands can ask one, always on stderr. When stdin is not a terminal none does: `ticket answer` and `ticket resolve` exit `2` unless `--yes` is given (at a terminal `--yes` skips the question), and `ticket dod-approve` exits `3` with `CONFIRMATION_REQUIRED`, records nothing and has no `--yes`, because the release decision is a person's.
+
+### Breaking changes
+
+For anyone scripting on "non-zero means failed, and it is always `1`":
+
+- **Exit codes mean something now.** `3` is not a failure. A wrapper that loops while the exit code is `0` should stop cleanly on `3` and treat only `1` as broken. `orchestrator run` used to exit `0` on `HUMAN_GATE` and `AWAITING_APPROVAL` and `1` on the other early halts; all of them are `3` now. `ticket run` used to exit `0` on a block and `1` on an escalation; both are `3`, and an interrupted run is `130`.
+- **Usage errors exit `2`**, including Commander's own (a missing argument, an unknown option), which used to exit `1`. An unknown `ticket list --column`, an invalid ticket id, `--body` with `--body-file` and a reason shorter than ten characters are usage errors too.
+- **A missing resource exits `4`** (no project, no `aeos install`, an unknown `costs --project`), not `1`.
+- **`ticket approve` on a ticket that is already done exits `1`** (`ALREADY_DONE`); it used to print the same line and exit `0`. Declining the confirmation of `ticket answer` or `ticket resolve` exits `1` (`CONFIRMATION_DECLINED`), not `0`.
+- **Questions are on stderr**, and so is the conformance report `ticket dod-approve` shows before asking. Without a terminal no command waits on stdin any more (see above).
+- **Two error messages are reworded**: an executor that is not one of the four, and a `--key` that is not 2–4 uppercase letters, are now reported by the generated parameter check (`--executor must be one of …, got 'x'.`). All other text output is what it was.
 
 <!-- BEGIN GENERATED CLI REFERENCE -->
 <!-- Generated from cli-contract.yaml by `npm run generate:cli`. Do not edit between the markers. -->
@@ -507,6 +542,10 @@ The reference below is generated from `cli-contract.yaml` (`npm run generate:cli
 ### `aeos install [options]`
 
 One-time global setup
+
+| Parameter | Description |
+| --- | --- |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: nothing.
 
@@ -524,6 +563,7 @@ Initialise a project in the current directory
 | --- | --- |
 | `--name <name>` | Project name (defaults to directory name) |
 | `--key <key>` | Ticket prefix key (2–4 uppercase letters) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `aeos_home`.
 
@@ -543,6 +583,7 @@ Reconcile this project's column specs, agents, and rubrics with the current temp
 | `--apply` | Write files that are missing from the project |
 | `--force` | Also overwrite drifted files (each backed up to <file>.bak). Implies --apply |
 | `--diff` | Show a line diff for each drifted file |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`.
 
@@ -567,6 +608,7 @@ Create a new ticket (an epic by default, or a task with --parent)
 | `--spec <feature>` | Back this epic with the spec at .aeos/features/<feature>. Refused unless the decisions lint is clean |
 | `--bug` | Create a standalone bug task that must show a reproducing test red, then green |
 | `--implements <ids>` | Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -584,6 +626,7 @@ List all tickets in the current project
 | Parameter | Description |
 | --- | --- |
 | `--column <column>` | Filter by pipeline column |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -601,6 +644,7 @@ Show details of a single ticket
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -618,6 +662,8 @@ Unblock a BLOCKED ticket after answering preflight questions
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--yes` | Answer yes to this command's confirmation |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -635,6 +681,8 @@ Resume an ESCALATED ticket after writing a decision in its escalation.md
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--yes` | Answer yes to this command's confirmation |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -654,6 +702,7 @@ Run the full column cycle for a ticket (preflight → executor → review → si
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--executor <type>` | Override executor type (claude-cli, auggie-cli, opencode-cli, ollama-cli) |
 | `--model <model>` | Override model identifier |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `executor`.
 
@@ -673,6 +722,7 @@ Advance a SIGNED_OFF ticket to the next pipeline column
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `git_repo`.
 
@@ -692,6 +742,7 @@ Manually set a ticket sub-state to SIGNED_OFF
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--reason <text>` (required) | Why the review is being overridden. Recorded as a gate |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -711,6 +762,7 @@ Move a ticket to any workflow status
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `<status>` | Target workflow status / column |
 | `--reason <text>` (required) | Why the normal path is being bypassed. Recorded as a gate |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -728,6 +780,7 @@ Set a ticket sub-state to READY
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -747,6 +800,7 @@ Review DoD checklist and approve a DOD_GATE ticket as DONE
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--reason <text>` | Required when any criterion is failed or unverified |
 | `--verified <ids>` | Criteria a person vouches for, comma-separated (e.g. AC-3,AC-7). Each gains a human instrument citing the gate record |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `git_repo`.
 
@@ -765,6 +819,7 @@ Move a spec-backed ticket's pin to the current spec after an amendment
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -784,6 +839,7 @@ Run an epic until it completes, needs a human, or hits its budget
 | `<epicId>` | Epic ticket ID |
 | `--budget <usd>` | USD ceiling for this epic (persisted for later runs) |
 | `--max-steps <n>` | Safety bound on scheduled actions |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `git_repo`, `executor`.
 
@@ -803,6 +859,7 @@ Stop scheduling new work for an epic (in-flight runs finish)
 | Parameter | Description |
 | --- | --- |
 | `<epicId>` | Epic ticket ID |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -820,6 +877,7 @@ Allow an epic to be scheduled again
 | Parameter | Description |
 | --- | --- |
 | `<epicId>` | Epic ticket ID |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -837,6 +895,7 @@ Remove the budget ceiling from an epic
 | Parameter | Description |
 | --- | --- |
 | `<epicId>` | Epic ticket ID |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -854,6 +913,7 @@ Show orchestrator state for one epic or all of them
 | Parameter | Description |
 | --- | --- |
 | `[epicId]` | Epic ticket ID |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -874,6 +934,7 @@ Report model spend
 | `--epic <id>` | One epic and its child tasks |
 | `--ticket <id>` | One ticket |
 | `--since <date>` | Records from this date on (YYYY-MM-DD) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `state_db`.
 

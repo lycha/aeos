@@ -1,89 +1,55 @@
 // CLI command — aeos ticket answer
 
-import * as readline from 'node:readline';
 import type { Handlers } from '../generated/commands.gen.js';
-
-function askConfirmation(question: string): Promise<boolean> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase() === 'y');
-    });
-  });
-}
+import { done, failed, stopped } from '../result.js';
 
 export const ticketAnswer: Handlers['ticketAnswer'] = async (
   { id: ticketId },
   options,
   context,
 ) => {
-  try {
-    const { projectPath } = context;
-    const successMsg = (amended?: string[]): string =>
-      amended
-        ? `Decision recorded as ${amended.join(', ')}. Update spec.md (spec-writer), commit, then run \`aeos ticket repin ${ticketId}\`.`
-        : `✓ Ticket ${ticketId} unblocked — sub-state set to READY`;
-
-    const project = context.container.projectRepo.read(projectPath);
-
-    const result = context.container.ticketAnswer.execute({
+  const { projectPath, prompt } = context;
+  const project = context.container.projectRepo.read(projectPath);
+  const run = (confirmed?: boolean) =>
+    context.container.ticketAnswer.execute({
       projectId: project.id,
       projectPath,
       ticketId,
+      ...(confirmed ? { confirmed } : {}),
     });
 
-    if (!result.ok && result.needsConfirmation) {
-      const confirmed = await askConfirmation(
-        'Warning: questions file does not appear to have been modified. Continue anyway? [y/N] ',
+  let result = run(options.yes);
+
+  if (!result.ok && result.needsConfirmation) {
+    if (!prompt.interactive) {
+      return stopped(
+        'usage',
+        'CONFIRMATION_REQUIRED',
+        'The questions file does not appear to have been modified, and stdin is not a terminal to ask at. Pass --yes to continue anyway.',
       );
-      if (!confirmed) {
-        // eslint-disable-next-line no-console
-        console.error('Aborted.');
-        return;
-      }
-      const retryResult = context.container.ticketAnswer.execute({
-        projectId: project.id,
-        projectPath,
-        ticketId,
-        confirmed: true,
-      });
-
-      if (!retryResult.ok) {
-        // eslint-disable-next-line no-console
-        console.error(`Error: ${'error' in retryResult ? retryResult.error : 'Unknown error'}`);
-        process.exitCode = 1;
-        return;
-      }
-
-      retryResult.warnings?.forEach((warning) => {
-        // eslint-disable-next-line no-console
-        console.warn(`Warning: ${warning}`);
-      });
-
-      // eslint-disable-next-line no-console
-      console.log(successMsg(retryResult.amendedDecisions));
-      return;
     }
-
-    if (!result.ok) {
-      // eslint-disable-next-line no-console
-      console.error(`Error: ${'error' in result ? result.error : 'Unknown error'}`);
-      process.exitCode = 1;
-      return;
+    const answer = await prompt.ask(
+      'Warning: questions file does not appear to have been modified. Continue anyway? [y/N] ',
+    );
+    if (answer.toLowerCase() !== 'y') {
+      return stopped('error', 'CONFIRMATION_DECLINED', 'Aborted.', { text: 'Aborted.' });
     }
-
-    result.warnings?.forEach((warning) => {
-      // eslint-disable-next-line no-console
-      console.warn(`Warning: ${warning}`);
-    });
-
-    // eslint-disable-next-line no-console
-    console.log(successMsg(result.amendedDecisions));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    // eslint-disable-next-line no-console
-    console.error(`Error: ${message}`);
-    process.exitCode = 1;
+    result = run(true);
   }
+
+  if (!result.ok) return failed('error' in result ? result.error : 'Unknown error');
+
+  const amended = result.amendedDecisions;
+  return done(
+    {
+      ticketId,
+      promoted: result.promoted,
+      amendedDecisions: amended ?? [],
+      specPin: result.specPin,
+    },
+    amended
+      ? `Decision recorded as ${amended.join(', ')}. Update spec.md (spec-writer), commit, then run \`aeos ticket repin ${ticketId}\`.`
+      : `✓ Ticket ${ticketId} unblocked — sub-state set to READY`,
+    (result.warnings ?? []).map((message) => ({ code: 'LEGACY_QUESTIONS_FILE', message })),
+  );
 };

@@ -6,10 +6,9 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { Command } from 'commander';
 import { vi } from 'vitest';
 
-import { buildProgram, createContainer } from '../cli/index.js';
+import { createContainer, runCli as runAeos } from '../cli/index.js';
 import type { Column } from '../domain/model/column.js';
 import type { SubStateOrNull } from '../domain/model/sub-state.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
@@ -47,6 +46,8 @@ export interface TempProject {
 export interface CliResult {
   /** Everything the command printed to stdout and stderr. */
   readonly output: string;
+  /** What it printed to stdout alone: under --json, one envelope. */
+  readonly stdout: string;
   readonly exitCode: number;
 }
 
@@ -180,40 +181,32 @@ export async function createEpic(title: string): Promise<string> {
   return id;
 }
 
-/** Runs `aeos <args>` in-process through Commander, capturing its output. */
+/** Runs `aeos <args>` in-process, as the entrypoint does, capturing its output. */
 export async function runCli(...args: string[]): Promise<CliResult> {
   const lines: string[] = [];
-  const capture = (...parts: unknown[]): void => {
-    lines.push(parts.join(' '));
-  };
-  const spies = [
-    vi.spyOn(console, 'log').mockImplementation(capture),
-    vi.spyOn(console, 'error').mockImplementation(capture),
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      lines.push(String(chunk));
+  const stdout: string[] = [];
+  const capture =
+    (...also: string[][]) =>
+    (...parts: unknown[]): boolean => {
+      for (const sink of [lines, ...also]) sink.push(parts.join(' ').replace(/\n$/, ''));
       return true;
-    }),
+    };
+  const spies = [
+    vi.spyOn(console, 'log').mockImplementation(capture(stdout)),
+    vi.spyOn(console, 'error').mockImplementation(capture()),
+    vi.spyOn(process.stdout, 'write').mockImplementation(capture(stdout)),
+    // Commander's own usage errors, and the run events of --json.
+    vi.spyOn(process.stderr, 'write').mockImplementation(capture()),
   ];
   try {
-    // Commander exits the process on a usage error; here every command throws instead.
-    const throwing = (command: Command): Command => {
-      command.exitOverride().configureOutput({ writeErr: () => {} });
-      command.commands.forEach(throwing);
-      return command;
-    };
-    await throwing(buildProgram()).parseAsync(['node', 'aeos', ...args]);
-  } catch (error) {
-    // As the entrypoint does with an error no command caught.
-    capture(`Error: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
+    await runAeos(['node', 'aeos', ...args], { stdout: { isTTY: false } });
   } finally {
     for (const spy of spies) spy.mockRestore();
   }
-  // Commands report failure through process.exitCode; left set, it would fail
-  // the whole test process.
+  // Left set, the exit code would fail the whole test process.
   const exitCode = Number(process.exitCode ?? 0);
   process.exitCode = undefined;
-  return { output: lines.join('\n'), exitCode };
+  return { output: lines.join('\n'), stdout: stdout.join('\n'), exitCode };
 }
 
 /** Reads a ticket's column and sub-state from the database. */

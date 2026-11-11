@@ -14,6 +14,7 @@ describe('aeos orchestrator clear-budget', () => {
   let program: Command;
   let clearBudget: ReturnType<typeof vi.fn>;
   const status = vi.fn();
+  const spentUsd = vi.fn().mockReturnValue(0);
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -22,7 +23,7 @@ describe('aeos orchestrator clear-budget', () => {
     clearBudget = vi.fn().mockReturnValue({ epicId: 'AEOS-1', budgetUsd: null });
     programWith(
       {
-        orchestrator: { clearBudget, status } as unknown as OrchestratorPort,
+        orchestrator: { clearBudget, status, spentUsd } as unknown as OrchestratorPort,
         projectRepo: {
           findRoot: vi.fn().mockReturnValue('/test'),
           read: vi.fn().mockReturnValue({ id: 'proj-1' }),
@@ -38,7 +39,7 @@ describe('aeos orchestrator clear-budget', () => {
     consoleSpy.mockRestore();
   });
 
-  it('shows a stored halt message with column labels in place of identifiers', () => {
+  it('shows a stored halt message with column labels in place of identifiers', async () => {
     status.mockReturnValue([
       {
         epicId: 'AEOS-1',
@@ -49,27 +50,32 @@ describe('aeos orchestrator clear-budget', () => {
       },
     ]);
 
-    program.parse(['node', 'aeos', 'orchestrator', 'status']);
+    await program.parseAsync(['node', 'aeos', 'orchestrator', 'status']);
 
-    expect(consoleSpy.mock.calls[0]![0]).toContain('ready to leave Shaping, but');
-    expect(consoleSpy.mock.calls[0]![0]).toContain('last halt: AWAITING_APPROVAL');
+    const printed = consoleSpy.mock.calls.map((call: unknown[]) => call[0]).join('\n');
+    expect(printed).toContain('ready to leave Shaping, but');
+    expect(printed).toContain('last halt: AWAITING_APPROVAL');
   });
 
-  it('clears the budget and prints a one-line confirmation', () => {
-    program.parse(['node', 'aeos', 'orchestrator', 'clear-budget', 'AEOS-1']);
+  it('clears the budget and prints a one-line confirmation', async () => {
+    await program.parseAsync(['node', 'aeos', 'orchestrator', 'clear-budget', 'AEOS-1']);
 
     expect(clearBudget).toHaveBeenCalledWith('proj-1', 'AEOS-1');
     expect(consoleSpy).toHaveBeenCalledTimes(1);
     expect(consoleSpy).toHaveBeenCalledWith('✓ AEOS-1 budget cleared (no ceiling)');
   });
 
-  it('lets the "no orchestrator state" error reach the CLI error handler', async () => {
+  it('reports the "no orchestrator state" error and exits 1', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     clearBudget.mockImplementation(() => {
       throw new Error('Epic AEOS-1 has no orchestrator state');
     });
 
-    await expect(
-      program.parseAsync(['node', 'aeos', 'orchestrator', 'clear-budget', 'AEOS-1']),
-    ).rejects.toThrow(/no orchestrator state/);
+    await program.parseAsync(['node', 'aeos', 'orchestrator', 'clear-budget', 'AEOS-1']);
+
+    expect(errors).toHaveBeenCalledWith('Error: Epic AEOS-1 has no orchestrator state');
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    errors.mockRestore();
   });
 });

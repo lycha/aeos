@@ -7,7 +7,7 @@ import { z } from 'zod';
 const Status = z.enum(['existing', 'proposed']);
 /** Present on anything Iteration 1 adds: `status: proposed` and the task that adds it. */
 const Lifecycle = { status: Status.optional(), task: z.string().min(1).optional() };
-/** A JSON Schema. Not validated here (I1-M4-004c). */
+/** A JSON Schema. Not validated here: `schemaProblems` (contract-output.fixture.ts) does, in tests. */
 const JsonSchema = z.record(z.string(), z.unknown());
 
 const ParameterSchema = z.strictObject({

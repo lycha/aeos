@@ -2,8 +2,9 @@
 
 import type { Handlers } from '../generated/commands.gen.js';
 import type { CommandContext } from '../resources.js';
+import { done, stopped } from '../result.js';
 import { withColumnLabels } from '../../domain/services/column-labels.js';
-import { createTicketRunDisplay } from '../ui/ticket-run-display.js';
+import { createJsonLinesDisplay, createTicketRunDisplay } from '../ui/ticket-run-display.js';
 
 /** Halt reasons that mean "finished cleanly", as opposed to "stopped early". */
 const CLEAN_HALTS = new Set(['COMPLETE', 'HUMAN_GATE', 'AWAITING_APPROVAL']);
@@ -12,23 +13,18 @@ const CLEAN_HALTS = new Set(['COMPLETE', 'HUMAN_GATE', 'AWAITING_APPROVAL']);
  * `label` puts column labels into text built with identifiers: step outcomes
  * and halt messages, which are stored with identifiers.
  */
-function resolveProject(
-  context: CommandContext,
-): { id: string; path: string; label: (text: string) => string } | null {
+function resolveProject(context: CommandContext): {
+  id: string;
+  path: string;
+  label: (text: string) => string;
+} {
   const { projectPath, container } = context;
-  try {
-    const labels = container.columnLabels(projectPath);
-    return {
-      id: container.projectRepo.read(projectPath).id,
-      path: projectPath,
-      label: (text) => withColumnLabels(text, labels),
-    };
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    process.exitCode = 1;
-    return null;
-  }
+  const labels = container.columnLabels(projectPath);
+  return {
+    id: container.projectRepo.read(projectPath).id,
+    path: projectPath,
+    label: (text) => withColumnLabels(text, labels),
+  };
 }
 
 export const orchestratorRun: Handlers['orchestratorRun'] = async (
@@ -37,13 +33,14 @@ export const orchestratorRun: Handlers['orchestratorRun'] = async (
   context,
 ) => {
   const project = resolveProject(context);
-  if (!project) return;
 
   // Reuse the ticket-run live view: each ticket the orchestrator drives
   // renders the same pane as a standalone `aeos ticket run`. Started lazily
   // on the first ticket-run event, so an immediate halt (no runs) prints
   // its summary normally rather than flashing a blank screen.
-  const display = createTicketRunDisplay(process.stdout, project.label);
+  const display = options.json
+    ? createJsonLinesDisplay()
+    : createTicketRunDisplay(process.stdout, project.label);
   let displayStarted = false;
 
   // Capture the instance so SIGINT interrupts the same run it started.
@@ -54,8 +51,9 @@ export const orchestratorRun: Handlers['orchestratorRun'] = async (
   };
   process.once('SIGINT', interruptHandler);
 
+  let result;
   try {
-    const result = await orchestrator.run(
+    result = await orchestrator.run(
       project.id,
       project.path,
       epicId,
@@ -71,48 +69,44 @@ export const orchestratorRun: Handlers['orchestratorRun'] = async (
           },
         },
         onStep(step) {
-          // In the live pane, interleaving plain lines would corrupt the
-          // alt-screen; the per-ticket view and the end-of-run summary carry
-          // it instead. Without a TTY, print each step as it happens.
-          if (!display.live) {
+          if (options.json) {
+            process.stderr.write(`${JSON.stringify({ type: 'orchestrator.step', ...step })}\n`);
+          } else if (!display.live) {
+            // In the live pane, interleaving plain lines would corrupt the
+            // alt-screen; the per-ticket view and the end-of-run summary carry
+            // it instead. Without a TTY, print each step as it happens.
             // eslint-disable-next-line no-console
             console.log(project.label(`  ${step.ticketId} [${step.column}]: ${step.outcome}`));
           }
         },
       },
     );
-
+  } finally {
     process.removeListener('SIGINT', interruptHandler);
     if (displayStarted) display.stop();
-
-    const summary: string[] = [];
-    // The live pane suppressed inline step lines — replay them after the
-    // screen is torn down so the run is legible in scroll-back.
-    if (display.live) {
-      for (const step of result.steps) {
-        summary.push(project.label(`  ${step.ticketId} [${step.column}]: ${step.outcome}`));
-      }
-    }
-    summary.push(
-      '',
-      `${CLEAN_HALTS.has(result.haltReason) ? '✓' : '⏸'} ${result.epicId} — ${result.haltReason}`,
-      `  ${project.label(result.message)}`,
-      `  ${result.steps.length} action(s), $${result.spentUsd.toFixed(2)} spent`,
-    );
-    // eslint-disable-next-line no-console
-    console.log(summary.join('\n'));
-
-    if (!CLEAN_HALTS.has(result.haltReason)) {
-      // 130 is the conventional "terminated by Ctrl+C" code.
-      process.exitCode = result.haltReason === 'INTERRUPTED' ? 130 : 1;
-    }
-  } catch (err) {
-    process.removeListener('SIGINT', interruptHandler);
-    if (displayStarted) display.stop();
-    // eslint-disable-next-line no-console
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    process.exitCode = 1;
   }
+
+  const summary: string[] = [];
+  // The live pane suppressed inline step lines — replay them after the
+  // screen is torn down so the run is legible in scroll-back.
+  if (display.live) {
+    for (const step of result.steps) {
+      summary.push(project.label(`  ${step.ticketId} [${step.column}]: ${step.outcome}`));
+    }
+  }
+  const { haltReason, message, spentUsd } = result;
+  summary.push(
+    '',
+    `${CLEAN_HALTS.has(haltReason) ? '✓' : '⏸'} ${result.epicId} — ${haltReason}`,
+    `  ${project.label(message)}`,
+    `  ${result.steps.length} action(s), $${spentUsd.toFixed(2)} spent`,
+  );
+  const text = summary.join('\n');
+  const data = { epicId: result.epicId, haltReason, message, steps: result.steps.length, spentUsd };
+
+  return haltReason === 'COMPLETE'
+    ? done(data, text)
+    : stopped({ haltReason }, haltReason, message, { data, text, stream: 'stdout' });
 };
 
 export const orchestratorPause: Handlers['orchestratorPause'] = async (
@@ -121,10 +115,8 @@ export const orchestratorPause: Handlers['orchestratorPause'] = async (
   context,
 ) => {
   const project = resolveProject(context);
-  if (!project) return;
   const state = context.container.orchestrator.pause(project.id, epicId);
-  // eslint-disable-next-line no-console
-  console.log(`⏸ ${state.epicId} paused`);
+  return done({ epicId: state.epicId, paused: true }, `⏸ ${state.epicId} paused`);
 };
 
 export const orchestratorResume: Handlers['orchestratorResume'] = async (
@@ -133,10 +125,8 @@ export const orchestratorResume: Handlers['orchestratorResume'] = async (
   context,
 ) => {
   const project = resolveProject(context);
-  if (!project) return;
   const state = context.container.orchestrator.resume(project.id, epicId);
-  // eslint-disable-next-line no-console
-  console.log(`▶ ${state.epicId} resumed`);
+  return done({ epicId: state.epicId, paused: false }, `▶ ${state.epicId} resumed`);
 };
 
 export const orchestratorClearBudget: Handlers['orchestratorClearBudget'] = async (
@@ -145,10 +135,11 @@ export const orchestratorClearBudget: Handlers['orchestratorClearBudget'] = asyn
   context,
 ) => {
   const project = resolveProject(context);
-  if (!project) return;
   const state = context.container.orchestrator.clearBudget(project.id, epicId);
-  // eslint-disable-next-line no-console
-  console.log(`✓ ${state.epicId} budget cleared (no ceiling)`);
+  return done(
+    { epicId: state.epicId, budgetUsd: null },
+    `✓ ${state.epicId} budget cleared (no ceiling)`,
+  );
 };
 
 export const orchestratorStatus: Handlers['orchestratorStatus'] = async (
@@ -157,26 +148,28 @@ export const orchestratorStatus: Handlers['orchestratorStatus'] = async (
   context,
 ) => {
   const project = resolveProject(context);
-  if (!project) return;
+  const { orchestrator } = context.container;
 
-  const states = context.container.orchestrator.status(project.id, epicId);
+  const states = orchestrator.status(project.id, epicId);
+  const epics = states.map((state) => ({
+    epicId: state.epicId,
+    status: state.status,
+    haltReason: state.haltReason,
+    paused: state.status === 'PAUSED',
+    budgetUsd: state.budgetUsd,
+    spentUsd: orchestrator.spentUsd(project.id, state.epicId),
+  }));
   if (states.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log('No epics have been driven by the orchestrator yet.');
-    return;
+    return done({ epics }, 'No epics have been driven by the orchestrator yet.');
   }
 
-  for (const state of states) {
+  const text = states.flatMap((state) => {
     const budget = state.budgetUsd === null ? 'no ceiling' : `$${state.budgetUsd.toFixed(2)}`;
-    // eslint-disable-next-line no-console
-    console.log(
-      [
-        `${state.epicId}  ${state.status}  (budget: ${budget})`,
-        state.haltReason ? `  last halt: ${state.haltReason}` : null,
-        state.message ? `  ${project.label(state.message)}` : null,
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    );
-  }
+    return [
+      `${state.epicId}  ${state.status}  (budget: ${budget})`,
+      ...(state.haltReason ? [`  last halt: ${state.haltReason}`] : []),
+      ...(state.message ? [`  ${project.label(state.message)}`] : []),
+    ];
+  });
+  return done({ epics }, text.join('\n'));
 };

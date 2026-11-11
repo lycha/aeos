@@ -1,12 +1,12 @@
 import { render } from 'ink';
-import type { Command } from 'commander';
 
 import type { Container } from '../container.js';
 import { AppShell } from './App.js';
+import type { BuildProgram } from './shell-command-runner.js';
 
 interface RunInkAppOptions {
   readonly container: Container;
-  readonly buildProgram: () => Command;
+  readonly buildProgram: BuildProgram;
   readonly cwd?: string;
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;

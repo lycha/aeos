@@ -32,5 +32,6 @@ process.stdout.write(
   failures === 0
     ? '\nThe CLI matches cli-contract.yaml.\n'
     : `\n${failures} problem(s): the CLI and cli-contract.yaml disagree.\n`,
+  // Once it is written: exiting before the pipe drains would cut the report short.
+  () => process.exit(failures === 0 ? 0 : 1),
 );
-process.exitCode = failures === 0 ? 0 : 1;

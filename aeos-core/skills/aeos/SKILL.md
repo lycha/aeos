@@ -92,10 +92,43 @@ from inside a column — those drive the pipeline and would re-enter it. Your jo
 is to produce this column's output; advancing is the operator's or
 orchestrator's concern.
 
+## Reading a command's result
+
+Add `--json` to any command to get one JSON object on stdout and nothing else
+there (progress and questions go to stderr):
+
+```json
+{ "ok": true, "command": "ticket create", "exit": 0, "contractVersion": 0,
+  "data": { "ticketId": "AEOS-7", "kind": "TASK", "parentId": "AEOS-1", "alreadyExisted": false },
+  "error": null, "warnings": [] }
+```
+
+Read the result from `data` instead of parsing the text. The exit code says what
+happened, and non-zero does not always mean something broke:
+
+- `0` the command did what was asked. `data` has the shape the reference below
+  declares.
+- `1` something broke. `error.code` is stable (`TICKET_NOT_FOUND`,
+  `NOT_SIGNED_OFF`, …) and `error.message` says what; fix that and retry.
+- `2` your arguments were wrong (`error.code` `INVALID_ARGUMENT` or `USAGE`, the
+  message names the parameter). Nothing was attempted; correct the call.
+- `3` the pipeline worked and stopped for a person: a ticket escalated or is
+  blocked, an approval or a gate is waiting, a budget is spent. **Do not retry
+  and do not work around it.** Report `error.message` and stop.
+- `4` a resource is missing; `error.resource` names it and the message gives the
+  fix. Nothing was attempted.
+- `130` the run was interrupted.
+
+A command never asks you a question: without a terminal, `ticket answer` and
+`ticket resolve` need `--yes` to skip their confirmation, and
+`ticket dod-approve` exits `3`, because the release decision is a person's.
+Entries in `warnings` did not stop the command (for example a cost that could
+not be read).
+
 ## Command reference
 
-Generated from the CLI contract. The exit codes are the contract's: for now every
-failure still exits `1`.
+Generated from the CLI contract; the exit codes each command lists are the ones
+it uses.
 
 <!-- BEGIN GENERATED CLI REFERENCE -->
 <!-- Generated from cli-contract.yaml by `npm run generate:cli`. Do not edit between the markers. -->
@@ -103,6 +136,10 @@ failure still exits `1`.
 ### `aeos install [options]`
 
 One-time global setup
+
+| Parameter | Description |
+| --- | --- |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: nothing.
 
@@ -120,6 +157,7 @@ Initialise a project in the current directory
 | --- | --- |
 | `--name <name>` | Project name (defaults to directory name) |
 | `--key <key>` | Ticket prefix key (2–4 uppercase letters) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `aeos_home`.
 
@@ -139,6 +177,7 @@ Reconcile this project's column specs, agents, and rubrics with the current temp
 | `--apply` | Write files that are missing from the project |
 | `--force` | Also overwrite drifted files (each backed up to <file>.bak). Implies --apply |
 | `--diff` | Show a line diff for each drifted file |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`.
 
@@ -163,6 +202,7 @@ Create a new ticket (an epic by default, or a task with --parent)
 | `--spec <feature>` | Back this epic with the spec at .aeos/features/<feature>. Refused unless the decisions lint is clean |
 | `--bug` | Create a standalone bug task that must show a reproducing test red, then green |
 | `--implements <ids>` | Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -180,6 +220,7 @@ List all tickets in the current project
 | Parameter | Description |
 | --- | --- |
 | `--column <column>` | Filter by pipeline column |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -197,6 +238,7 @@ Show details of a single ticket
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -214,6 +256,8 @@ Unblock a BLOCKED ticket after answering preflight questions
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--yes` | Answer yes to this command's confirmation |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -231,6 +275,8 @@ Resume an ESCALATED ticket after writing a decision in its escalation.md
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--yes` | Answer yes to this command's confirmation |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -250,6 +296,7 @@ Run the full column cycle for a ticket (preflight → executor → review → si
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--executor <type>` | Override executor type (claude-cli, auggie-cli, opencode-cli, ollama-cli) |
 | `--model <model>` | Override model identifier |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `executor`.
 
@@ -269,6 +316,7 @@ Advance a SIGNED_OFF ticket to the next pipeline column
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `git_repo`.
 
@@ -288,6 +336,7 @@ Manually set a ticket sub-state to SIGNED_OFF
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--reason <text>` (required) | Why the review is being overridden. Recorded as a gate |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -307,6 +356,7 @@ Move a ticket to any workflow status
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `<status>` | Target workflow status / column |
 | `--reason <text>` (required) | Why the normal path is being bypassed. Recorded as a gate |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -324,6 +374,7 @@ Set a ticket sub-state to READY
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -343,6 +394,7 @@ Review DoD checklist and approve a DOD_GATE ticket as DONE
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--reason <text>` | Required when any criterion is failed or unverified |
 | `--verified <ids>` | Criteria a person vouches for, comma-separated (e.g. AC-3,AC-7). Each gains a human instrument citing the gate record |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `git_repo`.
 
@@ -361,6 +413,7 @@ Move a spec-backed ticket's pin to the current spec after an amendment
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -380,6 +433,7 @@ Run an epic until it completes, needs a human, or hits its budget
 | `<epicId>` | Epic ticket ID |
 | `--budget <usd>` | USD ceiling for this epic (persisted for later runs) |
 | `--max-steps <n>` | Safety bound on scheduled actions |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `git_repo`, `executor`.
 
@@ -399,6 +453,7 @@ Stop scheduling new work for an epic (in-flight runs finish)
 | Parameter | Description |
 | --- | --- |
 | `<epicId>` | Epic ticket ID |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -416,6 +471,7 @@ Allow an epic to be scheduled again
 | Parameter | Description |
 | --- | --- |
 | `<epicId>` | Epic ticket ID |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -433,6 +489,7 @@ Remove the budget ceiling from an epic
 | Parameter | Description |
 | --- | --- |
 | `<epicId>` | Epic ticket ID |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -450,6 +507,7 @@ Show orchestrator state for one epic or all of them
 | Parameter | Description |
 | --- | --- |
 | `[epicId]` | Epic ticket ID |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
 
@@ -470,6 +528,7 @@ Report model spend
 | `--epic <id>` | One epic and its child tasks |
 | `--ticket <id>` | One ticket |
 | `--since <date>` | Records from this date on (YYYY-MM-DD) |
+| `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `state_db`.
 

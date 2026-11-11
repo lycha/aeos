@@ -33,7 +33,8 @@ describe('verifyContract', () => {
     expect(report.mismatches).toEqual([]);
     // What Iteration 1 has not built yet is pending, not wrong.
     expect(report.pending).toContain('dashboard: command (I1-M5-001)');
-    expect(report.pending).toContain('ticket run --json: flag (I1-M4-004c)');
+    expect(report.landed).toContain('ticket run --json: flag (I1-M4-004c)');
+    expect(report.landed).toContain('ticket answer --yes: flag (I1-M4-004c)');
   });
 
   it('passes a CLI that matches, and lists what is proposed and absent as pending', () => {

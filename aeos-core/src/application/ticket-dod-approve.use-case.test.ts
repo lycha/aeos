@@ -85,7 +85,7 @@ function createMockStateMachine() {
 
 function createMockCostRepo(): CostRepository {
   return {
-    record: vi.fn(),
+    record: vi.fn(() => ({ id: 'GATE-1' })),
     findByProject: vi.fn().mockReturnValue([]),
     findByTicket: vi.fn().mockReturnValue([]),
     findByFilters: vi.fn().mockReturnValue([]),
@@ -99,7 +99,7 @@ const callOrder = (mock: unknown): number =>
   (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
 beforeEach(() => {
   gateRecorder.decidedBy.mockReset();
-  gateRecorder.record.mockReset();
+  gateRecorder.record.mockReset().mockReturnValue({ id: 'GATE-1' });
 });
 
 const PROJECT_ID = 'startup-a';
@@ -368,7 +368,11 @@ describe('TicketDodApproveUseCase', () => {
 
       const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, false, REASON, shown);
 
-      expect(result).toEqual({ status: 'cancelled', ticketId: TICKET_ID });
+      expect(result).toEqual({
+        status: 'cancelled',
+        ticketId: TICKET_ID,
+        gateRecordId: 'GATE-7',
+      });
       expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, specBacked(), {
         gate: 'definition-of-done',
         verdict: 'rejected',
@@ -429,7 +433,11 @@ describe('TicketDodApproveUseCase', () => {
         'AC-3 is not demonstrated.',
       );
 
-      expect(result).toEqual({ status: 'cancelled', ticketId: TICKET_ID });
+      expect(result).toEqual({
+        status: 'cancelled',
+        ticketId: TICKET_ID,
+        gateRecordId: 'GATE-1',
+      });
       expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, dodGateTicket(), {
         gate: 'definition-of-done',
         verdict: 'rejected',
@@ -516,7 +524,11 @@ describe('TicketDodApproveUseCase', () => {
 
   it('should return cancelled when not approved', () => {
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, false);
-    expect(result).toEqual({ status: 'cancelled', ticketId: TICKET_ID });
+    expect(result).toEqual({
+      status: 'cancelled',
+      ticketId: TICKET_ID,
+      gateRecordId: 'GATE-1',
+    });
   });
 
   it('should not transition or commit when not approved', () => {
@@ -578,6 +590,7 @@ describe('TicketDodApproveUseCase', () => {
     expect(result).toEqual({
       status: 'approved',
       ticketId: TICKET_ID,
+      gateRecordId: 'GATE-1',
       totalCostUsd: 0,
     });
   });

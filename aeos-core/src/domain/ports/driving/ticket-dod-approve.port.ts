@@ -17,11 +17,11 @@ export type TicketDodApproveResult =
       status: 'approved';
       ticketId: string;
       totalCostUsd: number | null;
-      gateRecordId?: string;
+      gateRecordId: string;
       /** The decision stands, and something after it did not work. */
       warning?: string;
     }
-  | { status: 'cancelled'; ticketId: string }
+  | { status: 'cancelled'; ticketId: string; gateRecordId: string }
   | { status: 'error'; ticketId: string; error: string };
 
 export interface TicketDodApprovePort {

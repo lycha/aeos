@@ -49,7 +49,7 @@ export class TicketMoveUseCase implements TicketMovePort {
     if (currentColumn === targetColumn) {
       return { status: 'error', ticketId, error: `Already in ${currentColumn}` };
     }
-    this.gateRecorder.record(projectPath, ticket, {
+    const gate = this.gateRecorder.record(projectPath, ticket, {
       gate: 'move-override',
       verdict: 'overridden',
       fromColumn: currentColumn,
@@ -100,6 +100,12 @@ export class TicketMoveUseCase implements TicketMovePort {
       throw err;
     }
 
-    return { status: 'moved', ticketId, fromColumn: currentColumn, toColumn: targetColumn };
+    return {
+      status: 'moved',
+      ticketId,
+      fromColumn: currentColumn,
+      toColumn: targetColumn,
+      gateRecordId: gate.id,
+    };
   }
 }

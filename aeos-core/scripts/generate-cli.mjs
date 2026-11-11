@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Generates the command scaffold from cli-contract.yaml (I1-M4-004b): Commander
-// registration, argument and option types, resource lists, the environment
-// table, and the command reference in README.md and skills/aeos/SKILL.md.
+// Generates the command scaffold from cli-contract.yaml (I1-M4-004b, 004c):
+// Commander registration with its parameter checks, argument, option and
+// output types, resource lists, the environment table, the exit codes, and the
+// command reference in README.md and skills/aeos/SKILL.md.
 //
 //   node scripts/generate-cli.mjs              write the files
 //   node scripts/generate-cli.mjs --check      fail if a committed file differs
@@ -21,12 +22,15 @@ const BEGIN = '<!-- BEGIN GENERATED CLI REFERENCE -->';
 const END = '<!-- END GENERATED CLI REFERENCE -->';
 const DOCS = ['README.md', 'skills/aeos/SKILL.md'];
 
-// A proposed item is generated once the contract says `existing`. These ten are
+// A proposed item is generated once the contract says `existing`. These are
 // built and the contract still marks them proposed (`npm run verify:contract`
 // lists each as landed); the contract is its owner's to update, so until then
 // they are named here. An entry the contract no longer marks proposed stops the
-// generator: delete it.
+// generator: delete it. A bare `--name` is that parameter on every command
+// that declares it.
 const LANDED = [
+  '--json',
+  '--yes',
   'ticket create --spec',
   'ticket create --bug',
   'ticket create --implements',
@@ -62,6 +66,9 @@ function resolveRefs(node, root) {
   return resolveRefs(target, root);
 }
 
+const raw = yaml.load(
+  fs.readFileSync(flags.contract ?? path.join(ROOT, 'cli-contract.yaml'), 'utf-8'),
+);
 const document = yaml.load(
   fs.readFileSync(flags.contract ?? path.join(ROOT, 'cli-contract.yaml'), 'utf-8'),
 );
@@ -79,10 +86,10 @@ if (flags.resolved) {
 // ── What is generated: everything existing, and the proposed items that landed ─
 const landedIds = flags.landed?.split(',') ?? (flags.contract ? [] : LANDED);
 const proposed = new Set();
-const built = (id, item) => {
+const built = (item, ...ids) => {
   if (item.status !== 'proposed') return true;
-  proposed.add(id);
-  return landedIds.includes(id);
+  for (const id of ids) proposed.add(id);
+  return ids.some((id) => landedIds.includes(id));
 };
 const resources = Object.entries(contract.resources).filter(
   ([, resource]) => resource.status !== 'proposed',
@@ -90,12 +97,12 @@ const resources = Object.entries(contract.resources).filter(
 const hasGuard = (name) => resources.some(([resource]) => resource === name);
 
 const commands = Object.entries(contract.commands)
-  .filter(([commandPath, command]) => built(commandPath, command))
+  .filter(([commandPath, command]) => built(command, commandPath))
   .map(([commandPath, command]) => {
     const words = commandPath.split(' ');
     if (words.length > 2) throw new Error(`"${commandPath}": commands nest one level at most.`);
     const parameters = command.parameters.filter((parameter) =>
-      built(`${commandPath} --${parameter.name}`, parameter),
+      built(parameter, `${commandPath} --${parameter.name}`, `--${parameter.name}`),
     );
     return {
       path: commandPath,
@@ -116,11 +123,15 @@ const commands = Object.entries(contract.commands)
   });
 
 for (const id of landedIds) {
-  const named = id.includes(' --')
-    ? contract.commands[id.split(' --')[0]]?.parameters.some(
-        (parameter) => parameter.name === id.split(' --')[1],
-      )
-    : id in contract.commands;
+  const [commandPath, parameterName] = id.split(/ ?--/);
+  const named =
+    parameterName === undefined
+      ? id in contract.commands
+      : Object.entries(contract.commands).some(
+          ([candidate, command]) =>
+            (commandPath === '' || candidate === commandPath) &&
+            command.parameters.some((parameter) => parameter.name === parameterName),
+        );
   if (named && !proposed.has(id)) {
     throw new Error(
       `"${id}" is no longer marked proposed in the contract: delete it from LANDED in scripts/generate-cli.mjs.`,
@@ -154,6 +165,88 @@ function coercion(parameter) {
   return type === 'array' ? `, list(${quote(parameter.separator)})` : '';
 }
 
+// ── Output types: the JSON Schemas that describe shape, as TypeScript ─────────
+// Keywords that only constrain a value change no type; tests hold output to them.
+const VALUE_ONLY = ['description', 'pattern', 'minimum', 'exclusiveMinimum', 'format', '$schema'];
+const SHAPE = [
+  'type',
+  'enum',
+  'const',
+  'properties',
+  'required',
+  'additionalProperties',
+  'items',
+  'anyOf',
+  '$ref',
+];
+const literal = (value) => (typeof value === 'string' ? quote(value) : String(value));
+
+function tsType(schema, where) {
+  for (const key of Object.keys(schema)) {
+    // An allOf of if/then/else alone constrains values, as the envelope's does.
+    const conditions =
+      key === 'allOf' &&
+      schema.allOf.every((member) =>
+        Object.keys(member).every((word) => ['if', 'then', 'else'].includes(word)),
+      );
+    if (!conditions && !SHAPE.includes(key) && !VALUE_ONLY.includes(key)) {
+      throw new Error(`${where}: the type generator does not support "${key}".`);
+    }
+  }
+  if ('$ref' in schema) {
+    const name = /^#\/components\/schemas\/(\w+)$/.exec(schema.$ref)?.[1];
+    if (!name) throw new Error(`${where}: "${schema.$ref}" is not a schema under components.`);
+    return name;
+  }
+  if ('const' in schema) return literal(schema.const);
+  if (schema.enum) return schema.enum.map(literal).join(' | ');
+  if (schema.anyOf) return schema.anyOf.map((member) => tsType(member, where)).join(' | ');
+  const types = [schema.type ?? []].flat();
+  if (types.length === 0) return 'unknown';
+  return types
+    .map((type) => {
+      if (type === 'integer') return 'number';
+      if (type === 'array') return `Array<${tsType(schema.items ?? {}, where)}>`;
+      if (type !== 'object') return type;
+      if (!schema.properties) {
+        const extra = schema.additionalProperties;
+        return `Record<string, ${extra && typeof extra === 'object' ? tsType(extra, where) : 'unknown'}>`;
+      }
+      const fields = Object.entries(schema.properties).map(
+        ([name, property]) =>
+          `${name}${schema.required?.includes(name) ? '' : '?'}: ${tsType(property, `${where}.${name}`)}`,
+      );
+      return `{ ${fields.join('; ')} }`;
+    })
+    .join(' | ');
+}
+
+/** What a command returns as `data`: every shape its responses declare. */
+function dataType(command) {
+  const shapes = Object.entries(raw.commands[command.path].responses).flatMap(([exit, response]) => {
+    const declared =
+      '$ref' in response ? raw.components.responses[response.$ref.split('/').at(-1)] : response;
+    return declared.data ? [tsType(declared.data, `${command.path} response ${exit}`)] : [];
+  });
+  return [...new Set(shapes)].join(' | ') || 'null';
+}
+
+function exitCodesFile() {
+  return [
+    HEADER,
+    '',
+    `export const CONTRACT_VERSION = ${contract.contractVersion};`,
+    '',
+    '/** The whole exit-code vocabulary, by name. */',
+    'export const EXIT = {',
+    ...Object.entries(contract.exitCodes).map(([code, { name }]) => `  ${name}: ${code},`),
+    '} as const;',
+    '',
+    'export type ExitCode = (typeof EXIT)[keyof typeof EXIT];',
+    '',
+  ].join('\n');
+}
+
 function typesFile() {
   const fields = (parameters) =>
     parameters
@@ -170,6 +263,12 @@ function typesFile() {
       `export interface ${pascal(command.id)}Args {\n${fields(command.positional)}}`,
       '',
       `export interface ${pascal(command.id)}Options {\n${fields(command.named)}}`,
+      '',
+      `export type ${pascal(command.id)}Data = ${dataType(command)};`,
+    ]),
+    ...Object.entries(raw.components.schemas).flatMap(([name, schema]) => [
+      '',
+      `export type ${name} = ${tsType(schema, name)};`,
     ]),
     '',
   ].join('\n');
@@ -225,6 +324,21 @@ function environmentFile() {
   ].join('\n');
 }
 
+/** A parameter schema as a literal, or null when a string can be anything. */
+function checkOf(schema) {
+  const parts = Object.entries(schema).flatMap(([key, value]) => {
+    if (key === 'items') {
+      const items = checkOf(value);
+      return items ? [`items: ${items}`] : [];
+    }
+    if (key === 'enum') return [`enum: [${value.map(quote).join(', ')}]`];
+    return [`${key}: ${typeof value === 'string' ? quote(value) : value}`];
+  });
+  const plain =
+    parts.length === 0 || (['string', 'array'].includes(schema.type) && parts.length === 1);
+  return plain ? null : `{ ${parts.join(', ')} }`;
+}
+
 function commandsFile() {
   const declared = new Set();
   const register = (command) => {
@@ -254,7 +368,17 @@ function commandsFile() {
           `    .${parameter.required ? 'requiredOption' : 'option'}(${quote(optionFlags(parameter))}, ${quote(parameter.description)}${coercion(parameter)})`,
       ),
       `    .action((${[...args, `options: ${options}`].join(', ')}) =>`,
-      `      run(resources, ${quote(command.id)}, options, (context) =>`,
+      `      run(resources, setExit, ${quote(command.id)}, ${quote(command.path)}, options, [`,
+      ...[...command.positional, ...command.named].flatMap((parameter) => {
+        const checked = checkOf(parameter.schema ?? {});
+        const name = camel(parameter.name);
+        return checked
+          ? [
+              `        [${quote(parameter.in === 'argument' ? parameter.name : `--${parameter.name}`)}, ${parameter.in === 'argument' ? name : `options.${name}`}, ${checked}],`,
+            ]
+          : [];
+      }),
+      '      ], (context) =>',
       `        handlers.${command.id}(${command.positional.length > 0 ? `{ ${command.positional.map((parameter) => camel(parameter.name)).join(', ')} }` : '{}'}, options, context),`,
       '      ),',
       '    );',
@@ -262,31 +386,31 @@ function commandsFile() {
   };
   return [
     HEADER,
-    '/* eslint-disable no-console */',
     '',
     "import type { Command } from 'commander';",
     '',
+    "import { render, setProcessExit } from '../render.js';",
     "import type { CommandContext, Resources } from '../resources.js';",
+    "import { failed, missingResource, stopped, type CommandResult } from '../result.js';",
     'import {',
     '  COMMAND_RESOURCES,',
-    '  RESOURCES,',
     '  type Declared,',
     '  type OperationId,',
     '  type ResourceName,',
     "} from './resources.gen.js';",
     "import type * as T from './types.gen.js';",
     '',
-    'type Handler<Id extends OperationId, Args, Options> = (',
+    'type Handler<Id extends OperationId, Args, Options, Data> = (',
     '  args: Args,',
     '  options: Options,',
     '  context: CommandContext<Declared<Id>>,',
-    ') => Promise<void>;',
+    ') => Promise<CommandResult<Data>>;',
     '',
     '/** One handler per command, by operationId. */',
     'export interface Handlers {',
     ...commands.map(
       (command) =>
-        `  ${command.id}: Handler<${quote(command.id)}, T.${pascal(command.id)}Args, T.${pascal(command.id)}Options>;`,
+        `  ${command.id}: Handler<${quote(command.id)}, T.${pascal(command.id)}Args, T.${pascal(command.id)}Options, T.${pascal(command.id)}Data>;`,
     ),
     '}',
     '',
@@ -299,22 +423,77 @@ function commandsFile() {
     '      .map((item) => item.trim())',
     '      .filter(Boolean);',
     '',
-    "/** Checks the command's resources, then runs its handler. The first one missing stops it. */",
-    'async function run<Id extends OperationId>(',
+    '/** The subset of JSON Schema a parameter may carry (the header of the contract fixes it). */',
+    'interface ParameterSchema {',
+    '  readonly type?: string;',
+    '  readonly enum?: readonly string[];',
+    '  readonly pattern?: string;',
+    '  readonly minimum?: number;',
+    '  readonly exclusiveMinimum?: number;',
+    '  readonly format?: string;',
+    '  readonly items?: ParameterSchema;',
+    '}',
+    '',
+    '/** What is wrong with a value, or null. */',
+    'function violation(value: unknown, schema: ParameterSchema): string | null {',
+    '  if (Array.isArray(value)) {',
+    '    return value.map((item) => violation(item, schema.items ?? {})).find(Boolean) ?? null;',
+    '  }',
+    "  if ((schema.type === 'number' || schema.type === 'integer') && Number.isNaN(value)) {",
+    "    return 'must be a number';",
+    '  }',
+    '  if (schema.enum && !schema.enum.includes(String(value))) {',
+    "    return `must be one of ${schema.enum.join(', ')}`;",
+    '  }',
+    '  if (schema.pattern && !new RegExp(schema.pattern).test(String(value))) {',
+    '    return `must match ${schema.pattern}`;',
+    '  }',
+    '  if (schema.minimum !== undefined && Number(value) < schema.minimum) {',
+    '    return `must be at least ${schema.minimum}`;',
+    '  }',
+    '  if (schema.exclusiveMinimum !== undefined && Number(value) <= schema.exclusiveMinimum) {',
+    '    return `must be greater than ${schema.exclusiveMinimum}`;',
+    '  }',
+    "  if (schema.format === 'date' && !/^\\d{4}-\\d{2}-\\d{2}$/.test(String(value))) {",
+    "    return 'must be a date as YYYY-MM-DD';",
+    '  }',
+    '  return null;',
+    '}',
+    '',
+    '/**',
+    ' * Checks the parameters, then the resources, then runs the handler; the first',
+    ' * thing wrong stops it. Whatever the outcome, this is where it is written.',
+    ' */',
+    'async function run<Id extends OperationId, Data>(',
     '  resources: Resources,',
+    '  setExit: (code: number) => void,',
     '  id: Id,',
-    '  options: object,',
-    '  handle: (context: CommandContext<Declared<Id>>) => Promise<void>,',
+    '  command: string,',
+    '  options: { json?: boolean },',
+    '  checks: readonly (readonly [string, unknown, ParameterSchema])[],',
+    '  handle: (context: CommandContext<Declared<Id>>) => Promise<CommandResult<Data>>,',
     '): Promise<void> {',
-    '  const require = (resource: ResourceName): boolean => {',
-    '    if (resources.inPlace(resource, options)) return true;',
-    '    const { description, fix } = RESOURCES[resource];',
-    '    console.error(`Error: a required resource is not in place: ${resource}.\\n  ${description}\\n  ${fix}`);',
-    '    process.exitCode = 1;',
-    '    return false;',
-    '  };',
-    '  const requires: readonly ResourceName[] = COMMAND_RESOURCES[id].requires;',
-    '  if (requires.every(require)) await handle(resources.context(require));',
+    '  let result: CommandResult<unknown>;',
+    '  try {',
+    '    const require = (resource: ResourceName): CommandResult<never> | null =>',
+    '      resources.inPlace(resource, options) ? null : missingResource(resource);',
+    '    const invalid = checks',
+    '      .filter(([, value]) => value !== undefined)',
+    '      .map(([name, value, schema]) => [name, value, violation(value, schema)] as const)',
+    '      .find(([, , problem]) => problem !== null);',
+    '    const requires: readonly ResourceName[] = COMMAND_RESOURCES[id].requires;',
+    '    const missing = invalid',
+    '      ? undefined',
+    '      : requires.find((resource) => !resources.inPlace(resource, options));',
+    '    result = invalid',
+    "      ? stopped('usage', 'INVALID_ARGUMENT', `${invalid[0]} ${invalid[2]}, got '${String(invalid[1])}'.`)",
+    '      : missing',
+    '        ? missingResource(missing)',
+    '        : await handle(resources.context(require));',
+    '  } catch (error) {',
+    '    result = failed(error);',
+    '  }',
+    '  render(command, result, options.json === true, setExit);',
     '}',
     '',
     '/** Builds the whole command tree from the contract. */',
@@ -322,6 +501,7 @@ function commandsFile() {
     '  program: Command,',
     '  handlers: Handlers,',
     '  resources: Resources,',
+    '  setExit: (code: number) => void = setProcessExit,',
     '): void {',
     ...commands.map(register),
     '}',
@@ -408,6 +588,7 @@ const outputs = new Map([
   ['src/cli/generated/types.gen.ts', typesFile()],
   ['src/cli/generated/resources.gen.ts', resourcesFile()],
   ['src/cli/generated/environment.gen.ts', environmentFile()],
+  ['src/cli/generated/exit-codes.gen.ts', exitCodesFile()],
 ]);
 for (const doc of DOCS) {
   const file = [path.join(base, doc), path.join(ROOT, doc)].find((candidate) =>

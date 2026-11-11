@@ -98,7 +98,7 @@ function createPullRequestMocks() {
       updateBody: vi.fn(),
     } satisfies PullRequestGateway,
     costRepo: {
-      record: vi.fn(),
+      record: vi.fn(() => ({ id: 'GATE-1' })),
       findByProject: vi.fn().mockReturnValue([]),
       findByTicket: vi.fn().mockReturnValue([]),
       findByFilters: vi.fn().mockReturnValue([]),
@@ -127,7 +127,7 @@ const callOrder = (mock: unknown): number =>
   (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
 beforeEach(() => {
   gateRecorder.decidedBy.mockReset();
-  gateRecorder.record.mockReset();
+  gateRecorder.record.mockReset().mockReturnValue({ id: 'GATE-1' });
 });
 
 const PROJECT_ID = 'startup-a';
@@ -333,6 +333,8 @@ describe('TicketApproveUseCase', () => {
       ticketId: TICKET_ID,
       fromColumn: 'SPEC_REVIEW',
       toColumn: 'TECH_SPEC',
+      pullRequestUrl: null,
+      gateRecordId: 'GATE-1',
     });
   });
 
@@ -400,6 +402,8 @@ describe('TicketApproveUseCase', () => {
       ticketId: TICKET_ID,
       fromColumn: 'BACKLOG',
       toColumn: 'SPEC_REVIEW',
+      pullRequestUrl: null,
+      gateRecordId: 'GATE-1',
     });
   });
 
@@ -430,6 +434,8 @@ describe('TicketApproveUseCase', () => {
       ticketId: TICKET_ID,
       fromColumn: 'BACKLOG',
       toColumn: 'SPEC_REVIEW',
+      pullRequestUrl: null,
+      gateRecordId: 'GATE-1',
     });
   });
 

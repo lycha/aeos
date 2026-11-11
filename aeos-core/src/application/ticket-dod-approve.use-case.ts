@@ -157,12 +157,12 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
 
     // 3. A no is a decision too: record it, and leave the ticket at the gate.
     if (!approved) {
-      this.gateRecorder.record(projectPath, ticket, {
+      const rejection = this.gateRecorder.record(projectPath, ticket, {
         gate: 'definition-of-done',
         verdict: 'rejected',
         reason,
       });
-      return { status: 'cancelled', ticketId };
+      return { status: 'cancelled', ticketId, gateRecordId: rejection.id };
     }
     const open = report ? report.summary.fail + report.summary.unverified : 0;
     if (open > 0 && !reason?.trim()) {
@@ -260,7 +260,7 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
       status: 'approved',
       ticketId,
       totalCostUsd,
-      ...(gate?.id ? { gateRecordId: gate.id } : {}),
+      gateRecordId: gate.id,
       ...(warning ? { warning } : {}),
     };
   }

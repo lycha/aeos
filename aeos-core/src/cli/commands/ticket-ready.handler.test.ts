@@ -60,8 +60,8 @@ describe('the ticket ready handler', () => {
     process.exitCode = savedExitCode;
   });
 
-  it('passes the ticket id and project info to the use case', () => {
-    program.parse(['node', 'aeos', 'ticket', 'ready', 'AEOS-1']);
+  it('passes the ticket id and project info to the use case', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'ready', 'AEOS-1']);
     expect(useCase.execute).toHaveBeenCalledWith({
       projectId: 'proj-1',
       projectPath: '/test',
@@ -69,30 +69,30 @@ describe('the ticket ready handler', () => {
     });
   });
 
-  it('prints a success message when the ready reset succeeds', () => {
-    program.parse(['node', 'aeos', 'ticket', 'ready', 'AEOS-1']);
+  it('prints a success message when the ready reset succeeds', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'ready', 'AEOS-1']);
     expect(consoleSpy).toHaveBeenCalledWith(
       '✓ Ticket AEOS-1 marked READY (previous state: WORKING)',
     );
   });
 
-  it('shows use case errors and sets exit code 1', () => {
+  it('shows use case errors and sets exit code 1', async () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       status: 'error',
       ticketId: 'AEOS-1',
       error: 'Ticket AEOS-1 is already READY',
     });
-    program.parse(['node', 'aeos', 'ticket', 'ready', 'AEOS-1']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'ready', 'AEOS-1']);
     expect(consoleErrorSpy).toHaveBeenCalledWith('Error: Ticket AEOS-1 is already READY');
     expect(process.exitCode).toBe(1);
   });
 
-  it('shows an error when not inside an AEOS project', () => {
+  it('shows an error when not inside an AEOS project', async () => {
     (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    program.parse(['node', 'aeos', 'ticket', 'ready', 'AEOS-1']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'ready', 'AEOS-1']);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('Run `aeos project init` in the project root.'),
     );
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(4);
   });
 });

@@ -1,5 +1,16 @@
 # Task: Implement Clear Error Messages for Every FAILED State
 
+> **Archived, superseded by [I1-M4-004c](../iteration-1/I1-M4-004c-json-output-and-exit-codes.md).**
+> Every error the CLI reports now has a stable `error.code` in one enum,
+> `src/cli/error-codes.ts`. Of the list below it has `EXECUTOR_NONZERO_EXIT`,
+> `VALIDATION_FAILED` and `EXECUTOR_NOT_FOUND` (this task's `CLAUDE_NOT_FOUND`,
+> for any executor). `REVIEWER_REJECTED` and `PREFLIGHT_BLOCKED` are not
+> failures: such a run ends `ESCALATED` or `BLOCKED`, exits `3`, and reports the
+> engine's escalation reason (`ITERATIONS_EXHAUSTED`, `PREFLIGHT_BLOCKERS`, …).
+> `EXECUTOR_TIMEOUT` has no code yet: no executor reports a timeout in words the
+> CLI can tell apart. The message texts proposed here were not adopted; text
+> output is unchanged.
+
 **Milestone:** M7 — Polish & Distribution
 **Agent:** typescript-pro
 **Method:** Manual

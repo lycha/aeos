@@ -74,6 +74,19 @@ export function createTicketRunDisplay(
   return new PlainTicketRunDisplay(stdout, labelOf);
 }
 
+/** For --json: nothing is drawn. Each run event is one JSON object on a line of stderr. */
+export function createJsonLinesDisplay(
+  stderr: Pick<NodeJS.WriteStream, 'write'> = process.stderr,
+): TicketRunDisplay {
+  return {
+    observer: { onEvent: (event) => void stderr.write(`${JSON.stringify(event)}\n`) },
+    live: false,
+    start() {},
+    stop() {},
+    requestInterrupt() {},
+  };
+}
+
 abstract class BaseTicketRunDisplay implements TicketRunDisplay, TicketRunObserver {
   readonly observer: TicketRunObserver = this;
   abstract readonly live: boolean;

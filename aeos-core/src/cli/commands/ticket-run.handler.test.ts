@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { programWith } from './program.fixture.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketRunPort } from '../../domain/ports/driving/ticket-run.port.js';
+import type { TicketShowPort } from '../../domain/ports/driving/ticket-show.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import { displayOrder } from '../../domain/model/column.js';
 import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
@@ -57,7 +58,20 @@ describe('the ticket run handler', () => {
     useCase = createMockTicketRunUseCase();
     projectRepo = createMockProjectRepo();
     programWith(
-      { ticketRun: useCase, projectRepo, columnLabels: () => columnLabels(COLUMNS, {}, null) },
+      {
+        ticketRun: useCase,
+        projectRepo,
+        columnLabels: () => columnLabels(COLUMNS, {}, null),
+        // The handler reads the ticket before and after, to say what the run added.
+        ticketShow: {
+          execute: () => ({
+            ok: true,
+            ticket: { id: 'AEOS-1', column: 'IMPLEMENTATION', subState: 'FAILED' },
+            runs: [],
+            executions: [],
+          }),
+        } as unknown as TicketShowPort,
+      },
       program,
     );
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -154,9 +168,9 @@ describe('the ticket run handler', () => {
     await program.parseAsync(['node', 'aeos', 'ticket', 'run', 'AEOS-1', '--executor', 'bad-cli']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      "Error: Invalid executor 'bad-cli'. Supported executors: claude-cli, auggie-cli, opencode-cli, ollama-cli",
+      "Error: --executor must be one of claude-cli, auggie-cli, opencode-cli, ollama-cli, got 'bad-cli'.",
     );
     expect(useCase.execute).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
   });
 });

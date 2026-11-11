@@ -79,15 +79,15 @@ describe('the ticket list handler', () => {
     process.exitCode = savedExitCode;
   });
 
-  it('should display "no tickets" message when no tickets exist', () => {
-    program.parse(['node', 'aeos', 'ticket', 'list']);
+  it('should display "no tickets" message when no tickets exist', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'list']);
 
     expect(consoleSpy).toHaveBeenCalledWith(
       "No tickets found. Run 'aeos ticket create <title>' to add one.",
     );
   });
 
-  it('should display tickets with correct column and sub-state', () => {
+  it('should display tickets with correct column and sub-state', async () => {
     const tickets = [
       makeTicket({ id: 'AEOS-1', title: 'Add rate limiting', column: 'BACKLOG', subState: null }),
       makeTicket({
@@ -101,7 +101,7 @@ describe('the ticket list handler', () => {
     ];
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue(tickets);
 
-    program.parse(['node', 'aeos', 'ticket', 'list']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'list']);
 
     expect(consoleSpy).toHaveBeenCalledTimes(3); // header + 2 rows
     const header = consoleSpy.mock.calls[0][0] as string;
@@ -124,19 +124,19 @@ describe('the ticket list handler', () => {
     expect(row2).toContain('WORKING');
   });
 
-  it('should display em-dash for null sub_state', () => {
+  it('should display em-dash for null sub_state', async () => {
     const tickets = [makeTicket({ subState: null })];
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue(tickets);
 
-    program.parse(['node', 'aeos', 'ticket', 'list']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'list']);
 
     const row = consoleSpy.mock.calls[1][0] as string;
     expect(row).toContain('—');
     expect(row).not.toContain('null');
   });
 
-  it('should filter by --column flag', () => {
-    program.parse(['node', 'aeos', 'ticket', 'list', '--column', 'BACKLOG']);
+  it('should filter by --column flag', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'list', '--column', 'BACKLOG']);
 
     expect(useCase.execute).toHaveBeenCalledWith({
       projectId: 'proj-1',
@@ -144,8 +144,8 @@ describe('the ticket list handler', () => {
     });
   });
 
-  it('should uppercase column input for case-insensitive matching', () => {
-    program.parse(['node', 'aeos', 'ticket', 'list', '--column', 'backlog']);
+  it('should uppercase column input for case-insensitive matching', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'list', '--column', 'backlog']);
 
     expect(useCase.execute).toHaveBeenCalledWith({
       projectId: 'proj-1',
@@ -153,12 +153,12 @@ describe('the ticket list handler', () => {
     });
   });
 
-  it("shows a column's label, and filters by label as well as by identifier", () => {
+  it("shows a column's label, and filters by label as well as by identifier", async () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue([
       makeTicket({ column: 'TECH_SPEC', subState: 'READY' }),
     ]);
 
-    program.parse(['node', 'aeos', 'ticket', 'list', '--column', 'shaping']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'list', '--column', 'shaping']);
 
     expect(useCase.execute).toHaveBeenCalledWith({
       projectId: 'proj-1',
@@ -169,25 +169,25 @@ describe('the ticket list handler', () => {
     expect(row).not.toContain('TECH_SPEC');
   });
 
-  it('should reject invalid column with error and exit code 1', () => {
-    program.parse(['node', 'aeos', 'ticket', 'list', '--column', 'BACKLG']);
+  it('should reject an invalid column as a usage error', async () => {
+    await program.parseAsync(['node', 'aeos', 'ticket', 'list', '--column', 'BACKLG']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining("Unknown column 'BACKLG'"),
     );
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Valid columns: BACKLOG'));
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     expect(useCase.execute).not.toHaveBeenCalled();
   });
 
-  it('should show error when not inside an AEOS project', () => {
+  it('should show error when not inside an AEOS project', async () => {
     (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
 
-    program.parse(['node', 'aeos', 'ticket', 'list']);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'list']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('Run `aeos project init` in the project root.'),
     );
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(4);
   });
 });
