@@ -811,6 +811,38 @@ describe('TicketApproveUseCase — pull requests', () => {
     expect(pr.prGateway.create).toHaveBeenCalled();
   });
 
+  it('asks whether the code host is in place exactly when it is about to open a pull request', () => {
+    const pullRequestHost = vi.fn().mockReturnValue(false);
+
+    // A column that opens none, a child task, and a project without pull requests.
+    approving(signedOffTicket('TECH_SPEC'));
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+    approving({ ...standaloneTaskAtQa(), parentId: 'AEOS-9' });
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+    const config = pr.projectRepo.readExecutorConfig as ReturnType<typeof vi.fn>;
+    config.mockReturnValue({ pullRequests: { enabled: false } });
+    approving(epicAtIntegrationReview());
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+    expect(pullRequestHost).not.toHaveBeenCalled();
+    expect(stateMachine.transition).toHaveBeenCalledTimes(3);
+
+    // An approval that would be refused anyway never gets as far as asking.
+    config.mockReturnValue({});
+    approving({ ...epicAtIntegrationReview(), subState: 'READY' });
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+    expect(pullRequestHost).not.toHaveBeenCalled();
+
+    for (const ticket of [epicAtIntegrationReview(), standaloneTaskAtQa()]) {
+      approving(ticket);
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+      expect(result.status).toBe('error');
+    }
+    expect(pullRequestHost).toHaveBeenCalledTimes(2);
+    expect(pr.prGateway.isAvailable).not.toHaveBeenCalled();
+    expect(pr.prGateway.create).not.toHaveBeenCalled();
+    expect(stateMachine.transition).toHaveBeenCalledTimes(3);
+  });
+
   it('stops with the cause and leaves the ticket SIGNED_OFF when gh is not on PATH', () => {
     approving(epicAtIntegrationReview());
     pr.prGateway.isAvailable.mockReturnValue({

@@ -346,10 +346,20 @@ describe('exit codes', () => {
       ok: false,
       error: { code: 'CONTRACT_APPROVAL_REQUIRED' },
     });
-    expect(execute).toHaveBeenLastCalledWith('proj-1', '/test', 'AEOS-1', { contract: false });
+    expect(execute).toHaveBeenLastCalledWith(
+      'proj-1',
+      '/test',
+      'AEOS-1',
+      expect.objectContaining({ contract: false }),
+    );
 
     await cli({ ticketApprove: { execute } }, ['ticket', 'approve', 'AEOS-1', '--contract']);
-    expect(execute).toHaveBeenLastCalledWith('proj-1', '/test', 'AEOS-1', { contract: true });
+    expect(execute).toHaveBeenLastCalledWith(
+      'proj-1',
+      '/test',
+      'AEOS-1',
+      expect.objectContaining({ contract: true }),
+    );
   });
 
   it('a missing required argument is usage', async () => {
@@ -380,6 +390,58 @@ describe('exit codes', () => {
       error: { code: 'RESOURCE_MISSING', resource: 'project' },
     });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('ticket create asks for python exactly when --spec is given', async () => {
+    const execute = vi.fn().mockReturnValue({
+      ticketId: 'AEOS-2',
+      kind: 'TASK',
+      parentId: null,
+      title: 'A bug',
+      alreadyExisted: false,
+    });
+    const create = (...args: string[]): Promise<Ran> =>
+      cli({ ticketCreate: { execute } }, ['ticket', 'create', ...args, '--json'], undefined, [
+        'python',
+      ]);
+
+    expect((await create('A bug', '--bug')).exit).toBe(0);
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    const ran = await create('An epic', '--spec', 'sample');
+    expect(ran.exit).toBe(4);
+    expect(ran.envelope()).toMatchObject({
+      error: { code: 'RESOURCE_MISSING', resource: 'python' },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('ticket approve asks for gh exactly when the approval opens a pull request', async () => {
+    const advanced = {
+      status: 'advanced',
+      ticketId: 'AEOS-1',
+      fromColumn: 'TECH_SPEC',
+      toColumn: 'TASK_BREAKDOWN',
+      pullRequestUrl: null,
+      gateRecordId: 'GATE-1',
+    };
+    const approve = (execute: unknown): Promise<Ran> =>
+      cli({ ticketApprove: { execute } }, ['ticket', 'approve', 'AEOS-1', '--json'], undefined, [
+        'gh',
+      ]);
+
+    // The use case opens no pull request, so it never asks.
+    expect((await approve(() => advanced)).exit).toBe(0);
+
+    // It is about to open one, and asks through the option the handler gave it.
+    const ran = await approve(
+      (_project: string, _path: string, id: string, options: { pullRequestHost(): boolean }) =>
+        options.pullRequestHost()
+          ? advanced
+          : { status: 'error', ticketId: id, error: 'no code host' },
+    );
+    expect(ran.exit).toBe(4);
+    expect(ran.envelope()).toMatchObject({ error: { code: 'RESOURCE_MISSING', resource: 'gh' } });
   });
 
   it('ticket repin without python is missing_resource', async () => {

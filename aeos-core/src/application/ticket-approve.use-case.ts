@@ -43,7 +43,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
     projectId: string,
     projectPath: string,
     ticketId: string,
-    options: { byEngine?: boolean; contract?: boolean } = {},
+    options: { byEngine?: boolean; contract?: boolean; pullRequestHost?: () => boolean } = {},
   ): TicketApproveResult {
     const ticket = this.ticketRepo.findById(projectId, ticketId);
     if (!ticket) {
@@ -166,6 +166,13 @@ export class TicketApproveUseCase implements TicketApprovePort {
       opensPullRequest &&
       this.projectRepo.readExecutorConfig(projectPath)?.pullRequests?.enabled !== false
     ) {
+      if (options.pullRequestHost?.() === false) {
+        return {
+          status: 'error',
+          ticketId,
+          error: `Cannot open a pull request for ${ticketId}: the code host is not in place.`,
+        };
+      }
       const error = this.openPullRequest(projectId, projectPath, ticket, columnSpec);
       if (error) return { status: 'error', ticketId, error };
     }

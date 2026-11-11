@@ -22,11 +22,13 @@ export interface TicketApprovePort {
    * is not a human decision, so no gate record is written for it.
    * `contract`: the person also approves the contract change the ticket
    * carries (`--contract`). The engine cannot.
+   * `pullRequestHost`: asked once the approval is about to open a pull
+   * request, and only then; false stops it, with the ticket left as it was.
    */
   execute(
     projectId: string,
     projectPath: string,
     ticketId: string,
-    options?: { byEngine?: boolean; contract?: boolean },
+    options?: { byEngine?: boolean; contract?: boolean; pullRequestHost?: () => boolean },
   ): TicketApproveResult;
 }

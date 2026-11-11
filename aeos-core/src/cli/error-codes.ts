@@ -46,8 +46,11 @@ const BY_WORDING: readonly (readonly [RegExp, ErrorCode, Situation?, T.Error['re
   [/needs --reason/, 'REASON_REQUIRED', 'gate-refused'],
   [/needs a written reason/, 'REASON_REQUIRED', 'usage'],
   [/^Unknown status '/, 'INVALID_ARGUMENT', 'usage'],
+  // Guards answer for `ticket create --spec` and `ticket repin`. Still read
+  // here: the amendment lint of `ticket answer`, which declares no python.
   [/python3 is not on PATH|python3 modules/, 'RESOURCE_MISSING', 'missing-resource', 'python'],
-  [/`gh`( command)? is not /, 'RESOURCE_MISSING', 'missing-resource', 'gh'],
+  // The `gh` guard finds the command; whether it is logged in, only running it says.
+  [/`gh` is not authenticated/, 'RESOURCE_MISSING', 'missing-resource', 'gh'],
   [/^Cannot open a pull request/, 'PULL_REQUEST_FAILED'],
   [/CLI not found on PATH/, 'EXECUTOR_NOT_FOUND'],
   [/exited with code/, 'EXECUTOR_NONZERO_EXIT'],
