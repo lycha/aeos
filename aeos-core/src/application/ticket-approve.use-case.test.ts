@@ -135,6 +135,12 @@ const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
 const TICKET_ID = 'AEOS-1';
 
+/** An epic as `ticket create --spec` leaves it. */
+const inBacklog = (): Ticket => ({
+  ...signedOffTicket('BACKLOG'),
+  specPin: { repo: 'AEOS-aeos', commit: 'abc1234def', path: 'features/sample' },
+});
+
 function signedOffTicket(column: Ticket['column'] = 'SPEC_REVIEW'): Ticket {
   return {
     id: TICKET_ID,
@@ -394,8 +400,7 @@ describe('TicketApproveUseCase', () => {
   });
 
   it('should allow advancing BACKLOG ticket with null sub-state (no sign-off needed)', () => {
-    const ticket = signedOffTicket('BACKLOG');
-    ticket.subState = null;
+    const ticket = { ...inBacklog(), subState: null };
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(ticket);
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
     expect(result).toEqual({
@@ -405,6 +410,41 @@ describe('TicketApproveUseCase', () => {
       toColumn: 'SPEC_REVIEW',
       pullRequestUrl: null,
       gateRecordId: 'GATE-1',
+    });
+  });
+
+  describe('an epic from before spec pins, still in BACKLOG', () => {
+    const unpinned = (overrides: Partial<Ticket> = {}): Ticket => ({
+      ...signedOffTicket('BACKLOG'),
+      subState: null,
+      specPin: undefined,
+      ...overrides,
+    });
+
+    it.each([{}, { byEngine: true }])('is refused with what to do instead (%o)', (options) => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(unpinned());
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, options);
+
+      expect(result).toMatchObject({
+        status: 'error',
+        error: expect.stringMatching(
+          /Epic AEOS-1 has no spec.*aeos ticket create <title> --spec <feature>.*aeos ticket move/s,
+        ),
+      });
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
+
+    it('does not concern a task, or a bug', () => {
+      for (const task of [
+        unpinned({ kind: 'TASK', parentId: 'AEOS-9' }),
+        unpinned({ kind: 'TASK', track: 'bug' }),
+      ]) {
+        (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(task);
+
+        expect(useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID).status).toBe('advanced');
+      }
     });
   });
 
@@ -428,7 +468,7 @@ describe('TicketApproveUseCase', () => {
   });
 
   it('should advance BACKLOG ticket to SPEC_REVIEW', () => {
-    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket('BACKLOG'));
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(inBacklog());
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
     expect(result).toEqual({
       status: 'advanced',

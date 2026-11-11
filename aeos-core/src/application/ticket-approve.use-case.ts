@@ -68,6 +68,16 @@ export class TicketApproveUseCase implements TicketApprovePort {
       return { status: 'already_done', ticketId };
     }
 
+    // An epic is reviewed against its pinned spec. One created before pins has
+    // none, and would reach the spec-review column with nothing to review.
+    if (isBacklog && ticket.kind === TicketKind.EPIC && !ticket.specPin) {
+      return {
+        status: 'error',
+        ticketId,
+        error: `Epic ${ticketId} has no spec. An epic is now built from a spec a person wrote: write one with the spec skills (prototype-harvest, gap-interrogation-solo or gap-interrogation-capture, spec-writer), create a new epic with "aeos ticket create <title> --spec <feature>", and close this one with "aeos ticket move".`,
+      };
+    }
+
     // What this column is for decides what leaving it means: never its name.
     const columnSpec = columnSpecOf(this.columnSpecLoader, projectPath, currentColumn);
     const role = columnSpec?.role ?? 'standard';
