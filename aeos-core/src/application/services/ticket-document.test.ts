@@ -53,6 +53,13 @@ describe('buildInitialTicketDocument — spec pin', () => {
     expect(doc).toContain('- Spec: AEOS-aeos@c0ffee1 (features/checkout)');
   });
 
+  it('records the criteria a task claims', () => {
+    const doc = buildInitialTicketDocument(ticket({ implements: ['AC-1', 'AC-2'] }));
+
+    expect(doc).toContain('- Implements: AC-1, AC-2');
+    expect(buildInitialTicketDocument(ticket())).not.toContain('- Implements:');
+  });
+
   it('has no spec line without a pin', () => {
     expect(buildInitialTicketDocument(ticket())).not.toContain('- Spec:');
   });

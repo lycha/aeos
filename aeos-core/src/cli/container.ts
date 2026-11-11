@@ -21,12 +21,13 @@ import { CostsUseCase } from '../application/costs.use-case.js';
 import { OrchestratorUseCase } from '../application/orchestrator.use-case.js';
 import { SqliteOrchestratorStateRepository } from '../infrastructure/persistence/sqlite-orchestrator-state.repository.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
-import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js';
-import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
+import type { PullRequestGateway } from '../domain/ports/driven/pull-request-gateway.port.js';
 import { FsConfigStore } from '../infrastructure/filesystem/fs-config.adapter.js';
 import { FsProjectRepository } from '../infrastructure/filesystem/fs-project.repository.js';
 import { FsArtefactTree } from '../infrastructure/filesystem/fs-artefact-tree.adapter.js';
 import { PythonDecisionsLint } from '../infrastructure/spec/decisions-lint.adapter.js';
+import { FsFileHasher } from '../infrastructure/filesystem/fs-file-hasher.adapter.js';
+import { FsGeneratorStampStore } from '../infrastructure/filesystem/fs-generator-stamp-store.adapter.js';
 import { FsArtifactStore } from '../infrastructure/filesystem/fs-artifact-store.adapter.js';
 import { FsRunRecordStore } from '../infrastructure/filesystem/fs-run-record-store.adapter.js';
 import { FsGateRecordStore } from '../infrastructure/filesystem/fs-gate-record-store.adapter.js';
@@ -48,7 +49,10 @@ import { YamlDecisionsFile } from '../infrastructure/spec/decisions-file.adapter
 import { TicketResolveUseCase } from '../application/ticket-resolve.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
 import { CheckRegistry } from '../application/checks/check-registry.js';
+import { CriteriaCollector } from '../application/services/criteria-collector.js';
 import { ShellChecksRunner } from '../infrastructure/checks/shell-checks-runner.adapter.js';
+import { ConformanceService } from '../application/services/conformance.service.js';
+import { VitestJsonReader } from '../infrastructure/test-report/vitest-json-reader.adapter.js';
 import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
 import { TicketSignOffUseCase } from '../application/ticket-sign-off.use-case.js';
 import { TicketMoveUseCase } from '../application/ticket-move.use-case.js';
@@ -64,6 +68,10 @@ import { AuggieCliExecutor } from '../infrastructure/executor/auggie-cli-executo
 import { OpenCodeCliExecutor } from '../infrastructure/executor/opencode-cli-executor.adapter.js';
 import { OllamaCliExecutor } from '../infrastructure/executor/ollama-cli-executor.adapter.js';
 import { YamlColumnSpecLoader } from '../infrastructure/spec-loader/yaml-column-spec-loader.adapter.js';
+import { YamlPipelineLoader } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+import { Column, displayOrder } from '../domain/model/column.js';
+import { PipelineGuard } from '../application/services/pipeline-guard.js';
+import { SqlitePipelineStateRepository } from '../infrastructure/persistence/sqlite-pipeline-state.repository.js';
 import { YamlAgentSpecLoader } from '../infrastructure/spec-loader/yaml-agent-spec-loader.adapter.js';
 import { FsRubricLoader } from '../infrastructure/filesystem/fs-rubric-loader.adapter.js';
 import { PreflightService } from '../application/services/preflight.js';
@@ -98,8 +106,11 @@ export interface Container {
   columnLabels: (projectPath: string) => ColumnLabels;
   /** The same by project id, for `aeos costs`; the defaults for a project that cannot be read. */
   columnLabelsOfProject: (projectId: string) => ColumnLabels;
-  rubricLoader: RubricLoader;
-  artifactStore: ArtifactStore;
+  /**
+   * Holds the project to its accepted pipelines: a changed pipelines file is
+   * accepted, or this throws while tickets of that kind are in flight.
+   */
+  checkPipelines: (projectPath: string) => void;
 }
 
 export function createContainer(): Container {
@@ -139,6 +150,43 @@ export function createContainer(): Container {
   // every agent's executor into `stub` before createExecutor sees it.
   const newExecutorConfigResolver = (): ExecutorConfigResolver =>
     new ExecutorConfigResolver(projectRepo, process.env.AEOS_EXECUTOR === 'stub');
+
+  const newCriteriaCollector = (): CriteriaCollector =>
+    new CriteriaCollector(getTicketRepo(), gitGateway, artefactTree, projectRepo);
+  const newConformanceService = (): ConformanceService =>
+    new ConformanceService(
+      projectRepo,
+      getTicketRepo(),
+      newCriteriaCollector(),
+      new ShellChecksRunner(),
+      new VitestJsonReader(),
+      gitGateway,
+    );
+  // A stub run must never reach the real code host.
+  const newPullRequestGateway = (): PullRequestGateway =>
+    process.env.AEOS_EXECUTOR === 'stub'
+      ? new StubPullRequestGateway()
+      : new GhPullRequestGateway();
+
+  const newPipelineLoader = (): YamlPipelineLoader =>
+    new YamlPipelineLoader(new YamlColumnSpecLoader());
+
+  const newPipelineGuard = (): PipelineGuard =>
+    new PipelineGuard(
+      newPipelineLoader(),
+      new SqlitePipelineStateRepository(getDb()),
+      getTicketRepo(),
+      projectRepo,
+      getGateRecorder(),
+      // eslint-disable-next-line no-console
+      (line) => console.log(line),
+    );
+  // The columns in force, so a ticket still shows where a refused change left it.
+  const labelsOf = (projectPath: string): ColumnLabels =>
+    new YamlColumnSpecLoader().labels(
+      projectPath,
+      displayOrder(newPipelineGuard().accepted(projectPath)),
+    );
 
   const createExecutor = (agentSpec: AgentSpec) => {
     if (agentSpec.executor.type === 'stub') {
@@ -246,6 +294,7 @@ export function createContainer(): Container {
       const rubricLoader = new FsRubricLoader();
       const preflight = new PreflightService(artifactStore, getStateMachine());
       const executorConfigResolver = newExecutorConfigResolver();
+      const criteriaCollector = newCriteriaCollector();
       return new TicketRunUseCase(
         getTicketRepo(),
         getStateMachine(),
@@ -262,9 +311,13 @@ export function createContainer(): Container {
         executorConfigResolver,
         configStore,
         runRecordStore,
-        new CheckRegistry(projectRepo, new ShellChecksRunner()),
+        new CheckRegistry(projectRepo, new ShellChecksRunner(), criteriaCollector, artifactStore),
         projectRepo,
         gateRecordStore,
+        criteriaCollector,
+        newConformanceService(),
+        new FsFileHasher(),
+        new FsGeneratorStampStore(),
       );
     },
     get ticketApprove() {
@@ -273,14 +326,12 @@ export function createContainer(): Container {
         artifactStore,
         getStateMachine(),
         gitGateway,
-        // A stub run must never reach the real code host.
-        process.env.AEOS_EXECUTOR === 'stub'
-          ? new StubPullRequestGateway()
-          : new GhPullRequestGateway(),
+        newPullRequestGateway(),
         getCostRepo(),
         new YamlColumnSpecLoader(),
         projectRepo,
         getGateRecorder(),
+        newPipelineLoader(),
       );
     },
     get ticketSignOff() {
@@ -298,6 +349,7 @@ export function createContainer(): Container {
         getStateMachine(),
         gitGateway,
         getGateRecorder(),
+        newPipelineLoader(),
       );
     },
     get ticketReady() {
@@ -315,6 +367,7 @@ export function createContainer(): Container {
         gitGateway,
         new YamlAgentSpecLoader(),
         newExecutorConfigResolver(),
+        newPipelineLoader(),
       );
     },
     get ticketDodApprove() {
@@ -325,23 +378,27 @@ export function createContainer(): Container {
         gitGateway,
         getCostRepo(),
         getGateRecorder(),
+        newConformanceService(),
+        runRecordStore,
+        newPullRequestGateway(),
+        new YamlColumnSpecLoader(),
       );
     },
     get costs() {
       return new CostsUseCase(getCostRepo(), configStore);
     },
     projectRepo,
-    columnLabels: (projectPath) => new YamlColumnSpecLoader().labels(projectPath),
+    columnLabels: labelsOf,
+    checkPipelines: (projectPath) => newPipelineGuard().check(projectPath),
     columnLabelsOfProject: (projectId) => {
       try {
         const entry = configStore.readRegistry().find((project) => project.id === projectId);
-        if (entry) return new YamlColumnSpecLoader().labels(entry.path);
+        if (entry) return labelsOf(entry.path);
       } catch {
         // A report across projects must not fail on one project's labels.
       }
-      return columnLabels({}, null);
+      // Only the structural columns are known; any other identifier is shown as it is.
+      return columnLabels([Column.BACKLOG, Column.DONE], {}, null);
     },
-    rubricLoader: new FsRubricLoader(),
-    artifactStore,
   };
 }

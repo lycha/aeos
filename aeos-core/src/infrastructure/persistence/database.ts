@@ -220,6 +220,47 @@ UPDATE cost_records SET "column" = 'SPEC_REVIEW' WHERE "column" = 'PRODUCT_SCOPI
       `);
     },
   },
+  {
+    version: 11,
+    description: 'The acceptance criteria a task claims',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'implements')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN implements TEXT DEFAULT NULL`);
+      }
+    },
+  },
+  {
+    version: 12,
+    description: 'The track of a standalone task (bug)',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'track')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN track TEXT DEFAULT NULL`);
+      }
+    },
+  },
+  {
+    version: 13,
+    description: 'The pipeline last accepted for each ticket kind of a project',
+    apply: (db) => {
+      db.exec(`
+CREATE TABLE IF NOT EXISTS pipeline_state (
+  project_id   TEXT NOT NULL,
+  kind         TEXT NOT NULL,
+  columns_json TEXT NOT NULL,
+  accepted_at  TEXT NOT NULL,
+  PRIMARY KEY (project_id, kind)
+);`);
+    },
+  },
+  {
+    version: 14,
+    description: 'The contract paths a ticket changed, and the gate that approved them',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'contract_change')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN contract_change TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

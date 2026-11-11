@@ -28,8 +28,16 @@ import type { RunRecordStore } from '../domain/ports/driven/run-record-store.por
 import type { ChecksRunner } from '../domain/ports/driven/checks-runner.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import type { Check } from '../domain/model/check.js';
-import type { CheckConfig } from '../domain/model/project-executor-config.js';
+import type { CheckConfig, GeneratorConfig } from '../domain/model/project-executor-config.js';
 import { CheckRegistry } from './checks/check-registry.js';
+import type { CriteriaCollector } from './services/criteria-collector.js';
+import { traceCriteria } from '../domain/services/criteria-trace.js';
+import {
+  buildConformanceReport,
+  renderConformanceMarkdown,
+} from '../domain/services/conformance-builder.js';
+import type { ConformanceService } from './services/conformance.service.js';
+import type { FileHasher } from '../domain/ports/driven/file-hasher.port.js';
 
 // --- Mock factories ---
 
@@ -47,6 +55,7 @@ function createMockTicketRepo(): TicketRepository {
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
     setSpecCommit: vi.fn(),
+    setContractChange: vi.fn(),
   };
 }
 
@@ -212,6 +221,8 @@ function defaultColumnSpec(overrides: Partial<ColumnSpec> = {}): ColumnSpec {
 function baseColumnSpec(): ColumnSpec {
   return {
     column: 'IMPLEMENTATION',
+    // As the template states it: the column that writes code says so itself.
+    executorMode: 'agentic',
     workerAgentFile: 'agents/worker.yaml',
     reviewerAgentFile: 'agents/reviewer.yaml',
     outputArtifact: 'impl.md',
@@ -290,10 +301,17 @@ describe('TicketRunUseCase', () => {
   let buildPromptFn: (context: AssembledContext, agentSpec: AgentSpec) => string;
   let projectChecks: CheckConfig[] | undefined;
   let protectedPaths: string[] | undefined;
+  let generators: GeneratorConfig[] | undefined;
+  let contracts: string[] | undefined;
+  /** What `.aeos/tmp/generators.json` holds. */
+  let generatorStamps: Record<string, string>;
   let projectRepo: ProjectRepository;
   let checksRunner: { run: ReturnType<typeof vi.fn> };
   let checkRegistry: CheckRegistry;
   let gateRecords: GateRecord[];
+  let criteriaCollector: { collect: ReturnType<typeof vi.fn> };
+  let conformanceService: { buildConformance: ReturnType<typeof vi.fn> };
+  let fileHasher: { sha256: ReturnType<typeof vi.fn> };
   let useCase: TicketRunUseCase;
 
   beforeEach(() => {
@@ -316,15 +334,26 @@ describe('TicketRunUseCase', () => {
     projectChecks = undefined;
     gateRecords = [];
     protectedPaths = undefined;
+    generators = undefined;
+    contracts = undefined;
+    generatorStamps = {};
     projectRepo = {
-      readExecutorConfig: () => ({ checks: projectChecks, protectedPaths }),
+      readExecutorConfig: () => ({ checks: projectChecks, protectedPaths, generators, contracts }),
     } as unknown as ProjectRepository;
     checksRunner = {
       run: vi
         .fn()
         .mockResolvedValue({ exitCode: 0, durationMs: 1200, timedOut: false, outputTail: 'fine' }),
     };
-    checkRegistry = new CheckRegistry(projectRepo, checksRunner as ChecksRunner);
+    criteriaCollector = { collect: vi.fn() };
+    conformanceService = { buildConformance: vi.fn() };
+    fileHasher = { sha256: vi.fn().mockReturnValue({}) };
+    checkRegistry = new CheckRegistry(
+      projectRepo,
+      checksRunner as ChecksRunner,
+      criteriaCollector as unknown as CriteriaCollector,
+      artifactStore,
+    );
     buildPromptFn = vi.fn().mockReturnValue('assembled prompt') as unknown as (
       context: AssembledContext,
       agentSpec: AgentSpec,
@@ -357,6 +386,15 @@ describe('TicketRunUseCase', () => {
       checkRegistry,
       projectRepo,
       { append: vi.fn(), list: () => gateRecords },
+      criteriaCollector as unknown as CriteriaCollector,
+      conformanceService as unknown as ConformanceService,
+      fileHasher as FileHasher,
+      {
+        read: () => generatorStamps,
+        write: (_projectPath, stamps) => {
+          generatorStamps = stamps;
+        },
+      },
     );
   }
 
@@ -370,6 +408,644 @@ describe('TicketRunUseCase', () => {
       files: call[2] as { brief: string; transcript: string },
     }));
   }
+
+  describe('roles, not names', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    /** An epic in TECH_SPEC, whose spec declares `declared`. */
+    const inTechSpec = (declared: Partial<ColumnSpec>, specPin: typeof PIN | null = PIN): void => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'TECH_SPEC', subState: 'READY', specPin }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ column: 'TECH_SPEC', executorMode: 'artifact', ...declared }),
+      );
+    };
+    const reviewerContext = (): AssembledContext =>
+      (buildPromptFn as ReturnType<typeof vi.fn>).mock.calls[1]![0] as AssembledContext;
+    const fullTrace = traceCriteria({
+      criteria: ['AC-1'],
+      nonGoals: [],
+      claims: new Map([['AEOS-2', ['AC-1']]]),
+      instruments: new Map([['AC-1', ['a.test.ts']]]),
+    });
+
+    it('builds the conformance report at a final gate of any name', async () => {
+      inTechSpec({ role: 'final-gate' });
+      conformanceService.buildConformance.mockResolvedValue({
+        report: { criteria: [] },
+        markdown: '# Conformance report',
+      });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(conformanceService.buildConformance).toHaveBeenCalledWith(PROJECT_PATH, TICKET_ID);
+      expect(executor.run).not.toHaveBeenCalled();
+    });
+
+    it('runs a column called DOD_GATE like any other when its spec does not make it the final gate', async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'DOD_GATE', subState: 'READY' }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ column: 'DOD_GATE', executorMode: 'artifact' }),
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(conformanceService.buildConformance).not.toHaveBeenCalled();
+      expect(executor.run).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives the unclaimed criteria to the reviewer of a decomposition column of any name, and of no other', async () => {
+      criteriaCollector.collect.mockReturnValue(fullTrace);
+      inTechSpec({ role: 'decomposition' });
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(reviewerContext().priorArtifacts.map((a) => a.name)).toContain('criteria-claims.md');
+
+      (buildPromptFn as ReturnType<typeof vi.fn>).mockClear();
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'TASK_BREAKDOWN', subState: 'READY', specPin: PIN }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ column: 'TASK_BREAKDOWN', executorMode: 'artifact' }),
+      );
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(reviewerContext().priorArtifacts.map((a) => a.name)).not.toContain(
+        'criteria-claims.md',
+      );
+    });
+
+    it('traces criteria before the worker of an integration column of any name', async () => {
+      criteriaCollector.collect.mockReturnValue(
+        traceCriteria({
+          criteria: ['AC-1'],
+          nonGoals: [],
+          claims: new Map(),
+          instruments: new Map(),
+        }),
+      );
+      inTechSpec({ role: 'integration' });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'escalated', reason: 'PRE_WORKER_CHECK_FAILED' });
+    });
+
+    it('runs the worker of a column called IMPLEMENTATION as an artifact unless its spec says agentic', async () => {
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ executorMode: undefined }),
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const worker = (executor.run as ReturnType<typeof vi.fn>).mock
+        .calls[0]![0] as ExecutorInvocation;
+      expect(worker).toMatchObject({ mode: 'artifact', workingDirectory: undefined });
+      expect(gitGateway.stageAll).not.toHaveBeenCalled();
+    });
+
+    it.each(['none', 'task', 'epic'] as const)(
+      'assembles every context of a column with the diff its spec asks for: %s',
+      async (diffContext) => {
+        inTechSpec({ diffContext }, null);
+
+        await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+        const asked = (contextAssembler.assemble as ReturnType<typeof vi.fn>).mock.calls.map(
+          (call) => call[2] as string,
+        );
+        expect(asked.length).toBeGreaterThan(1);
+        expect(new Set(asked)).toEqual(new Set([diffContext]));
+      },
+    );
+  });
+
+  describe('the bug track', () => {
+    const COMMAND = 'npx vitest run src/foo.test.ts -t "returns 404"';
+    const TEST_FILE = 'src/foo.test.ts';
+    const red = {
+      exitCode: 1,
+      durationMs: 40,
+      timedOut: false,
+      outputTail: 'expected 404, got 500',
+    };
+    const green = { exitCode: 0, durationMs: 40, timedOut: false, outputTail: '1 passed' };
+    const notes = `${'A '.repeat(60)}`;
+    /** What the ticket directory holds: the engine reads its own repro record back from it. */
+    let stored: Record<string, string>;
+    /** What the reproduce phase answers with. */
+    let reproduceNotes: string;
+
+    const invocations = (): ExecutorInvocation[] =>
+      (executor.run as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0] as ExecutorInvocation,
+      );
+    const phases = (): string[] =>
+      invocations().map((invocation) =>
+        invocation.outputPath.endsWith('-review.md') ? 'review' : (invocation.bugPhase ?? 'worker'),
+      );
+    const prompts = (): Array<{ context: AssembledContext; agent: AgentSpec }> =>
+      (buildPromptFn as ReturnType<typeof vi.fn>).mock.calls.map((call) => ({
+        context: call[0] as AssembledContext,
+        agent: call[1] as AgentSpec,
+      }));
+    const projectCommits = (): string[] =>
+      (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls
+        .filter((call) => call[0] === PROJECT_PATH)
+        .map((call) => call[2] as string);
+    const checksRecords = (): RunRecord[] =>
+      writtenRuns()
+        .map((run) => run.record)
+        .filter((record) => record.role === 'checks');
+
+    beforeEach(() => {
+      stored = {};
+      reproduceNotes = `${notes}\n\n<!-- AEOS-REPRO\ncommand: ${COMMAND}\n-->`;
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ kind: 'TASK', subState: 'READY', track: 'bug' }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ executorMode: 'agentic' }),
+      );
+      (agentSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultAgentSpec({ bugTrack: { reproduce: 'ADD A FAILING TEST', fix: 'MAKE IT PASS' } }),
+      );
+      (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mockImplementation(
+        (_project: string, _ticket: string, name: string, content: string) => {
+          stored[name] = content;
+        },
+      );
+      (artifactStore.artifactExists as ReturnType<typeof vi.fn>).mockImplementation(
+        (_project: string, _ticket: string, name: string) => name in stored,
+      );
+      (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockImplementation(
+        (_project: string, _ticket: string, name: string) => stored[name] ?? 'ticket content',
+      );
+      (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (invocation: ExecutorInvocation) => ({
+          ok: true,
+          artifactPath: invocation.outputPath,
+          content: invocation.outputPath.endsWith('-review.md')
+            ? reviewWith('APPROVED')
+            : invocation.bugPhase === 'reproduce'
+              ? reproduceNotes
+              : notes,
+        }),
+      );
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockImplementation((dir: string) =>
+        dir === PROJECT_PATH ? [TEST_FILE] : [],
+      );
+      fileHasher.sha256.mockReturnValue({ [TEST_FILE]: 'hash-of-the-test' });
+      checksRunner.run.mockResolvedValueOnce(red).mockResolvedValueOnce(green);
+    });
+
+    it('reproduces, commits the test, fixes, proves it green, and goes to review with the evidence', async () => {
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(phases()).toEqual(['reproduce', 'fix', 'review']);
+      // Each phase is briefed with its own instruction, selected by the engine.
+      expect(prompts()[0]!.agent.taskInstruction).toBe('ADD A FAILING TEST');
+      expect(prompts()[1]!.agent.taskInstruction).toBe('MAKE IT PASS');
+      // ...and the fix is told the command and the files it must leave alone.
+      const reproduction = prompts()[1]!.context.priorArtifacts.find(
+        (artifact) => artifact.name === 'reproduction.md',
+      )!.content;
+      expect(reproduction).toContain(COMMAND);
+      expect(reproduction).toContain(TEST_FILE);
+
+      // The same command, through the checks runner, before and after the fix.
+      expect(checksRunner.run.mock.calls.map((call) => [call[0].command, call[1]])).toEqual([
+        [COMMAND, PROJECT_PATH],
+        [COMMAND, PROJECT_PATH],
+      ]);
+      // The reproducing test is committed before the fix is asked for.
+      expect(gitGateway.commitFiles).toHaveBeenCalledWith(
+        PROJECT_PATH,
+        [path.join(PROJECT_PATH, TEST_FILE)],
+        expect.stringMatching(/^\[AEOS-1\]\[REPRO\]/),
+      );
+      const reproCommit = (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.findIndex(
+        (call) => call[0] === PROJECT_PATH,
+      );
+      expect(
+        (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.invocationCallOrder[reproCommit],
+      ).toBeLessThan((executor.run as ReturnType<typeof vi.fn>).mock.invocationCallOrder[1]!);
+
+      // Evidence: two checks records, and repro.md with red then green.
+      expect(checksRecords()).toMatchObject([
+        { verdict: 'CHECKS_PASSED', executor: 'shell', output: null },
+        { verdict: 'CHECKS_PASSED', executor: 'shell', output: 'tickets/AEOS-1/AEOS-1-repro.md' },
+      ]);
+      const evidence = stored['AEOS-1-repro.md']!;
+      expect(evidence).toContain(`Command: \`${COMMAND}\``);
+      expect(evidence).toContain('| Before the fix | 1 |');
+      expect(evidence).toContain('| After the fix | 0 |');
+      expect(evidence.indexOf('expected 404, got 500')).toBeLessThan(evidence.indexOf('1 passed'));
+      expect(evidence).toContain(`<!-- AEOS-RUN: ${checksRecords()[1]!.run_id} -->`);
+      // ...committed with the artefact.
+      const artifactCommit = (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.find(
+        (call) => (call[2] as string).includes('[impl.md]'),
+      )!;
+      expect(artifactCommit[1]).toContain(
+        path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, 'AEOS-1-repro.md'),
+      );
+    });
+
+    it('rejects the attempt when the test passes before any fix: it does not reproduce the bug', async () => {
+      checksRunner.run.mockReset().mockResolvedValue(green);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // Rejected, retried in the same phase with that feedback, and escalated when it repeats.
+      expect(result.status).toBe('escalated');
+      expect(phases()).toEqual(['reproduce', 'reproduce']);
+      expect(
+        prompts()[1]!.context.priorArtifacts.find((a) => a.name === 'previous-checks.md')!.content,
+      ).toContain('The test does not reproduce the bug');
+      expect(projectCommits()).toEqual([]);
+      expect(checksRecords()).toMatchObject([
+        { verdict: 'CHECKS_FAILED' },
+        { verdict: 'CHECKS_FAILED' },
+      ]);
+    });
+
+    it('does not hand the fix the feedback that was about the reproduction', async () => {
+      checksRunner.run
+        .mockReset()
+        .mockResolvedValueOnce(green)
+        .mockResolvedValueOnce(red)
+        .mockResolvedValueOnce(green);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(phases()).toEqual(['reproduce', 'reproduce', 'fix', 'review']);
+      expect(prompts()[2]!.context.priorArtifacts.map((artifact) => artifact.name)).toEqual([
+        'reproduction.md',
+      ]);
+    });
+
+    it('fails the attempt, naming the file, when the fix edits the reproducing test', async () => {
+      fileHasher.sha256
+        .mockReturnValueOnce({ [TEST_FILE]: 'hash-of-the-test' })
+        .mockReturnValueOnce({ [TEST_FILE]: 'another-hash' });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      if (result.status !== 'failed') return;
+      expect(result.error).toContain('The reproducing test was modified');
+      expect(result.error).toContain(TEST_FILE);
+      expect(gitGateway.restoreFiles).toHaveBeenCalledWith(PROJECT_PATH, [TEST_FILE]);
+      expect(phases()).toEqual(['reproduce', 'fix']);
+      // The fix was not run against a test it had rewritten.
+      expect(checksRunner.run).toHaveBeenCalledTimes(1);
+    });
+
+    it('escalates when the reproduce phase names no command', async () => {
+      reproduceNotes = notes;
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'escalated', reason: 'UNPARSEABLE_REPRO' });
+      expect(stateMachine.setSubState).toHaveBeenLastCalledWith(PROJECT_ID, TICKET_ID, 'ESCALATED');
+      expect(phases()).toEqual(['reproduce']);
+      expect(checksRunner.run).not.toHaveBeenCalled();
+    });
+
+    it('sends the fix back when the test still fails after it, without asking the reviewer', async () => {
+      checksRunner.run.mockReset().mockResolvedValue(red);
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // Reproduced once; from then on only the fix is retried.
+      expect(phases()).toEqual(['reproduce', 'fix', 'fix']);
+      expect(
+        prompts()[2]!.context.priorArtifacts.find((a) => a.name === 'previous-checks.md')!.content,
+      ).toContain('still fails after the fix');
+      expect(projectCommits()).toHaveLength(1);
+      expect(stored).not.toHaveProperty('AEOS-1-repro.md');
+    });
+
+    it('does not reproduce again on a later run: the committed test and its hashes stand', async () => {
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      (executor.run as ReturnType<typeof vi.fn>).mockClear();
+      checksRunner.run.mockReset().mockResolvedValue(green);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(phases()).toEqual(['fix', 'review']);
+      expect(projectCommits()).toHaveLength(1);
+      expect(stored['AEOS-1-repro.md']).toContain('| Before the fix | 1 |');
+    });
+
+    it('refuses to run a bug with an agent that has no bug-track instructions', async () => {
+      (agentSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(defaultAgentSpec());
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: expect.stringContaining('bugTrack'),
+      });
+      expect(executor.run).not.toHaveBeenCalled();
+    });
+    it('halts a fix that touches a contract path: it is a behaviour change, not a bug fix', async () => {
+      contracts = ['db/**'];
+      const changed = [TEST_FILE];
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockImplementation((dir: string) =>
+        dir === PROJECT_PATH ? [...changed] : [],
+      );
+      (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (invocation: ExecutorInvocation) => {
+          if (invocation.bugPhase === 'fix') changed.push('db/schema.sql');
+          return {
+            ok: true,
+            artifactPath: invocation.outputPath,
+            content: invocation.bugPhase === 'reproduce' ? reproduceNotes : notes,
+          };
+        },
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'escalated', reason: 'CONTRACT_CHANGE' });
+      expect((result as { message: string }).message).toContain(
+        'this fix changes a contract; it is a behaviour change, not a bug fix',
+      );
+      expect((result as { message: string }).message).toContain('db/schema.sql');
+      // The reviewer is not asked, and the ticket carries the change for the person who decides.
+      expect(phases()).toEqual(['reproduce', 'fix']);
+      expect(ticketRepo.setContractChange).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, {
+        paths: ['db/schema.sql'],
+        approvedBy: null,
+      });
+    });
+  });
+
+  describe('conformance at the final gate', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    /** A report over AC-1…AC-4 in which exactly `passing` pass by test. */
+    const conformanceWith = (passing: string[]): void => {
+      const report = buildConformanceReport({
+        feature: 'checkout',
+        epic: TICKET_ID,
+        trace: traceCriteria({
+          criteria: ['AC-1', 'AC-2', 'AC-3', 'AC-4'],
+          nonGoals: [],
+          claims: new Map(),
+          instruments: new Map(),
+        }),
+        tests: passing.map((id) => ({ name: `${id} holds`, file: 'a.test.ts', status: 'pass' })),
+        spec: PIN,
+        code: { repo: 'shop', commit: 'deadbee' },
+        generatedAt: '2026-11-10T12:00:00.000Z',
+      });
+      conformanceService.buildConformance.mockResolvedValue({
+        report,
+        markdown: renderConformanceMarkdown(report),
+      });
+    };
+    const conformanceFile = (): string =>
+      (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.calls.find(
+        (call) => call[2] === `${TICKET_ID}-conformance.md`,
+      )?.[3] as string;
+    const workerAnswers = (block: string): void => {
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        artifactPath: '/tmp/artifact',
+        content: `${'A '.repeat(60)}\n\n${block}\n\n${reviewWith('APPROVED')}`,
+      });
+    };
+
+    beforeEach(() => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'DOD_GATE', subState: 'READY', specPin: PIN }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({
+          column: 'DOD_GATE',
+          role: 'final-gate',
+          executorMode: 'artifact',
+          outputArtifact: 'dod-verification.md',
+        }),
+      );
+    });
+
+    it('invokes no agent when every criterion passes by test, and signs the report off', async () => {
+      conformanceWith(['AC-1', 'AC-2', 'AC-3', 'AC-4']);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(conformanceService.buildConformance).toHaveBeenCalledWith(PROJECT_PATH, TICKET_ID);
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(preflight.run).not.toHaveBeenCalled();
+      for (const id of ['AC-1', 'AC-2', 'AC-3', 'AC-4']) {
+        expect(conformanceFile()).toContain(`| ${id} | pass |`);
+      }
+      expect(conformanceFile()).not.toContain('Judge exactly');
+      expect(stateMachine.setSubState).toHaveBeenLastCalledWith(
+        PROJECT_ID,
+        TICKET_ID,
+        'SIGNED_OFF',
+      );
+    });
+
+    it('asks the agent about exactly the unverified criteria, then the reviewer', async () => {
+      conformanceWith(['AC-1', 'AC-2']);
+      workerAnswers('<!-- AEOS-CONFORMANCE\nAC-3: pass | Stored.\nAC-4: fail | Never read.\n-->');
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      // Written to the ticket directory before the context is assembled, so
+      // the worker and the reviewer are both briefed with it.
+      expect(conformanceFile()).toContain('Judge exactly these criteria: AC-3, AC-4');
+      expect(
+        (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        (contextAssembler.assemble as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+      );
+      // The worker, then the reviewer.
+      expect(executor.run).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ['no verdict block', ''],
+      ['a block that leaves one out', '<!-- AEOS-CONFORMANCE\nAC-3: pass | Stored.\n-->'],
+    ])('escalates on %s, and does not ask the reviewer', async (_name, block) => {
+      conformanceWith(['AC-1', 'AC-2']);
+      workerAnswers(block);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'escalated', reason: 'UNPARSEABLE_VERDICT' });
+      expect(executor.run).toHaveBeenCalledTimes(1);
+      expect(stateMachine.setSubState).toHaveBeenLastCalledWith(PROJECT_ID, TICKET_ID, 'ESCALATED');
+    });
+
+    it('fails the run, with the cause, when the report cannot be built', async () => {
+      conformanceService.buildConformance.mockRejectedValue(new Error('no test report'));
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed', error: 'no test report' });
+      expect(executor.run).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('criterion tracing before the worker', () => {
+    const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+    const trace = (claimed: string[], tagged = ['AC-1', 'AC-2', 'AC-3', 'AC-4']) =>
+      traceCriteria({
+        criteria: ['AC-1', 'AC-2', 'AC-3', 'AC-4'],
+        nonGoals: ['NON-GOAL-1'],
+        claims: new Map([['AEOS-2', claimed]]),
+        instruments: new Map(tagged.map((id) => [id, [`src/${id}.test.ts`]])),
+      });
+    const atIntegration = (specPin: typeof PIN | null = PIN): void => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'INTEGRATION_REVIEW', specPin }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({
+          column: 'INTEGRATION_REVIEW',
+          role: 'integration',
+          executorMode: 'artifact',
+          outputArtifact: 'integration.md',
+        }),
+      );
+    };
+    const written = (): Record<string, string> =>
+      Object.fromEntries(
+        (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.calls.map((call) => [
+          call[2],
+          call[3],
+        ]),
+      ) as Record<string, string>;
+
+    it('escalates with the trace report when a criterion is unclaimed; no agent runs, no attempt is used', async () => {
+      atIntegration();
+      criteriaCollector.collect.mockReturnValue(trace(['AC-1', 'AC-2', 'AC-3']));
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({
+        status: 'escalated',
+        reason: 'PRE_WORKER_CHECK_FAILED',
+        attempts: 0,
+        artifactPath: path.join(
+          PROJECT_PATH,
+          '.aeos',
+          'tickets',
+          TICKET_ID,
+          'AEOS-1-criteria-trace.md',
+        ),
+      });
+      expect(written()['AEOS-1-criteria-trace.md']).toContain('Unclaimed: AC-4');
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(preflight.run).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).toHaveBeenCalledExactlyOnceWith(
+        PROJECT_ID,
+        TICKET_ID,
+        'ESCALATED',
+      );
+      // One run record, for the check; none for a worker or a reviewer.
+      expect(writtenRuns().map((run) => run.record)).toMatchObject([
+        {
+          role: 'checks',
+          executor: 'in-process',
+          verdict: 'CHECKS_FAILED',
+          brief: null,
+          output: 'tickets/AEOS-1/AEOS-1-criteria-trace.md',
+          spec_pin: PIN,
+        },
+      ]);
+    });
+
+    it('blocks on a claimed criterion that no test or scenario names', async () => {
+      atIntegration();
+      criteriaCollector.collect.mockReturnValue(
+        trace(['AC-1', 'AC-2', 'AC-3', 'AC-4'], ['AC-1', 'AC-2', 'AC-3']),
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('escalated');
+      expect(written()['AEOS-1-criteria-trace.md']).toContain('Untested: AC-4');
+    });
+
+    it('blocks on a claim of a criterion the spec does not contain', async () => {
+      atIntegration();
+      criteriaCollector.collect.mockReturnValue(trace(['AC-1', 'AC-2', 'AC-3', 'AC-4', 'AC-9']));
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('escalated');
+      expect(written()['AEOS-1-criteria-trace.md']).toContain('AEOS-2 claims AC-9');
+    });
+
+    it('passes, commits the report with its run record, and goes on to the worker', async () => {
+      atIntegration();
+      criteriaCollector.collect.mockReturnValue(trace(['AC-1', 'AC-2', 'AC-3', 'AC-4']));
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(written()['AEOS-1-criteria-trace.md']).toContain('NON-GOAL-1');
+      const dir = path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID);
+      expect(gitGateway.commitFiles).toHaveBeenCalledWith(
+        path.join(PROJECT_PATH, '.aeos'),
+        expect.arrayContaining([
+          path.join(dir, 'AEOS-1-criteria-trace.md'),
+          path.join(dir, 'AEOS-1-criteria-trace.json'),
+        ]),
+        expect.stringMatching(/\[checks\]\[ok\]$/),
+      );
+      expect(writtenRuns()[0]!.record).toMatchObject({ role: 'checks', verdict: 'CHECKS_PASSED' });
+    });
+
+    it('is skipped for an epic with no spec', async () => {
+      atIntegration(null);
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(criteriaCollector.collect).not.toHaveBeenCalled();
+      expect(writtenRuns().some((run) => run.record.role === 'checks')).toBe(false);
+    });
+
+    it('tells the task-breakdown reviewer which criteria no task claims', async () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ column: 'TASK_BREAKDOWN', specPin: PIN }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({
+          column: 'TASK_BREAKDOWN',
+          role: 'decomposition',
+          executorMode: 'artifact',
+          outputArtifact: 'tasks.md',
+        }),
+      );
+      criteriaCollector.collect.mockReturnValue(trace(['AC-1', 'AC-9']));
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const contexts = (buildPromptFn as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0] as AssembledContext,
+      );
+      const claims = (context: AssembledContext) =>
+        context.priorArtifacts.find((artifact) => artifact.name === 'criteria-claims.md');
+      expect(claims(contexts[0]!)).toBeUndefined();
+      expect(claims(contexts[1]!)?.content).toContain('Unclaimed: AC-2, AC-3, AC-4');
+      expect(claims(contexts[1]!)?.content).toContain('AEOS-2 claims AC-9');
+    });
+  });
 
   describe('drift guard', () => {
     const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
@@ -1009,6 +1685,9 @@ describe('TicketRunUseCase', () => {
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
       runnableTicket({ column: 'DOD_GATE' }),
     );
+    (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+      defaultColumnSpec({ column: 'DOD_GATE', role: 'final-gate', executorMode: 'artifact' }),
+    );
 
     const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
@@ -1291,23 +1970,6 @@ describe('TicketRunUseCase', () => {
     ).toBe(false);
   });
 
-  // --- Invalid column value in column spec ---
-
-  it('should return failed for invalid column value in columnSpec', async () => {
-    (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue({
-      ...defaultColumnSpec(),
-      column: 'NOT_A_COLUMN',
-    });
-
-    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
-
-    expect(result).toEqual({
-      status: 'failed',
-      ticketId: TICKET_ID,
-      error: 'Invalid column value: NOT_A_COLUMN',
-    });
-  });
-
   // --- Rubric loading through port ---
 
   it('should load rubrics through RubricLoader port', async () => {
@@ -1509,6 +2171,10 @@ describe('TicketRunUseCase', () => {
     });
 
     it('records a worker whose output fails validation as failed', async () => {
+      // An artifact column: the word count is not asked of an agentic summary.
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ executorMode: 'artifact' }),
+      );
       (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: true,
         artifactPath: '/tmp/artifact',
@@ -2076,6 +2742,185 @@ describe('TicketRunUseCase', () => {
 
       expect(result.status).toBe('success');
       expect(restored()).toEqual([]);
+    });
+  });
+  describe('generators and the contract gate', () => {
+    const GENERATOR: GeneratorConfig = {
+      name: 'api',
+      command: 'npm run generate:api',
+      inputs: ['api.yaml'],
+      outputs: ['gen/**'],
+    };
+    // What `git status` would list in the project; committing there clears it.
+    let dirty: string[];
+    /** What ran, in order. */
+    let order: string[];
+    /** What the worker edits as it runs. */
+    let workerTouches: string[];
+    const generatorRecords = (): RunRecord[] =>
+      writtenRuns()
+        .map((run) => run.record)
+        .filter((record) => record.role === 'generator');
+    const projectCommits = (): unknown[][] =>
+      (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (call) => call[0] === PROJECT_PATH,
+      );
+
+    beforeEach(() => {
+      dirty = [];
+      order = [];
+      workerTouches = [];
+      (gitGateway.listFiles as ReturnType<typeof vi.fn>).mockReturnValue(['api.yaml', 'src/a.ts']);
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockImplementation((dir: string) =>
+        dir === PROJECT_PATH ? [...dirty] : [],
+      );
+      (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mockImplementation((dir: string) => {
+        if (dir === PROJECT_PATH) dirty = [];
+      });
+      fileHasher.sha256.mockImplementation((_dir: string, files: string[]) =>
+        Object.fromEntries(files.map((file) => [file, `hash of ${file}`])),
+      );
+      checksRunner.run.mockImplementation(async () => {
+        order.push('generator');
+        dirty.push('gen/client.ts');
+        return { exitCode: 0, durationMs: 5, timedOut: false, outputTail: 'generated' };
+      });
+      (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (invocation: ExecutorInvocation) => {
+          const isReview = invocation.outputPath.endsWith('-review.md');
+          order.push(isReview ? 'reviewer' : 'worker');
+          if (!isReview) dirty.push(...workerTouches);
+          return {
+            ok: true,
+            artifactPath: invocation.outputPath,
+            content: `${'A '.repeat(60)}\n\n${reviewWith('APPROVED')}`,
+          };
+        },
+      );
+    });
+
+    it('runs a generator whose inputs changed before the worker, and commits what it wrote', async () => {
+      generators = [GENERATOR];
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(order).toEqual(['generator', 'worker', 'reviewer']);
+      expect(checksRunner.run).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'npm run generate:api' }),
+        PROJECT_PATH,
+      );
+      expect(projectCommits()).toEqual([
+        [PROJECT_PATH, [path.join(PROJECT_PATH, 'gen/client.ts')], '[AEOS-1][GENERATED] api'],
+      ]);
+      expect(generatorRecords()).toHaveLength(1);
+      expect(generatorRecords()[0]).toMatchObject({
+        role: 'generator',
+        executor: 'shell',
+        agent: null,
+        brief: null,
+        cost_basis: 'none',
+        exit: 'ok',
+      });
+      expect(generatorStamps).toHaveProperty('api');
+    });
+
+    it('does not run a generator whose inputs are unchanged', async () => {
+      generators = [GENERATOR];
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(checksRunner.run).toHaveBeenCalledTimes(1);
+      expect(generatorRecords()).toHaveLength(1);
+
+      // ...and runs it again once an input's content changes.
+      fileHasher.sha256.mockReturnValue({ 'api.yaml': 'another hash' });
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(checksRunner.run).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not run generators on a column whose worker is not agentic', async () => {
+      generators = [GENERATOR];
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ executorMode: 'artifact' }),
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(checksRunner.run).not.toHaveBeenCalled();
+    });
+
+    it('fails the attempt with the output of a generator that fails, and never runs the worker', async () => {
+      generators = [GENERATOR];
+      checksRunner.run.mockResolvedValue({
+        exitCode: 1,
+        durationMs: 5,
+        timedOut: false,
+        outputTail: 'api.yaml: unknown key "paths2"',
+      });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect((result as { error: string }).error).toContain("Generator 'api' failed");
+      expect((result as { error: string }).error).toContain('api.yaml: unknown key "paths2"');
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(generatorRecords()[0]).toMatchObject({ role: 'generator', exit: 'failed' });
+      // Not stamped: the next run tries again.
+      expect(generatorStamps).toEqual({});
+    });
+
+    it('treats a generator output the worker edits as a protected-path violation', async () => {
+      generators = [GENERATOR];
+      workerTouches = ['gen/client.ts'];
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect((result as { error: string }).error).toContain('protected paths');
+      expect((result as { error: string }).error).toContain('gen/client.ts');
+      expect(gitGateway.restoreFiles).toHaveBeenCalledWith(PROJECT_PATH, ['gen/client.ts']);
+    });
+
+    it('marks the ticket with the contract paths the worker changed', async () => {
+      contracts = ['db/schema.sql', 'api/**'];
+      workerTouches = ['src/index.ts', 'db/schema.sql', 'api/v1/openapi.yaml'];
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // The diff is the proposal: the attempt goes on to review.
+      expect(result.status).toBe('success');
+      expect(order).toEqual(['worker', 'reviewer']);
+      expect(ticketRepo.setContractChange).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, {
+        paths: ['api/v1/openapi.yaml', 'db/schema.sql'],
+        approvedBy: null,
+      });
+    });
+
+    it('counts the inputs of a generator as contracts, and adds to what the ticket already carries', async () => {
+      generators = [GENERATOR];
+      workerTouches = ['api.yaml'];
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ contractChange: { paths: ['db/schema.sql'], approvedBy: 'GATE-2' } }),
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // A new change is not covered by the earlier approval.
+      expect(ticketRepo.setContractChange).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, {
+        paths: ['api.yaml', 'db/schema.sql'],
+        approvedBy: null,
+      });
+    });
+
+    it('leaves a ticket unmarked when its worker touched no contract path', async () => {
+      contracts = ['db/schema.sql'];
+      workerTouches = ['src/index.ts'];
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(ticketRepo.setContractChange).not.toHaveBeenCalled();
     });
   });
 });

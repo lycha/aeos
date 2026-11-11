@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { spawnSync } from 'node:child_process';
 
-import { Column } from '../../domain/model/column.js';
 import type { ExecutorInvocation } from '../../domain/model/executor-invocation.js';
+import { parseConformanceVerdicts } from '../../domain/services/conformance-verdict-parser.js';
+import { parseRepro } from '../../domain/services/repro-parser.js';
 import { StubExecutor } from './stub-executor.adapter.js';
 
 describe('StubExecutor', () => {
@@ -25,7 +27,7 @@ describe('StubExecutor', () => {
       prompt: 'Test prompt',
       outputPath: path.join(tmpDir, 'output.md'),
       ticketId: 'T-42',
-      column: Column.SPEC_REVIEW,
+      column: 'SPEC_REVIEW',
       ...overrides,
     };
   }
@@ -41,7 +43,7 @@ describe('StubExecutor', () => {
   it('written file contains ticket ID and column', async () => {
     const invocation = makeInvocation({
       ticketId: 'PROJ-99',
-      column: Column.TECH_SPEC,
+      column: 'TECH_SPEC',
     });
     await executor.run(invocation);
 
@@ -53,7 +55,7 @@ describe('StubExecutor', () => {
   it('emits a parseable verdict trailer when standing in for a reviewer', async () => {
     // Without this, every AEOS_EXECUTOR=stub run escalates as
     // UNPARSEABLE_VERDICT and the pipeline cannot be exercised offline.
-    const invocation = makeInvocation({ ticketId: 'PROJ-99', column: Column.TECH_SPEC });
+    const invocation = makeInvocation({ ticketId: 'PROJ-99', column: 'TECH_SPEC' });
     const reviewInvocation = {
       ...invocation,
       outputPath: invocation.outputPath.replace(/\.md$/, '-review.md'),
@@ -81,7 +83,7 @@ describe('StubExecutor', () => {
   });
 
   it('does not emit a verdict trailer for worker output', async () => {
-    const result = await executor.run(makeInvocation({ column: Column.TECH_SPEC }));
+    const result = await executor.run(makeInvocation({ column: 'TECH_SPEC' }));
 
     expect(result.ok && result.content).not.toContain('AEOS-VERDICT');
   });
@@ -100,29 +102,6 @@ describe('StubExecutor', () => {
       expect(await run(`AEOS-1-${artifact}-review.md`), artifact).toContain('AEOS-VERDICT');
     }
     expect(await run('AEOS-1-tech-spec-review.md')).toContain('AEOS-VERDICT');
-  });
-
-  it('touches the file named by AEOS_STUB_TOUCH on a worker run only', async () => {
-    const touched = path.join(tmpDir, 'deep', 'touched.md');
-    vi.stubEnv('AEOS_STUB_TOUCH', touched);
-    try {
-      const run = (name: string): Promise<unknown> =>
-        new StubExecutor().run({
-          prompt: 'p',
-          outputPath: path.join(tmpDir, name),
-          ticketId: 'AEOS-1',
-          column: 'IMPLEMENTATION',
-        });
-
-      await run('preflight-AEOS-1.md');
-      await run('AEOS-1-impl-review.md');
-      await expect(fs.access(touched)).rejects.toThrow();
-
-      await run('AEOS-1-impl.md');
-      await expect(fs.readFile(touched, 'utf8')).resolves.toContain('stub');
-    } finally {
-      vi.unstubAllEnvs();
-    }
   });
 
   it('written file contains stub header and description', async () => {
@@ -196,5 +175,51 @@ describe('StubExecutor', () => {
 
   it('interrupt() resolves without error', async () => {
     await expect(executor.interrupt()).resolves.toBeUndefined();
+  });
+
+  it('judges every criterion it is asked about, as the final gate expects', async () => {
+    const invocation = makeInvocation({
+      column: 'DOD_GATE',
+      outputPath: path.join(tmpDir, 'EE-1-dod-verification.md'),
+      prompt: 'The report.\n\nJudge exactly these criteria: AC-1, AC-12a\n',
+    });
+
+    const result = await executor.run(invocation);
+
+    expect(
+      result.ok && parseConformanceVerdicts(result.content ?? '', ['AC-1', 'AC-12a']),
+    ).toMatchObject({
+      ok: true,
+      verdicts: [
+        { id: 'AC-1', result: 'pass' },
+        { id: 'AC-12a', result: 'pass' },
+      ],
+    });
+    // The review of it carries a verdict trailer and no judgement of its own.
+    const review = await executor.run({
+      ...invocation,
+      outputPath: path.join(tmpDir, 'EE-1-dod-verification-review.md'),
+    });
+    expect(review.ok && review.content).not.toContain('AEOS-CONFORMANCE');
+  });
+
+  it('plays both phases of a bug: a test that fails, then the fix that makes it pass', async () => {
+    const run = (): number =>
+      spawnSync(parsedCommand, { cwd: tmpDir, shell: true, stdio: 'ignore' }).status ?? -1;
+    let parsedCommand = '';
+
+    const reproduce = await executor.run(
+      makeInvocation({ mode: 'agentic', workingDirectory: tmpDir, bugPhase: 'reproduce' }),
+    );
+    const parsed = parseRepro((reproduce.ok && reproduce.content) || '');
+    if (!parsed.ok) throw new Error(parsed.reason);
+    parsedCommand = parsed.command;
+    expect(run()).not.toBe(0);
+
+    const fix = await executor.run(
+      makeInvocation({ mode: 'agentic', workingDirectory: tmpDir, bugPhase: 'fix' }),
+    );
+    expect(fix.ok && fix.content).not.toContain('AEOS-REPRO');
+    expect(run()).toBe(0);
   });
 });

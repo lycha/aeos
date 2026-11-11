@@ -74,6 +74,7 @@ function mockRepo(ticket: Ticket | null): TicketRepository {
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
     setSpecCommit: vi.fn(),
+    setContractChange: vi.fn(),
   };
 }
 

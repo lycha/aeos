@@ -174,6 +174,15 @@ describe('SimpleGitGateway.diff', () => {
     expect(result).toContain('diff --git');
     expect(result).toContain('modified content');
   });
+
+  it('limits the diff to the paths given', () => {
+    fs.writeFileSync(path.join(tmpDir, 'initial.md'), 'modified content\n');
+    fs.writeFileSync(path.join(tmpDir, 'other.md'), 'another file\n');
+    execFileSync('git', ['add', '-A'], { cwd: tmpDir });
+
+    expect(gateway.diff(tmpDir, ['other.md'])).toContain('another file');
+    expect(gateway.diff(tmpDir, ['other.md'])).not.toContain('modified content');
+  });
 });
 
 describe('SimpleGitGateway changed and restored files', () => {

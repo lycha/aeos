@@ -23,6 +23,7 @@ function createMockTicketRepo(): TicketRepository {
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
     setSpecCommit: vi.fn(),
+    setContractChange: vi.fn(),
   };
 }
 function createMockArtifactStore(): ArtifactStore {
@@ -76,7 +77,7 @@ const callOrder = (mock: unknown): number =>
   (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
 beforeEach(() => {
   gateRecorder.decidedBy.mockReset();
-  gateRecorder.record.mockReset();
+  gateRecorder.record.mockReset().mockReturnValue({ id: 'GATE-1' });
 });
 
 const PROJECT_ID = 'startup-a';
@@ -162,6 +163,7 @@ describe('TicketSignOffUseCase', () => {
     expect(result).toEqual({
       status: 'signed_off',
       ticketId: TICKET_ID,
+      gateRecordId: 'GATE-1',
       previousSubState: 'FAILED',
     });
     expect(stateMachine.setSubState).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, 'SIGNED_OFF');

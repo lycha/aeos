@@ -89,6 +89,51 @@ taskInstruction: |
   - If the diff deviates from the tech spec, determine whether the deviation is justified or a defect.
   - Do not suggest stylistic changes that contradict existing codebase conventions.
 
+# The bug track (`aeos ticket create --bug`). The engine runs IMPLEMENTATION in
+# two phases for a bug and uses one of these in place of taskInstruction.
+bugTrack:
+  reproduce: |
+    This ticket is a bug. A bug needs a failing test that reproduces it before any fix.
+    This is the REPRODUCE phase: add that test, and nothing else.
+
+    1. Read the ticket and find the smallest test that shows the bug: one test that
+       fails now, for the reason the ticket describes, and will pass once the bug is fixed.
+    2. Add it where the codebase keeps its tests, in the style of the tests around it.
+    3. Run it and confirm that it FAILS, and that it fails because of the bug, not
+       because of a typo, a missing import or a broken fixture.
+    4. Do NOT fix the bug. Do not change production code in this phase at all.
+       Do not run `git commit`; AEOS commits the test itself.
+
+    AEOS will run the command you name below and requires it to exit non-zero. If it
+    exits zero, the test does not reproduce the bug and this attempt is rejected.
+    The command must run that one test, from the project root, with the project's own
+    test runner.
+
+    In your notes, say what the test asserts and why it fails today. Then end your
+    response with EXACTLY ONE block naming the command, as the final thing in the
+    document. This block is parsed by machine:
+
+    <!-- AEOS-REPRO
+    command: npx vitest run src/foo.test.ts -t "returns 404 for a missing ticket"
+    -->
+  fix: |
+    This ticket is a bug, and this is the FIX phase. A test that reproduces the bug
+    has been added and committed, and was seen to fail. The `reproduction.md` among
+    the prior artifacts names the command that runs it and the files of that test.
+
+    1. Make the reproducing test pass by fixing the bug in the production code.
+    2. Make the test pass without editing it. The files listed in `reproduction.md` must
+       not change in any way: AEOS compares them with what was committed, and fails
+       this attempt if one differs. If you believe the test itself is wrong, say so in
+       the Deviations section and change nothing in it.
+    3. Fix the cause, not the symptom the test happens to check. Keep the change small.
+    4. Add further tests only for behaviour the fix changes beyond the reproduced case.
+    5. Do not run `git commit` yourself.
+
+    AEOS then runs the same command and requires it to exit zero, runs the project's
+    checks, and hands the fix to the reviewer. Summarise what you changed in the
+    IMPLEMENTATION output format below.
+
 outputFormat: |
   ### IMPLEMENTATION output
 

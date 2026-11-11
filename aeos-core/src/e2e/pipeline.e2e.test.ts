@@ -7,6 +7,9 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import yaml from 'js-yaml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { outputProblems } from '../cli/contract/contract-output.fixture.js';
+import { loadContract } from '../cli/contract/load-contract.js';
+import type { ConformanceReport } from '../domain/model/conformance-report.js';
 import type { GateRecord } from '../domain/model/gate-record.js';
 import type { RunRecord } from '../domain/model/run-record.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
@@ -20,6 +23,7 @@ import {
   driveColumn,
   pythonReady,
   runCli,
+  stubWorkerTouches,
   ticketState,
   type TempProject,
 } from './harness.js';
@@ -45,6 +49,7 @@ const ajv = new Ajv2020({
 });
 const validateRunRecord = ajv.compile(schema('run-record.schema.json'));
 const validateGates = ajv.compile(schema('gates.schema.json'));
+const validateConformance = ajv.compile(schema('conformance.schema.json'));
 
 /** Reads a gates file of `.aeos`, checks it against the approved schema, returns its records. */
 function gatesIn(project: TempProject, relative: string): GateRecord[] {
@@ -113,7 +118,8 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     await runCli('ticket', 'run', epic);
     expect(ticketState(epic).subState).toBe('SIGNED_OFF');
     const tasks = [
-      await createTicket('First task', '--parent', epic, '--key', 'T-001'),
+      // ...and claims the spec's one criterion for the first task.
+      await createTicket('First task', '--parent', epic, '--key', 'T-001', '--implements', 'AC-1'),
       await createTicket('Second task', '--parent', epic, '--key', 'T-002'),
     ];
     // A child task is refused on the default branch. `orchestrator run` would
@@ -122,6 +128,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     const refused = await runCli('ticket', 'run', tasks[0]!);
     expect(refused.output).toContain(`on the default branch '${defaultBranch}'`);
     expect(ticketState(tasks[0]!)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'READY' });
+    git('tag', `aeos-base/${epic}`);
     git('checkout', '-b', `aeos/${epic}`);
     for (let i = 0; i < 3; i++) await driveColumn(tasks[0]!);
     await driveTaskToDone(tasks[1]!);
@@ -130,8 +137,21 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect((await runCli('ticket', 'approve', epic)).exitCode).toBe(0);
     await driveColumn(epic);
     expect(ticketState(epic).column).toBe('DOD_GATE');
-    // DOD_GATE is human-only: no run, just the approval.
-    dodApprove(epic);
+    // DOD_GATE: no test answers AC-1 in this project, so the conformance agent
+    // is asked about it, and the reviewer about the agent. Then the person
+    // decides, vouching for AC-1 as well.
+    const stubCallsBeforeGate = vi.mocked(StubExecutor.prototype.run).mock.calls.length;
+    await runCli('ticket', 'run', epic);
+    expect(ticketState(epic)).toMatchObject({ column: 'DOD_GATE', subState: 'SIGNED_OFF' });
+    const gateCalls = vi.mocked(StubExecutor.prototype.run).mock.calls.slice(stubCallsBeforeGate);
+    expect(gateCalls.map(([invocation]) => path.basename(invocation.outputPath))).toEqual([
+      `${epic}-dod-verification.md`,
+      `${epic}-dod-verification-review.md`,
+    ]);
+    expect(gateCalls[0]![0].prompt).toContain('Judge exactly these criteria: AC-1\n');
+    // The agent judges against the code: the whole epic diff is in its brief.
+    expect(gateCalls[0]![0].prompt).toContain(`stub-${tasks[0]}.txt`);
+    await dodApprove(epic, ['AC-1']);
 
     // Approved out of INTEGRATION_REVIEW: the (stub) pull request is recorded.
     expect((await runCli('ticket', 'show', epic)).output).toContain(
@@ -140,7 +160,11 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // A standalone task started from the default branch moves to its own.
     git('checkout', defaultBranch);
-    const standalone = createStandaloneTask('A standalone task');
+    // A bug does not travel an epic.
+    const bugUnderEpic = await runCli('ticket', 'create', 'A bug', '--bug', '--parent', epic);
+    expect(bugUnderEpic.exitCode).toBe(1);
+    expect(bugUnderEpic.output).toContain('--bug');
+    const standalone = await createStandaloneTask('A standalone task');
     await driveTaskToDone(standalone);
     expect(git('branch', '--show-current').trim()).toBe(`aeos/${standalone}`);
     expect(git('tag', '--list', `aeos-base/${standalone}`).trim()).toBe(`aeos-base/${standalone}`);
@@ -173,6 +197,56 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       `${epic} column-approval approved INTEGRATION_REVIEW>DOD_GATE`,
       `${epic} definition-of-done approved DOD_GATE>DONE`,
     ]);
+    // The conformance report: committed with the definition-of-done gate
+    // record, in one commit, and valid against the approved schema.
+    const aeosRepo = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: path.join(project.projectPath, '.aeos'),
+        encoding: 'utf-8',
+      });
+    const dodCommit = aeosRepo('log', '-1', '--format=%H', '--', 'features/feature-sample');
+    expect(
+      aeosRepo('show', '--name-only', '--format=', dodCommit.trim()).trim().split('\n').sort(),
+    ).toEqual([
+      'features/feature-sample/conformance.md',
+      'features/feature-sample/conformance.yaml',
+      'features/feature-sample/gates.yaml',
+    ]);
+    const conformance = yaml.load(
+      aeosRepo('show', 'HEAD:features/feature-sample/conformance.yaml'),
+    ) as ConformanceReport;
+    expect(validateConformance(conformance), JSON.stringify(validateConformance.errors)).toBe(true);
+    expect(conformance.summary).toEqual({ total: 1, pass: 1, fail: 0, unverified: 0 });
+    const dodRun = fs
+      .readdirSync(path.join(project.projectPath, '.aeos', 'tickets', epic, 'runs'))
+      .map((file) => /^(RUN-.*)\.json$/.exec(file)?.[1])
+      .filter((runId) => runId !== undefined)
+      .map(
+        (runId) =>
+          JSON.parse(aeosRepo('show', `HEAD:tickets/${epic}/runs/${runId}.json`)) as RunRecord,
+      )
+      .find((record) => record.column === 'DOD_GATE' && record.role === 'worker')!;
+    expect(conformance.criteria).toMatchObject([
+      {
+        id: 'AC-1',
+        verdict: 'pass',
+        claimed_by: [tasks[0]],
+        instruments: [
+          {
+            kind: 'agent',
+            name: 'conformance-agent',
+            result: 'pass',
+            evidence: `tickets/${epic}/runs/${dodRun.run_id}.json`,
+          },
+          {
+            kind: 'human',
+            name: 'AEOS E2E <e2e@aeos.invalid>',
+            result: 'pass',
+            evidence: `features/feature-sample/gates.yaml#${featureGates.at(-1)!.id}`,
+          },
+        ],
+      },
+    ]);
     const standaloneGates = gatesIn(project, `tickets/${standalone}/${standalone}-gates.yaml`);
     expect(standaloneGates.map(decision)).toEqual(taskGates(standalone));
     for (const record of [...featureGates, ...standaloneGates]) {
@@ -196,6 +270,11 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     const aeosDir = path.join(project.projectPath, '.aeos');
     const read = (relative: string): string =>
       fs.readFileSync(path.join(aeosDir, relative), 'utf-8');
+    const aeosGitStatus = (pathspec: string): string =>
+      execFileSync('git', ['status', '--porcelain', '--', pathspec], {
+        cwd: aeosDir,
+        encoding: 'utf-8',
+      });
     const records: RunRecord[] = [];
     for (const id of [epic, ...tasks, standalone]) {
       const runsDir = path.join('tickets', id, 'runs');
@@ -203,11 +282,62 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
         if (file.endsWith('.json')) records.push(JSON.parse(read(path.join(runsDir, file))));
       }
     }
-    expect(records).toHaveLength(vi.mocked(StubExecutor.prototype.run).mock.calls.length);
-    expect(new Set(records.map((record) => record.role))).toEqual(
+    // Criterion tracing ran in process before the epic's integration worker,
+    // passed (AC-1 is claimed, and tagged on a scenario), and left its report.
+    const checksOf = (id: string): RunRecord[] =>
+      records.filter((record) => record.role === 'checks' && record.ticket === id);
+    const [trace, ...otherChecks] = checksOf(epic);
+    expect(otherChecks).toEqual([]);
+    for (const id of tasks) expect(checksOf(id)).toEqual([]);
+
+    // The bug: its test was seen red, then green, and the evidence is committed.
+    expect(
+      checksOf(standalone)
+        .sort((a, b) => a.started_at.localeCompare(b.started_at))
+        .map(({ verdict, executor, output }) => ({ verdict, executor, output })),
+    ).toEqual([
+      { verdict: 'CHECKS_PASSED', executor: 'shell', output: null },
+      {
+        verdict: 'CHECKS_PASSED',
+        executor: 'shell',
+        output: `tickets/${standalone}/${standalone}-repro.md`,
+      },
+    ]);
+    for (const record of checksOf(standalone)) {
+      expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
+    }
+    const repro = read(`tickets/${standalone}/${standalone}-repro.md`);
+    expect(repro).toContain(`Command: \`node stub-repro-${standalone}.cjs\``);
+    expect(repro).toContain('| Before the fix | 1 |');
+    expect(repro).toContain('| After the fix | 0 |');
+    expect(aeosGitStatus(`tickets/${standalone}`)).not.toContain('repro');
+    // On its branch the reproducing test is committed before the fix.
+    expect(git('log', `aeos/${standalone}`, '--format=%s', '-2').trim().split('\n')).toEqual([
+      `[${standalone}] A standalone task`,
+      `[${standalone}][REPRO] failing test that reproduces the bug`,
+    ]);
+    expect(
+      git('show', '--name-only', '--format=', `aeos/${standalone}~1`).trim().split('\n'),
+    ).toEqual([`stub-repro-${standalone}.cjs`]);
+    expect(trace).toMatchObject({
+      ticket: epic,
+      column: 'INTEGRATION_REVIEW',
+      executor: 'in-process',
+      verdict: 'CHECKS_PASSED',
+      output: `tickets/${epic}/${epic}-criteria-trace.md`,
+    });
+    expect(validateRunRecord(trace), JSON.stringify(validateRunRecord.errors)).toBe(true);
+    expect(read(trace!.output!)).toContain(
+      `| AC-1 | ${tasks[0]} | features/greeting.feature: A visitor with no saved name |`,
+    );
+    expect(read(trace!.output!)).toContain('NON-GOAL-1');
+    expect(aeosGitStatus(`tickets/${epic}`)).not.toContain('criteria-trace');
+    const executorRecords = records.filter((record) => record.role !== 'checks');
+    expect(executorRecords).toHaveLength(vi.mocked(StubExecutor.prototype.run).mock.calls.length);
+    expect(new Set(executorRecords.map((record) => record.role))).toEqual(
       new Set(['preflight', 'worker', 'reviewer']),
     );
-    for (const record of records) {
+    for (const record of executorRecords) {
       expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
       // AEOS_EXECUTOR=stub is what ran, so it is what the record names.
       expect(record).toMatchObject({ executor: 'stub', cost_basis: 'none' });
@@ -215,8 +345,9 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
         record.brief!.sha256,
       );
       expect(fs.existsSync(path.join(aeosDir, record.transcript!))).toBe(true);
-      // Every artefact's last line names the run that wrote it.
-      if (record.role !== 'preflight') {
+      // Every artefact's last line names the run that wrote it. (A bug's
+      // reproduce phase keeps no artefact: the fix's notes are the task's.)
+      if (record.role !== 'preflight' && record.output) {
         expect(read(record.output!).trimEnd().split('\n').pop()).toMatch(/^<!-- AEOS-RUN: RUN-/);
       }
     }
@@ -228,6 +359,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     )!;
     expect(read(codeReview.brief!.path)).toContain('# Spec Fidelity Rubric');
     expect(read(codeReview.brief!.path)).toContain('## Specification (pinned EE-aeos@');
+    expect(read(codeReview.brief!.path)).toContain('Scenario: A visitor with no saved name');
 
     // Later attempts overwrite an artefact, so check the link from the artefact's side too.
     for (const id of [epic, ...tasks, standalone]) {
@@ -260,9 +392,14 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     const messages = git('log', '--all', '--format=%B%x00').split('\0');
     const commitOf = (id: string): string[] =>
       messages.map((message) => message.trim()).filter((m) => m.startsWith(`[${id}]`));
-    for (const id of [...tasks, standalone]) expect(commitOf(id), id).toHaveLength(1);
+    for (const id of tasks) expect(commitOf(id), id).toHaveLength(1);
+    expect(commitOf(standalone)).toHaveLength(2);
     for (const id of tasks) expect(commitOf(id)[0]).toContain(`\n\nTicket: ${id}\nEpic: ${epic}`);
-    expect(commitOf(standalone)[0]).toMatch(new RegExp(`\\n\\nTicket: ${standalone}$`));
+    // The task's claim is in its commit.
+    expect(commitOf(tasks[0]!)[0]).toContain('\nImplements: AC-1');
+    expect(commitOf(standalone).find((message) => !message.includes('[REPRO]'))).toMatch(
+      new RegExp(`\\n\\nTicket: ${standalone}$`),
+    );
 
     // The engine committed nothing on the default branch: only the test's own two commits.
     expect(git('log', defaultBranch, '--format=%s').trim().split('\n')).toEqual([
@@ -287,7 +424,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // Columns advance manually, so the run stops for approval after one column.
     expect(run.output).toContain(`${epic} — AWAITING_APPROVAL`);
-    expect(run.exitCode).toBe(0);
+    expect(run.exitCode).toBe(3);
     expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'SIGNED_OFF' });
     const aeosDir = path.join(project.projectPath, '.aeos');
     expect(fs.existsSync(path.join(aeosDir, 'tickets', epic, `${epic}-spec-review.md`))).toBe(true);
@@ -346,10 +483,10 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // Overrides need a reason, and say what they overrode.
     const noReason = await runCli('ticket', 'move', epic, 'QA');
-    expect(noReason.exitCode).toBe(1);
+    expect(noReason.exitCode).toBe(2);
     expect(noReason.output).toContain('--reason');
     const tooShort = await runCli('ticket', 'sign-off', epic, '--reason', 'because');
-    expect(tooShort.exitCode).toBe(1);
+    expect(tooShort.exitCode).toBe(2);
     expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'ESCALATED' });
 
     const signOff = await runCli(
@@ -435,17 +572,22 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // Passing: the reviewer is briefed with the checks table.
     setChecks('node -e "process.exit(0)"');
-    const green = createStandaloneTask('A task with green checks');
+    const green = await createStandaloneTask('A task with green checks');
     await runCli('ticket', 'approve', green);
     await runCli('ticket', 'run', green);
 
     expect(ticketState(green)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
     const greenRuns = runsOf(green);
-    // Run ids sort by second, so the order within one run is not fixed.
+    // Run ids sort by second, so the order within one run is not fixed. The
+    // task is a bug: two worker phases, and its test run red and green before
+    // the project's own checks.
     expect(greenRuns.map((record) => record.role).sort()).toEqual([
+      'checks',
+      'checks',
       'checks',
       'preflight',
       'reviewer',
+      'worker',
       'worker',
     ]);
     expect(briefOf(greenRuns.find((record) => record.role === 'reviewer')!)).toMatch(
@@ -454,20 +596,20 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
 
     // Failing: no reviewer run for the attempt, and the output reaches the retry.
     setChecks(`node -e "console.log('gate is red'); process.exit(1)"`);
-    const red = createStandaloneTask('A task with red checks');
+    const red = await createStandaloneTask('A task with red checks');
     await runCli('ticket', 'approve', red);
     await runCli('ticket', 'run', red);
 
     expect(ticketState(red)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'ESCALATED' });
     const redRuns = runsOf(red);
     expect(redRuns.filter((record) => record.role === 'reviewer')).toEqual([]);
-    const redChecks = redRuns.filter((record) => record.role === 'checks');
+    const redChecks = redRuns.filter((record) => record.verdict === 'CHECKS_FAILED');
     expect(redChecks.length).toBeGreaterThan(0);
     for (const record of [...greenRuns, ...redRuns]) {
       expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
     }
     for (const record of redChecks) {
-      expect(record).toMatchObject({ verdict: 'CHECKS_FAILED', executor: 'shell' });
+      expect(record).toMatchObject({ role: 'checks', executor: 'shell' });
     }
     const retry = redRuns.find((record) => record.role === 'worker' && record.attempt === 2)!;
     expect(briefOf(retry)).toContain('gate is red');
@@ -560,6 +702,73 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       }
     },
   );
+
+  it('escalates an epic at integration review, before any agent runs, when a criterion is unclaimed', async () => {
+    await runCli('install');
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const epic = await createEpic('An epic');
+    // A task that claims nothing, and one that claims what the spec does not have.
+    await createTicket('First task', '--parent', epic, '--key', 'T-001');
+    const stray = await createTicket(
+      'Second',
+      '--parent',
+      epic,
+      '--key',
+      'T-002',
+      '--implements',
+      'AC-9',
+    );
+    const badId = await runCli(
+      'ticket',
+      'create',
+      'Third',
+      '--parent',
+      epic,
+      '--implements',
+      'ac1',
+    );
+    expect(badId.exitCode).toBe(2);
+    expect(badId.output).toContain('--implements must match');
+    await runCli(
+      'ticket',
+      'move',
+      epic,
+      'INTEGRATION_REVIEW',
+      '--reason',
+      'Straight to integration.',
+    );
+    await runCli('ticket', 'ready', epic);
+    const callsBefore = vi.mocked(StubExecutor.prototype.run).mock.calls.length;
+
+    const run = await runCli('ticket', 'run', epic);
+
+    expect(ticketState(epic)).toMatchObject({
+      column: 'INTEGRATION_REVIEW',
+      subState: 'ESCALATED',
+    });
+    expect(run.output).toContain('PRE_WORKER_CHECK_FAILED');
+    expect(vi.mocked(StubExecutor.prototype.run).mock.calls.length).toBe(callsBefore);
+    const dir = path.join(aeosDir, 'tickets', epic);
+    const report = fs.readFileSync(path.join(dir, `${epic}-criteria-trace.md`), 'utf-8');
+    expect(report).toContain('- Unclaimed: AC-1');
+    expect(report).toContain(`${stray} claims AC-9`);
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dir, `${epic}-criteria-trace.json`), 'utf-8')),
+    ).toMatchObject({ unclaimed: ['AC-1'], untested: [], nonGoals: ['NON-GOAL-1'] });
+    // The escalation points the person at the report.
+    expect((await runCli('ticket', 'show', epic)).output).toContain(`${epic}-criteria-trace.md`);
+    const records = fs
+      .readdirSync(path.join(dir, 'runs'))
+      .filter((file) => file.endsWith('.json'))
+      .map(
+        (file) => JSON.parse(fs.readFileSync(path.join(dir, 'runs', file), 'utf-8')) as RunRecord,
+      );
+    expect(records).toMatchObject([
+      { role: 'checks', executor: 'in-process', verdict: 'CHECKS_FAILED', attempt: 1 },
+    ]);
+    expect(validateRunRecord(records[0]), JSON.stringify(validateRunRecord.errors)).toBe(true);
+  });
 
   it('sends a late answer back to the spec: block, answer, amend, repin, run', async () => {
     // Preflight of the task's implementation raises one blocking question, once.
@@ -752,7 +961,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect((await runCli('ticket', 'show', epic)).output).toContain('Column: Shaping (TECH_SPEC)');
 
     // No label: the identifier in sentence case.
-    const task = createStandaloneTask('A task');
+    const task = await createStandaloneTask('A task');
     await runCli('ticket', 'move', task, 'QA', '--reason', 'Moving it by hand.');
     expect((await runCli('ticket', 'show', task)).output).toContain('Column: Qa (QA)');
 
@@ -780,17 +989,26 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(clash.output).toContain('column-specs/qa.yaml');
   });
 
+  it('stops a command whose resource is missing, with the fix from the contract', async () => {
+    const early = await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    expect(early.exitCode).toBe(4);
+    expect(early.output).toContain('a required resource is not in place: aeos_home');
+    expect(early.output).toContain('Run `aeos install`.');
+    expect(fs.existsSync(path.join(project.projectPath, '.aeos'))).toBe(false);
+
+    await runCli('install');
+    const outside = await runCli('ticket', 'list');
+    expect(outside.exitCode).toBe(4);
+    expect(outside.output).toContain(
+      'An initialised project. `.aeos/project.json` is found from the working directory upward.',
+    );
+    expect(outside.output).toContain('Run `aeos project init` in the project root.');
+  });
+
   it('fails a run that touches a protected path, in either repository, and restores it', async () => {
     await runCli('install');
     await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
     const aeosDir = path.join(project.projectPath, '.aeos');
-    const configFile = path.join(aeosDir, 'project.json');
-    const config = JSON.parse(fs.readFileSync(configFile, 'utf-8')) as object;
-    fs.writeFileSync(
-      configFile,
-      JSON.stringify({ ...config, protectedPaths: ['src/cli/generated/**'] }),
-      'utf-8',
-    );
     const failedRun = (ticketId: string): RunRecord => {
       const dir = path.join(aeosDir, 'tickets', ticketId, 'runs');
       return fs
@@ -808,7 +1026,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     const rubricFile = path.join(project.projectPath, rubric);
     const original = fs.readFileSync(rubricFile, 'utf-8');
 
-    vi.stubEnv('AEOS_STUB_TOUCH', rubric);
+    stubWorkerTouches(rubric);
     const epicRun = await runCli('ticket', 'run', epic);
 
     expect(ticketState(epic)).toMatchObject({ column: 'SPEC_REVIEW', subState: 'FAILED' });
@@ -818,12 +1036,12 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(failedRun(epic).error).toContain(rubric);
     expect(validateRunRecord(failedRun(epic)), JSON.stringify(validateRunRecord.errors)).toBe(true);
 
-    // Project repository: a new file under a configured glob.
-    const task = createStandaloneTask('A task that writes generated code');
+    // Project repository: generated code, protected with no configuration.
+    const task = await createStandaloneTask('A task that writes generated code');
     await runCli('ticket', 'approve', task);
-    const generated = 'src/cli/generated/commands.ts';
+    const generated = 'src/cli/generated/commands.gen.ts';
 
-    vi.stubEnv('AEOS_STUB_TOUCH', generated);
+    stubWorkerTouches(generated);
     const taskRun = await runCli('ticket', 'run', task);
 
     expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'FAILED' });
@@ -831,4 +1049,115 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(fs.existsSync(path.join(project.projectPath, generated))).toBe(false);
     expect(failedRun(task).error).toContain(generated);
   });
+  it('runs a generator before an agentic worker, and holds a contract change for a person', async () => {
+    await runCli('install');
+    // Columns advance on their own here, so it is the orchestrator that meets the contract gate.
+    const configFile = path.join(project.aeosHome, 'config.json');
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({ ...JSON.parse(fs.readFileSync(configFile, 'utf-8')), advanceMode: 'auto' }),
+    );
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const git = (cwd: string, ...args: string[]): string =>
+      execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const runsOf = (ticketId: string): RunRecord[] => {
+      const dir = path.join(aeosDir, 'tickets', ticketId, 'runs');
+      return fs
+        .readdirSync(dir)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8')) as RunRecord);
+    };
+
+    // A person declares the project's generator and its contracts.
+    const projectJson = path.join(aeosDir, 'project.json');
+    fs.writeFileSync(
+      projectJson,
+      JSON.stringify({
+        ...JSON.parse(fs.readFileSync(projectJson, 'utf-8')),
+        generators: [
+          {
+            name: 'api',
+            command: 'node generate.cjs',
+            inputs: ['api.yaml'],
+            outputs: ['generated/**'],
+          },
+        ],
+        contracts: ['db/schema.sql'],
+      }),
+    );
+    const specsDir = path.join(aeosDir, 'column-specs');
+    for (const file of fs.readdirSync(specsDir)) {
+      const spec = path.join(specsDir, file);
+      fs.writeFileSync(
+        spec,
+        fs.readFileSync(spec, 'utf-8').replace('advanceMode: manual', 'advanceMode: auto'),
+      );
+    }
+    git(aeosDir, 'add', '-A');
+    git(aeosDir, 'commit', '-m', 'declare the generator and the contracts; advance on sign-off');
+    const inProject = (file: string): string => path.join(project.projectPath, file);
+    fs.writeFileSync(inProject('api.yaml'), 'version: 1\n');
+    fs.writeFileSync(
+      inProject('generate.cjs'),
+      "const fs = require('node:fs');\nfs.mkdirSync('generated', { recursive: true });\nfs.writeFileSync('generated/api.txt', fs.readFileSync('api.yaml', 'utf-8'));\n",
+    );
+    fs.mkdirSync(inProject('db'));
+    fs.writeFileSync(inProject('db/schema.sql'), 'CREATE TABLE t (id);\n');
+    git(project.projectPath, 'add', '-A');
+    git(project.projectPath, 'commit', '-m', 'aeos project init');
+
+    // The epic's decomposition column is the first agentic one: the generator runs there.
+    const epic = await createEpic('An epic');
+    await runCli('ticket', 'approve', epic);
+    const first = await runCli('orchestrator', 'run', epic);
+    expect(first.output).toContain('AWAITING_DECOMPOSITION');
+    expect(fs.readFileSync(inProject('generated/api.txt'), 'utf-8')).toBe('version: 1\n');
+    expect(git(project.projectPath, 'log', '--format=%s')).toContain(`[${epic}][GENERATED] api`);
+    const generatorRuns = runsOf(epic).filter((record) => record.role === 'generator');
+    expect(generatorRuns).toHaveLength(1);
+    expect(generatorRuns[0]).toMatchObject({ executor: 'shell', cost_basis: 'none', exit: 'ok' });
+    expect(validateRunRecord(generatorRuns[0]), JSON.stringify(validateRunRecord.errors)).toBe(
+      true,
+    );
+
+    // A task whose worker edits a declared contract. Its run passes review;
+    // the engine's own advance is what is refused.
+    const task = await createTicket('Migrate the schema', '--parent', epic, '--key', 'T-001');
+    stubWorkerTouches('db/schema.sql');
+    const second = await runCli('orchestrator', 'run', epic);
+    stubWorkerTouches(null);
+    expect(second.output).toContain('NEEDS_HUMAN');
+    expect(second.output).toContain('carries a contract change: db/schema.sql');
+    expect(second.exitCode).toBe(3);
+    expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
+    // The generator's inputs have not changed since: it did not run again.
+    expect(runsOf(task).filter((record) => record.role === 'generator')).toEqual([]);
+    expect((await runCli('ticket', 'show', task)).output).toContain(
+      'Contract change: db/schema.sql (needs approval',
+    );
+
+    // A person without --contract is refused too, and shown the diff.
+    const refused = await runCli('ticket', 'approve', task);
+    expect(refused.exitCode).toBe(3);
+    expect(refused.output).toContain('db/schema.sql');
+    expect(refused.output).toContain('+edited by the stub');
+    const refusedJson = await runCli('ticket', 'approve', task, '--json');
+    expect(
+      outputProblems(loadContract(), 'ticket approve', refusedJson.stdout, refusedJson.exitCode),
+    ).toEqual([]);
+    expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
+
+    // With it, the decision is on record before the ticket moves.
+    expect((await runCli('ticket', 'approve', task, '--contract')).exitCode).toBe(0);
+    expect(ticketState(task).column).toBe('CODE_REVIEW');
+    const gates = gatesIn(project, 'features/feature-sample/gates.yaml').filter(
+      (record) => record.ticket === task,
+    );
+    expect(gates.map((record) => record.gate)).toEqual(['contract', 'column-approval']);
+    expect(gates[0]!.reason).toContain('db/schema.sql');
+    expect((await runCli('ticket', 'show', task)).output).toMatch(
+      /Contract change: db\/schema\.sql \(approved in GATE-\d+\)/,
+    );
+  }, 60_000);
 });

@@ -18,4 +18,10 @@ export interface PullRequestGateway {
    * Throws when the host refuses.
    */
   create(request: PullRequestRequest): { url: string };
+
+  /**
+   * Rewrites the body of the pull request open for `head` with what `update`
+   * makes of the current one. Throws when the host refuses.
+   */
+  updateBody(request: { cwd: string; head: string; update: (body: string) => string }): void;
 }

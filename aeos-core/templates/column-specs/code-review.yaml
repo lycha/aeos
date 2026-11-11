@@ -1,5 +1,7 @@
 column: CODE_REVIEW
 label: Code review
+role: standard
+diffContext: task
 phase: BUILD
 workerAgentFile: agents/engineer-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml

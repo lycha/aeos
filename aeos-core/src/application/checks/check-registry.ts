@@ -1,10 +1,23 @@
 // Turns configuration into the checks the stage runs: one ShellCheck per
 // `.aeos/project.json` entry, in the order written, then any registered check.
+// Checks that run before the worker are built in, not configured.
 
 import type { Check } from '../../domain/model/check.js';
+import type { GeneratorConfig } from '../../domain/model/project-executor-config.js';
 import type { ChecksRunner } from '../../domain/ports/driven/checks-runner.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import type { ColumnRole } from '../../domain/model/column-spec.js';
+import type { SpecPin } from '../../domain/model/spec-pin.js';
+import type { Ticket } from '../../domain/model/ticket.js';
+import { TicketKind } from '../../domain/model/ticket-kind.js';
+import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
+import type { CriteriaCollector } from '../services/criteria-collector.js';
+import { CriteriaTraceCheck } from './criteria-trace.check.js';
+import { ReproCheck } from './repro-check.js';
 import { ShellCheck } from './shell-check.js';
+
+// A generator has no timeout of its own in `project.json`; ten minutes bounds a hung one.
+const GENERATOR_TIMEOUT = 600;
 
 export class CheckRegistry {
   private readonly registered: Check[] = [];
@@ -12,6 +25,8 @@ export class CheckRegistry {
   constructor(
     private readonly projectRepo: ProjectRepository,
     private readonly runner: ChecksRunner,
+    private readonly criteriaCollector: CriteriaCollector,
+    private readonly artifactStore: ArtifactStore,
   ) {}
 
   register(check: Check): void {
@@ -21,5 +36,30 @@ export class CheckRegistry {
   checksFor(projectPath: string): Check[] {
     const configured = this.projectRepo.readExecutorConfig(projectPath)?.checks ?? [];
     return [...configured.map((config) => new ShellCheck(config, this.runner)), ...this.registered];
+  }
+
+  /** A generator's command, run as a check is: it passes when the command exits zero. */
+  generatorCheck(generator: GeneratorConfig): Check {
+    return new ShellCheck(
+      { name: generator.name, command: generator.command, timeoutSeconds: GENERATOR_TIMEOUT },
+      this.runner,
+    );
+  }
+
+  /** The run of a bug's reproducing test, expected to fail (`red`) or to pass (`green`). */
+  reproCheck(command: string, expected: 'red' | 'green'): ReproCheck {
+    return new ReproCheck(command, expected, this.runner);
+  }
+
+  /**
+   * The checks that run before any agent does. Criterion tracing, for a
+   * spec-backed epic at a column whose role is `integration`.
+   */
+  preWorkerChecksFor(ticket: Ticket, specPin: SpecPin | null, role: ColumnRole): Check[] {
+    const tracesCriteria =
+      specPin !== null && ticket.kind === TicketKind.EPIC && role === 'integration';
+    return tracesCriteria
+      ? [new CriteriaTraceCheck(this.criteriaCollector, this.artifactStore, ticket, specPin)]
+      : [];
   }
 }

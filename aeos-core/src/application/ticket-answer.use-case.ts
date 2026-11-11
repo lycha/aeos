@@ -150,6 +150,11 @@ export class TicketAnswerUseCase implements TicketAnswerPort {
       ok: true,
       ticketId,
       warnings: promotion.status === 'legacy-skipped' ? promotion.warnings : undefined,
+      promoted:
+        promotion.status === 'promoted' && promotion.decisionsPath !== null
+          ? [promotion.decisionsPath]
+          : [],
+      specPin: pin,
       ...(amended.length > 0
         ? { amendedDecisions: amended.map((decision) => decision.absence) }
         : {}),

@@ -6,7 +6,6 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 
-import { Column } from '../../domain/model/column.js';
 import type { ExecutorInvocation } from '../../domain/model/executor-invocation.js';
 import { AuggieCliExecutor } from './auggie-cli-executor.adapter.js';
 
@@ -75,7 +74,7 @@ describe('AuggieCliExecutor', () => {
       prompt: 'Test prompt',
       outputPath: path.join(tmpDir, 'output.md'),
       ticketId: 'T-99',
-      column: Column.IMPLEMENTATION,
+      column: 'IMPLEMENTATION',
       ...overrides,
     };
   }

@@ -32,8 +32,8 @@ export interface GitGateway {
    */
   commitAll(dir: string, message: string): boolean;
 
-  /** Return the output of `git diff HEAD` in the given directory. */
-  diff(dir: string): string;
+  /** Return the output of `git diff HEAD` in the given directory, of `paths` only when given. */
+  diff(dir: string, paths?: readonly string[]): string;
 
   /** True when `dir` is inside a git working tree. */
   isRepo(dir: string): boolean;

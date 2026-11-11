@@ -50,6 +50,15 @@ describe('protectedGlobs', () => {
     ).toEqual(['.aeos/tickets/EE-2/runs/RUN-1.json']);
   });
 
+  it('protects the CLI contract wherever the project keeps it', () => {
+    const changed = ['cli-contract.yaml', 'aeos-core/cli-contract.yaml', 'docs/cli-contract.md'];
+
+    expect(findViolations(changed, protectedGlobs())).toEqual([
+      'cli-contract.yaml',
+      'aeos-core/cli-contract.yaml',
+    ]);
+  });
+
   it('adds configured globs to the defaults', () => {
     expect(
       findViolations(['src/cli/generated/a.ts'], protectedGlobs(['src/cli/generated/**'])),

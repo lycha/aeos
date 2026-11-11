@@ -65,7 +65,6 @@ import { Column } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import { validateOutput } from '../domain/services/output-validation.js';
-import { isValidColumn } from '../domain/model/column.js';
 import { parseVerdict } from '../domain/services/verdict-parser.js';
 import { findViolations, protectedGlobs } from '../domain/services/path-guard.js';
 import {
@@ -75,6 +74,18 @@ import {
 } from '../domain/services/review-loop-policy.js';
 import type { Check, CheckResult } from '../domain/model/check.js';
 import type { CheckRegistry } from './checks/check-registry.js';
+import type { CriteriaCollector } from './services/criteria-collector.js';
+import type { ConformanceService } from './services/conformance.service.js';
+import { parseConformanceVerdicts } from '../domain/services/conformance-verdict-parser.js';
+import { parseRepro } from '../domain/services/repro-parser.js';
+import type { FileHasher } from '../domain/ports/driven/file-hasher.port.js';
+import type { GeneratorStampStore } from '../domain/ports/driven/generator-stamp-store.port.js';
+import type { GeneratorConfig } from '../domain/model/project-executor-config.js';
+import {
+  renderReproEvidence,
+  reproductionBrief,
+  type ReproState,
+} from './services/repro-evidence.js';
 import { DEFAULT_GLOBAL_CONFIG } from '../shared/config.js';
 import { syncTicketDocument } from './services/ticket-document.js';
 import { TicketRunEventEmitter } from './services/ticket-run-event-emitter.js';
@@ -104,8 +115,22 @@ interface RunContext {
   readonly reviewAbsPath: string;
   /** Globs no executor invocation of this run may touch. */
   readonly protectedGlobs: readonly string[];
+  /** Run before an agentic worker, each when its inputs changed. */
+  readonly generators: readonly GeneratorConfig[];
+  /** Globs of the project's contracts: a worker that changes one marks the ticket. */
+  readonly contractGlobs: readonly string[];
   /** The ticket's spec pin (its own or its epic's), written into every run record. */
   readonly specPin: SpecPin | null;
+  /**
+   * At the final gate: the criteria no instrument answered, which the worker
+   * must judge. Empty means no agent is needed; null off the gate.
+   */
+  readonly judging: readonly string[] | null;
+  /**
+   * The two task instructions of a bug's implementation, which then runs the
+   * worker twice: reproduce, fix. Null for anything else.
+   */
+  readonly bugTrack: NonNullable<AgentSpec['bugTrack']> | null;
 }
 
 /** One executor invocation, as much as the call site knows about it. */
@@ -168,6 +193,10 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly checkRegistry: CheckRegistry,
     private readonly projectRepo: ProjectRepository,
     private readonly gateRecordStore: GateRecordStore,
+    private readonly criteriaCollector: CriteriaCollector,
+    private readonly conformanceService: ConformanceService,
+    private readonly fileHasher: FileHasher,
+    private readonly generatorStampStore: GeneratorStampStore,
   ) {}
 
   async execute(
@@ -213,12 +242,16 @@ export class TicketRunUseCase implements TicketRunPort {
         executorOverrides,
       );
 
-      const column = this.resolveColumn(columnSpec.column);
-      if (!column) {
-        return { status: 'failed', ticketId, error: `Invalid column value: ${columnSpec.column}` };
+      const column = columnSpec.column;
+
+      // The gate's column builds a conformance report, which takes a spec.
+      const finalGate = columnSpec.role === 'final-gate';
+      if (finalGate && !mirroredTicket.specPin) {
+        return { status: 'failed', ticketId, error: 'DoD gate is human-only' };
       }
 
-      const workerMode = this.resolveWorkerExecutorMode(columnSpec, column);
+      // A column whose worker edits the repository says so in its spec.
+      const workerMode = columnSpec.executorMode ?? 'artifact';
       if (
         workerMode === 'agentic' &&
         !this.supportsAgenticExecution(resolvedWorkerConfig.executorType)
@@ -227,6 +260,16 @@ export class TicketRunUseCase implements TicketRunPort {
           status: 'failed',
           ticketId,
           error: `Executor '${resolvedWorkerConfig.executorType}' does not support agentic IMPLEMENTATION runs. Use 'claude-cli', 'auggie-cli', 'opencode-cli', or omit --executor.`,
+        };
+      }
+
+      // A bug is implemented in two phases, wherever code is written.
+      const isBugFix = mirroredTicket.track === 'bug' && workerMode === 'agentic';
+      if (isBugFix && !workerAgentSpec.bugTrack) {
+        return {
+          status: 'failed',
+          ticketId,
+          error: `${ticketId} is a bug, and ${columnSpec.workerAgentFile} has no \`bugTrack\` instructions (reproduce, fix). \`aeos project sync\` shows the template's.`,
         };
       }
 
@@ -266,13 +309,29 @@ export class TicketRunUseCase implements TicketRunPort {
 
       const aeosDir = path.join(projectPath, '.aeos');
 
+      // ── Final gate: the conformance report ───────────────────────
+      // Built before the context is assembled, so the worker and the reviewer
+      // are both briefed with it.
+      let judging: string[] | null = null;
+      if (finalGate) {
+        try {
+          judging = await this.writeConformance(projectPath, ticketId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          emitter.emit({ type: 'ticket-run.failed', phase: 'complete', payload: { message } });
+          return { status: 'failed', ticketId, error: message };
+        }
+      }
+      // Every criterion already has its answer: there is nothing to ask an agent.
+      const noAgent = judging?.length === 0;
+
       this.emitStageEvent(emitter, 'stage.started', 'context', 'Assembling ticket context');
       let baseContext: AssembledContext;
       try {
         baseContext = await this.contextAssembler.assemble(
           ticketId,
           projectPath,
-          columnSpec.column,
+          columnSpec.diffContext ?? 'none',
           specPin,
         );
       } catch (err) {
@@ -285,6 +344,8 @@ export class TicketRunUseCase implements TicketRunPort {
       this.emitStageEvent(emitter, 'stage.completed', 'context', 'Context assembled');
 
       const workerExecutor = this.createExecutor(resolvedWorkerAgentSpec);
+      const projectConfig = this.projectRepo.readExecutorConfig(projectPath);
+      const generators = projectConfig?.generators ?? [];
       const artifactFilename = `${ticketId}-${columnSpec.outputArtifact}`;
       const reviewFilename = `${ticketId}-${columnSpec.outputArtifact.replace('.md', '-review.md')}`;
 
@@ -310,14 +371,38 @@ export class TicketRunUseCase implements TicketRunPort {
         artifactAbsPath: path.join(aeosDir, 'tickets', ticketId, artifactFilename),
         reviewFilename,
         reviewAbsPath: path.join(aeosDir, 'tickets', ticketId, reviewFilename),
-        protectedGlobs: protectedGlobs(
-          this.projectRepo.readExecutorConfig(projectPath)?.protectedPaths,
-        ),
+        // An agent builds on generated code and may not edit it.
+        protectedGlobs: protectedGlobs([
+          ...(projectConfig?.protectedPaths ?? []),
+          ...generators.flatMap((generator) => generator.outputs),
+        ]),
+        generators,
+        contractGlobs: [
+          ...(projectConfig?.contracts ?? []),
+          ...generators.flatMap((generator) => generator.inputs),
+        ],
         specPin,
+        judging,
+        bugTrack: (isBugFix && workerAgentSpec.bugTrack) || null,
       };
 
+      // ── Pre-worker checks ────────────────────────────────────────
+      // Before preflight: a failure here is a person's to resolve, so no model
+      // is asked anything and no attempt is used.
+      const preWorkerChecks = this.checkRegistry.preWorkerChecksFor(
+        mirroredTicket,
+        specPin,
+        columnSpec.role ?? 'standard',
+      );
+      if (preWorkerChecks.length > 0) {
+        const escalation = await this.runPreWorkerChecks(ctx, preWorkerChecks);
+        if (escalation) return this.finishEscalatedRun(ctx, mirroredTicket, escalation, 0);
+      }
+
       // ── Preflight ────────────────────────────────────────────────
-      const preflightOutcome = await this.runPreflight(ctx);
+      const preflightOutcome = noAgent
+        ? ({ kind: 'clear' } as const)
+        : await this.runPreflight(ctx);
       if (preflightOutcome.kind === 'failed') {
         emitter.emit({
           type: 'ticket-run.failed',
@@ -380,6 +465,7 @@ export class TicketRunUseCase implements TicketRunPort {
       let attempt = 1;
 
       for (;;) {
+        if (noAgent) break;
         emitter.emit({
           type: 'run.attempt.started',
           phase: 'worker',
@@ -563,8 +649,7 @@ export class TicketRunUseCase implements TicketRunPort {
     attempt: number,
     feedback: { name: string; content: string } | undefined,
   ): Promise<AttemptOutcome> {
-    const { emitter, ticketId, projectPath, projectId, aeosDir, columnSpec, workerMode, column } =
-      ctx;
+    const { emitter, ticketId, projectPath, aeosDir, columnSpec, workerMode } = ctx;
 
     // ── Worker ───────────────────────────────────────────────────
     // On a retry the context is re-assembled rather than reusing the one taken
@@ -577,7 +662,7 @@ export class TicketRunUseCase implements TicketRunPort {
       const fresh = await this.contextAssembler.assemble(
         ticketId,
         projectPath,
-        columnSpec.column,
+        columnSpec.diffContext ?? 'none',
         ctx.specPin,
       );
       workerContext = this.withExtraArtifact(
@@ -592,8 +677,6 @@ export class TicketRunUseCase implements TicketRunPort {
         feedback.content,
       );
     }
-    const prompt = this.buildPromptFn(workerContext, ctx.workerAgentSpec);
-
     // Baseline the repo before an agentic worker touches it, on the first
     // attempt only. Whatever is already uncommitted — a previous task's work,
     // or unrelated local edits — becomes its own commit, so `git diff HEAD`
@@ -608,7 +691,290 @@ export class TicketRunUseCase implements TicketRunPort {
       );
     }
 
-    const attemptLabel = attempt > 1 ? ` (attempt ${attempt})` : '';
+    // ── Generators ───────────────────────────────────────────────
+    // On the first attempt only: later ones carry the worker's uncommitted
+    // work, which a commit of generated files must not sweep up.
+    if (workerMode === 'agentic' && attempt === 1) {
+      const failure = await this.runGenerators(ctx);
+      if (failure) return failure;
+    }
+
+    // ── Bug track: the reproducing test comes first ──────────────
+    // Once it has been seen to fail and is committed, every later attempt and
+    // run is the fix alone.
+    let repro: ReproState | null = null;
+    if (ctx.bugTrack) {
+      const known = this.readRepro(ctx);
+      const reproduced = known ?? (await this.reproduce(ctx, attempt, workerContext));
+      if ('kind' in reproduced) return reproduced;
+      repro = reproduced;
+      workerContext = this.withExtraArtifact(
+        // Feedback that was answered by reproducing is not feedback on the fix.
+        known
+          ? workerContext
+          : {
+              ...workerContext,
+              priorArtifacts: workerContext.priorArtifacts.filter(
+                (artifact) => artifact.name !== feedback?.name,
+              ),
+            },
+        'reproduction.md',
+        reproductionBrief(repro),
+      );
+    }
+
+    const worker = await this.invokeWorker(ctx, attempt, workerContext, repro ? 'fix' : undefined);
+    if ('kind' in worker) return worker;
+    const { run, content, contractPaths } = worker;
+
+    // The fix may not weaken the test it has to pass.
+    if (repro) {
+      const now = this.fileHasher.sha256(projectPath, Object.keys(repro.files));
+      const modified = Object.keys(repro.files).filter((file) => now[file] !== repro.files[file]);
+      if (modified.length > 0) {
+        // shortcut: restored to HEAD, which is the [REPRO] commit unless a later
+        // run baselined over it; then the person restores it from that commit.
+        this.gitGateway.restoreFiles(projectPath, modified);
+        const error = `The reproducing test was modified: ${modified.join(', ')}. The fix must make the test pass without editing it; what was committed has been restored.`;
+        this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
+        this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+        this.recordRunAlone(ctx, { ...run, error });
+        return { kind: 'failed', error };
+      }
+    }
+
+    // ── Validation ───────────────────────────────────────────────
+    this.emitStageEvent(emitter, 'stage.started', 'validation', 'Validating worker output');
+
+    // An agentic run must change the repo — unless the column opts out, because
+    // its work is not a repo edit (TASK_BREAKDOWN creates tickets). Undefined
+    // means true, so IMPLEMENTATION keeps the guarantee without stating it.
+    if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false) {
+      // Stage first: `git diff HEAD` does not show untracked files, so a task
+      // that only adds files (a migration, a new module) would read as "no
+      // changes" and fail this guarantee. Staging also makes the new files
+      // tracked, so CODE_REVIEW and QA see them as part of the change set
+      // instead of flagging them as untracked.
+      this.gitGateway.stageAll(projectPath);
+      const repoDiff = this.gitGateway.diff(projectPath).trim();
+      if (repoDiff.length === 0) {
+        const error = 'Agentic implementation produced no repository changes';
+        this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
+        this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+        this.recordRunAlone(ctx, { ...run, error });
+        return { kind: 'failed', error };
+      }
+    }
+
+    const validation = validateOutput(content, columnSpec);
+    if (!validation.passed) {
+      const error = `Output validation failed: ${validation.violations.join('; ')}`;
+      this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
+      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+      this.recordRunAlone(ctx, { ...run, error });
+      return { kind: 'failed', error };
+    }
+
+    this.emitStageEvent(emitter, 'stage.completed', 'validation', 'Validation passed');
+
+    // ── Checks ───────────────────────────────────────────────────
+    // Before the commit and the reviewer: a red build costs no model call.
+    let checksFiles: string[] = [];
+    if (repro) {
+      const proven = await this.proveFixed(ctx, attempt, repro);
+      if (!Array.isArray(proven)) {
+        this.recordRunAlone(ctx, run);
+        return proven;
+      }
+      checksFiles = proven;
+    }
+    const checks = columnSpec.runChecks ? this.checkRegistry.checksFor(projectPath) : [];
+    if (checks.length > 0) {
+      const stage = await this.runChecks(ctx, attempt, checks);
+      if (!stage.passed) {
+        this.recordRunAlone(ctx, run);
+        return { kind: 'checks-failed', check: stage.check, output: stage.output };
+      }
+      checksFiles = [...checksFiles, ...stage.files];
+    }
+
+    // ── Commit the artifact ──────────────────────────────────────
+    const revision = attempt > 1 ? `v${attempt}` : 'v1';
+    const workerCommitMessage = `[${ticketId}][${columnSpec.outputArtifact}][${revision}][${ctx.workerAgentSpec.name}][${attempt > 1 ? 'revise' : 'create'}]`;
+    const written = this.writeRunRecord(ctx, { ...run, output: ctx.artifactFilename });
+    this.artifactStore.writeArtifact(
+      projectPath,
+      ticketId,
+      ctx.artifactFilename,
+      linkToRun(content, written.record.run_id),
+    );
+    emitter.emit({
+      type: 'artifact.written',
+      phase: 'artifact',
+      payload: { role: 'worker', path: ctx.artifactAbsPath },
+    });
+    this.gitGateway.commitFiles(
+      aeosDir,
+      [ctx.artifactAbsPath, ...written.files, ...checksFiles],
+      workerCommitMessage,
+    );
+    emitter.emit({
+      type: 'artifact.committed',
+      phase: 'artifact',
+      payload: {
+        role: 'worker',
+        path: ctx.artifactAbsPath,
+        commitMessage: workerCommitMessage,
+      },
+    });
+
+    // ── Bug track: a fix does not change a contract ──────────────
+    // The work is committed and the ticket marked; whether this is a bug fix
+    // at all is a person's call, so the reviewer is not asked.
+    if (repro && contractPaths.length > 0) {
+      const message = `${ticketId}: this fix changes a contract; it is a behaviour change, not a bug fix (${contractPaths.join(', ')}). To accept it as one, \`aeos ticket sign-off ${ticketId} --reason "<why>"\` and then \`aeos ticket approve ${ticketId} --contract\`; otherwise re-file it as a feature.`;
+      this.emitStageEvent(emitter, 'stage.failed', 'validation', message);
+      return {
+        kind: 'escalated',
+        escalation: {
+          reason: EscalationReason.CONTRACT_CHANGE,
+          message,
+          attempt,
+          artifactPath: ctx.artifactAbsPath,
+        },
+      };
+    }
+
+    // ── Final gate: one verdict for each criterion asked about ───
+    // Never coerced: a judgement that cannot be read is a person's to sort out.
+    if (ctx.judging) {
+      const parsed = parseConformanceVerdicts(content, ctx.judging);
+      if (!parsed.ok) {
+        this.emitStageEvent(emitter, 'stage.failed', 'validation', parsed.reason);
+        return {
+          kind: 'escalated',
+          escalation: {
+            reason: EscalationReason.UNPARSEABLE_VERDICT,
+            message: parsed.reason,
+            attempt,
+            artifactPath: ctx.artifactAbsPath,
+          },
+        };
+      }
+    }
+
+    // ── Reviewer ─────────────────────────────────────────────────
+    return this.runReview(ctx, attempt, revision);
+  }
+
+  /**
+   * Builds the conformance report of a spec-backed epic at its final gate and
+   * commits it to the ticket directory, from where it reaches every context.
+   * Returns the criteria no instrument answered.
+   */
+  private async writeConformance(projectPath: string, ticketId: string): Promise<string[]> {
+    const { report, markdown } = await this.conformanceService.buildConformance(
+      projectPath,
+      ticketId,
+    );
+    const judging = report.criteria
+      .filter((criterion) => criterion.verdict === 'unverified')
+      .map((criterion) => criterion.id);
+    const filename = `${ticketId}-conformance.md`;
+    this.artifactStore.writeArtifact(
+      projectPath,
+      ticketId,
+      filename,
+      judging.length > 0
+        ? `${markdown}\n## To judge\n\nJudge exactly these criteria: ${judging.join(', ')}\n`
+        : markdown,
+    );
+    const aeosDir = path.join(projectPath, '.aeos');
+    this.gitGateway.commitFiles(
+      aeosDir,
+      [path.join(aeosDir, 'tickets', ticketId, filename)],
+      `[${ticketId}][conformance.md][engine][build]`,
+    );
+    return judging;
+  }
+
+  /**
+   * Runs each generator whose inputs differ from those of its last run here,
+   * records the run, and commits what it wrote to the project as
+   * `[<ticket>][GENERATED] <name>`. Returns the failure of the first that fails.
+   */
+  private async runGenerators(ctx: RunContext): Promise<AttemptOutcome | null> {
+    const { ticketId, projectPath } = ctx;
+    for (const generator of ctx.generators) {
+      const files = new Set([
+        ...this.gitGateway.listFiles(projectPath, 'HEAD', '.'),
+        ...this.gitGateway.changedFiles(projectPath),
+      ]);
+      const inputs = findViolations([...files].sort(), generator.inputs);
+      const hash = createHash('sha256')
+        .update(JSON.stringify(this.fileHasher.sha256(projectPath, inputs)))
+        .digest('hex');
+      const stamps = this.generatorStampStore.read(projectPath);
+      if (stamps[generator.name] === hash) continue;
+
+      const stage = await this.performChecks(
+        ctx,
+        1,
+        [this.checkRegistry.generatorCheck(generator)],
+        'shell',
+        () => null,
+        'generator',
+      );
+      this.gitGateway.commitFiles(
+        ctx.aeosDir,
+        stage.files,
+        `[${ticketId}][RUN][${stage.runId}][generator][${stage.record.exit}]`,
+      );
+      if (stage.failed) {
+        const error = `${stage.record.error}:\n${stage.failed.outputTail}`;
+        this.emitStageEvent(ctx.emitter, 'stage.failed', 'checks', error);
+        return { kind: 'failed', error };
+      }
+
+      // shortcut: an output the generator deleted is not committed here
+      // (commitFiles takes files that exist); the worker's diff carries it.
+      const written = this.fileHasher.sha256(
+        projectPath,
+        findViolations(this.gitGateway.changedFiles(projectPath), generator.outputs),
+      );
+      this.gitGateway.commitFiles(
+        projectPath,
+        Object.keys(written)
+          .filter((file) => written[file] !== null)
+          .map((file) => path.join(projectPath, file)),
+        `[${ticketId}][GENERATED] ${generator.name}`,
+      );
+      this.generatorStampStore.write(projectPath, { ...stamps, [generator.name]: hash });
+      this.emitStageEvent(ctx.emitter, 'stage.completed', 'checks', `Generated ${generator.name}`);
+    }
+    return null;
+  }
+
+  /**
+   * One invocation of the column's worker: brief, run, protected paths, cost.
+   * Returns the run and what it wrote, or how the attempt ends. A bug's
+   * implementation calls it twice, once per phase, each with its instruction.
+   */
+  private async invokeWorker(
+    ctx: RunContext,
+    attempt: number,
+    context: AssembledContext,
+    bugPhase?: 'reproduce' | 'fix',
+  ): Promise<{ run: InvokedRun; content: string; contractPaths: string[] } | AttemptOutcome> {
+    const { emitter, ticketId, projectPath, projectId, workerMode, column } = ctx;
+    const prompt = this.buildPromptFn(
+      context,
+      bugPhase && ctx.bugTrack
+        ? { ...ctx.workerAgentSpec, taskInstruction: ctx.bugTrack[bugPhase] }
+        : ctx.workerAgentSpec,
+    );
+
+    const attemptLabel = `${bugPhase ? ` (${bugPhase})` : ''}${attempt > 1 ? ` (attempt ${attempt})` : ''}`;
     this.emitStageEvent(
       emitter,
       'stage.started',
@@ -647,6 +1013,7 @@ export class TicketRunUseCase implements TicketRunPort {
         column,
         mode: workerMode,
         workingDirectory: workerMode === 'agentic' ? projectPath : undefined,
+        ...(bugPhase ? { bugPhase } : {}),
         onChunk: this.createChunkObserver(emitter, 'worker'),
       });
     } catch (err) {
@@ -728,86 +1095,152 @@ export class TicketRunUseCase implements TicketRunPort {
       mode: workerMode,
     });
 
-    // ── Validation ───────────────────────────────────────────────
-    const content = executorResult.content ?? '';
-    this.emitStageEvent(emitter, 'stage.started', 'validation', 'Validating worker output');
-
-    // An agentic run must change the repo — unless the column opts out, because
-    // its work is not a repo edit (TASK_BREAKDOWN creates tickets). Undefined
-    // means true, so IMPLEMENTATION keeps the guarantee without stating it.
-    if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false) {
-      // Stage first: `git diff HEAD` does not show untracked files, so a task
-      // that only adds files (a migration, a new module) would read as "no
-      // changes" and fail this guarantee. Staging also makes the new files
-      // tracked, so CODE_REVIEW and QA see them as part of the change set
-      // instead of flagging them as untracked.
-      this.gitGateway.stageAll(projectPath);
-      const repoDiff = this.gitGateway.diff(projectPath).trim();
-      if (repoDiff.length === 0) {
-        const error = 'Agentic implementation produced no repository changes';
-        this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
-        this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
-        this.recordRunAlone(ctx, { ...run, error });
-        return { kind: 'failed', error };
-      }
+    // A contract path is not protected: the diff is the proposal. The ticket
+    // carries it to the approval, where a person decides.
+    const contractPaths =
+      ctx.contractGlobs.length > 0
+        ? findViolations(
+            [...this.changedPaths(ctx)].filter((file) => !beforeWorker.has(file)),
+            ctx.contractGlobs,
+          )
+        : [];
+    if (contractPaths.length > 0) {
+      const carried = this.ticketRepo.findById(projectId, ticketId)?.contractChange?.paths ?? [];
+      this.ticketRepo.setContractChange(projectId, ticketId, {
+        paths: [...new Set([...carried, ...contractPaths])].sort(),
+        // What was approved before does not cover what changed since.
+        approvedBy: null,
+      });
     }
 
-    const validation = validateOutput(content, columnSpec);
-    if (!validation.passed) {
-      const error = `Output validation failed: ${validation.violations.join('; ')}`;
-      this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
-      this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
-      this.recordRunAlone(ctx, { ...run, error });
-      return { kind: 'failed', error };
+    return { run, content: executorResult.content ?? '', contractPaths };
+  }
+
+  /** The record of a reproduction this ticket already has, if any. */
+  private readRepro(ctx: RunContext): ReproState | null {
+    const filename = `${ctx.ticketId}-repro.json`;
+    return this.artifactStore.artifactExists(ctx.projectPath, ctx.ticketId, filename)
+      ? (JSON.parse(
+          this.artifactStore.readArtifact(ctx.projectPath, ctx.ticketId, filename),
+        ) as ReproState)
+      : null;
+  }
+
+  /**
+   * Phase A of a bug: the worker adds a failing test and names the command
+   * that runs it. The command must fail; then the test is committed as
+   * `[<id>][REPRO]` and its files' hashes are kept.
+   */
+  private async reproduce(
+    ctx: RunContext,
+    attempt: number,
+    context: AssembledContext,
+  ): Promise<ReproState | AttemptOutcome> {
+    const { emitter, ticketId, projectPath, aeosDir } = ctx;
+    const worker = await this.invokeWorker(ctx, attempt, context, 'reproduce');
+    if ('kind' in worker) return worker;
+
+    const parsed = parseRepro(worker.content);
+    if (!parsed.ok) {
+      this.emitStageEvent(emitter, 'stage.failed', 'validation', parsed.reason);
+      this.recordRunAlone(ctx, { ...worker.run, error: parsed.reason });
+      return {
+        kind: 'escalated',
+        escalation: {
+          reason: EscalationReason.UNPARSEABLE_REPRO,
+          message: parsed.reason,
+          attempt,
+          artifactPath: ctx.artifactAbsPath,
+        },
+      };
     }
 
-    this.emitStageEvent(emitter, 'stage.completed', 'validation', 'Validation passed');
-
-    // ── Checks ───────────────────────────────────────────────────
-    // Before the commit and the reviewer: a red build costs no model call.
-    const checks = columnSpec.runChecks ? this.checkRegistry.checksFor(projectPath) : [];
-    let checksFiles: string[] = [];
-    if (checks.length > 0) {
-      const stage = await this.runChecks(ctx, attempt, checks);
-      if (!stage.passed) {
-        this.recordRunAlone(ctx, run);
-        return { kind: 'checks-failed', check: stage.check, output: stage.output };
-      }
-      checksFiles = stage.files;
+    const red = this.checkRegistry.reproCheck(parsed.command, 'red');
+    const stage = await this.performChecks(ctx, attempt, [red], 'shell', () => null);
+    const outputTail = stage.results[0]!.outputTail;
+    this.recordRunAlone(ctx, worker.run);
+    if (stage.failed) {
+      const message = `The test does not reproduce the bug: \`${parsed.command}\` ${stage.failed.timedOut ? 'timed out' : 'exited 0'} before any fix.`;
+      this.emitStageEvent(emitter, 'stage.failed', 'checks', message);
+      this.gitGateway.commitFiles(
+        aeosDir,
+        stage.files,
+        `[${ticketId}][RUN][${stage.runId}][checks][${stage.record.exit}]`,
+      );
+      return {
+        kind: 'checks-failed',
+        check: red.name,
+        output: `# ${message}\n\nA reproducing test fails until the bug is fixed. Change the test so that it does, and do not fix the bug yet.\n\n\`\`\`\n${outputTail}\n\`\`\`\n`,
+      };
     }
+    this.emitStageEvent(emitter, 'stage.completed', 'checks', 'The test fails: bug reproduced');
 
-    // ── Commit the artifact ──────────────────────────────────────
-    const revision = attempt > 1 ? `v${attempt}` : 'v1';
-    const workerCommitMessage = `[${ticketId}][${columnSpec.outputArtifact}][${revision}][${ctx.workerAgentSpec.name}][${attempt > 1 ? 'revise' : 'create'}]`;
-    const written = this.writeRunRecord(ctx, { ...run, output: ctx.artifactFilename });
+    const files = this.gitGateway
+      .changedFiles(projectPath)
+      .filter((file) => !file.startsWith('.aeos/'));
+    const state: ReproState = {
+      command: parsed.command,
+      red: { exitCode: red.exitCode, outputTail },
+      files: this.fileHasher.sha256(projectPath, files),
+    };
+    this.gitGateway.commitFiles(
+      projectPath,
+      files.map((file) => path.join(projectPath, file)),
+      `[${ticketId}][REPRO] failing test that reproduces the bug`,
+    );
+    const stateFilename = `${ticketId}-repro.json`;
     this.artifactStore.writeArtifact(
       projectPath,
       ticketId,
-      ctx.artifactFilename,
-      linkToRun(content, written.record.run_id),
+      stateFilename,
+      `${JSON.stringify(state, null, 2)}\n`,
     );
-    emitter.emit({
-      type: 'artifact.written',
-      phase: 'artifact',
-      payload: { role: 'worker', path: ctx.artifactAbsPath },
-    });
     this.gitGateway.commitFiles(
       aeosDir,
-      [ctx.artifactAbsPath, ...written.files, ...checksFiles],
-      workerCommitMessage,
+      [path.join(aeosDir, 'tickets', ticketId, stateFilename), ...stage.files],
+      `[${ticketId}][RUN][${stage.runId}][checks][${stage.record.exit}]`,
     );
-    emitter.emit({
-      type: 'artifact.committed',
-      phase: 'artifact',
-      payload: {
-        role: 'worker',
-        path: ctx.artifactAbsPath,
-        commitMessage: workerCommitMessage,
-      },
-    });
+    return state;
+  }
 
-    // ── Reviewer ─────────────────────────────────────────────────
-    return this.runReview(ctx, attempt, revision);
+  /**
+   * After the fix: the same command must now pass. Writes `<id>-repro.md` and
+   * returns the files to commit with the artefact, or the rejection.
+   */
+  private async proveFixed(
+    ctx: RunContext,
+    attempt: number,
+    repro: ReproState,
+  ): Promise<string[] | AttemptOutcome> {
+    const { emitter, ticketId, projectPath, aeosDir } = ctx;
+    const evidenceFilename = `${ticketId}-repro.md`;
+    const green = this.checkRegistry.reproCheck(repro.command, 'green');
+    const stage = await this.performChecks(ctx, attempt, [green], 'shell', (failed) =>
+      failed ? null : evidenceFilename,
+    );
+    const outputTail = stage.results[0]!.outputTail;
+    if (stage.failed) {
+      const message = `The reproducing test still fails after the fix: \`${repro.command}\` ${stage.describe(stage.failed)}.`;
+      this.emitStageEvent(emitter, 'stage.failed', 'checks', message);
+      this.gitGateway.commitFiles(
+        aeosDir,
+        stage.files,
+        `[${ticketId}][RUN][${stage.runId}][checks][${stage.record.exit}]`,
+      );
+      return {
+        kind: 'checks-failed',
+        check: green.name,
+        output: `# ${message}\n\nFix this before anything else, without editing the test. The reviewer was not asked.\n\n\`\`\`\n${outputTail}\n\`\`\`\n`,
+      };
+    }
+    this.artifactStore.writeArtifact(
+      projectPath,
+      ticketId,
+      evidenceFilename,
+      linkToRun(renderReproEvidence(repro, { exitCode: green.exitCode, outputTail }), stage.runId),
+    );
+    this.emitStageEvent(emitter, 'stage.completed', 'checks', 'The test passes: bug fixed');
+    return [path.join(aeosDir, 'tickets', ticketId, evidenceFilename), ...stage.files];
   }
 
   /**
@@ -821,67 +1254,14 @@ export class TicketRunUseCase implements TicketRunPort {
   ): Promise<{ passed: true; files: string[] } | { passed: false; check: string; output: string }> {
     const { emitter, ticketId, projectPath } = ctx;
     const checksFilename = `${ticketId}-checks.md`;
-    this.emitStageEvent(emitter, 'stage.started', 'checks', `Running ${checks.length} check(s)`);
-
-    const startedAt = new Date();
-    const results: CheckResult[] = [];
-    for (const check of checks) {
-      const checkStartedAt = Date.now();
-      let result: CheckResult;
-      try {
-        result = await check.run({ projectPath });
-      } catch (err) {
-        result = {
-          name: check.name,
-          passed: false,
-          durationMs: Date.now() - checkStartedAt,
-          timedOut: false,
-          outputTail: err instanceof Error ? err.message : String(err),
-        };
-      }
-      results.push(result);
-      if (!result.passed) break;
-    }
-    const endedAt = new Date();
-    const failed = results.find((result) => !result.passed);
-    const describe = (result: CheckResult): string =>
-      result.passed ? 'passed' : result.timedOut ? 'timed out' : 'failed';
-
-    const runId = this.newRunId(startedAt);
-    const record: RunRecord = {
-      schema_version: 0,
-      run_id: runId,
-      project: ctx.projectId,
-      ticket: ticketId,
-      column: ctx.column,
-      role: 'checks',
-      agent: null,
+    const { results, failed, describe, runId, record, files } = await this.performChecks(
+      ctx,
       attempt,
-      executor: 'shell',
-      model: null,
-      mode: null,
-      brief: null,
-      output: failed ? null : `tickets/${ticketId}/${checksFilename}`,
-      transcript: runRecordPaths(ticketId, runId).transcript,
-      verdict: failed ? 'CHECKS_FAILED' : 'CHECKS_PASSED',
-      started_at: startedAt.toISOString(),
-      ended_at: endedAt.toISOString(),
-      duration_ms: endedAt.getTime() - startedAt.getTime(),
-      exit: !failed ? 'ok' : failed.timedOut ? 'timeout' : 'failed',
-      usage: null,
-      cost_usd: 0,
-      cost_basis: 'none',
-      spec_pin: ctx.specPin,
-      error: failed ? `Check '${failed.name}' ${describe(failed)}` : null,
-    };
-    const files = this.runRecordStore.write(projectPath, record, {
-      transcript: results
-        .map(
-          (result) =>
-            `## ${result.name}: ${describe(result)} (${result.durationMs}ms)\n\n${result.outputTail}\n`,
-        )
-        .join('\n'),
-    });
+      checks,
+      'shell',
+      // A failed stage writes no table.
+      (failed) => (failed ? null : checksFilename),
+    );
 
     if (failed) {
       const message = `Check '${failed.name}' ${describe(failed)}`;
@@ -925,6 +1305,140 @@ export class TicketRunUseCase implements TicketRunPort {
     };
   }
 
+  /**
+   * The checks that run before any agent. They pass, or the run escalates: a
+   * worker that has not run has nothing to fix. Either way the files a check
+   * wrote are committed with the stage's run record.
+   */
+  private async runPreWorkerChecks(
+    ctx: RunContext,
+    checks: readonly Check[],
+  ): Promise<Escalation | null> {
+    const { emitter, ticketId } = ctx;
+    const inTicketDir = (filename: string): string =>
+      path.join(ctx.aeosDir, 'tickets', ticketId, filename);
+    const { results, failed, describe, runId, record, files } = await this.performChecks(
+      ctx,
+      1,
+      checks,
+      'in-process',
+      (_failed, last) => last.artifacts?.[0] ?? null,
+    );
+    this.gitGateway.commitFiles(
+      ctx.aeosDir,
+      [...results.flatMap((result) => result.artifacts ?? []).map(inTicketDir), ...files],
+      `[${ticketId}][RUN][${runId}][checks][${record.exit}]`,
+    );
+    if (!failed) {
+      this.emitStageEvent(emitter, 'stage.completed', 'checks', 'Checks passed');
+      return null;
+    }
+    const report = failed.artifacts?.[0];
+    const message = `Check '${failed.name}' ${describe(failed)} before any agent ran. A worker cannot fix this; it needs your decision.${report ? ` Read ${report}.` : ''}`;
+    this.emitStageEvent(emitter, 'stage.failed', 'checks', message);
+    return {
+      reason: EscalationReason.PRE_WORKER_CHECK_FAILED,
+      message,
+      artifactPath: report ? inTicketDir(report) : undefined,
+    };
+  }
+
+  /**
+   * Runs the checks in order, stopping at the first failure, and writes the
+   * stage's run record. `outputOf` names the file in the ticket directory the
+   * record points at.
+   */
+  private async performChecks(
+    ctx: RunContext,
+    attempt: number,
+    checks: readonly Check[],
+    executor: 'shell' | 'in-process',
+    outputOf: (failed: CheckResult | undefined, last: CheckResult) => string | null,
+    role: 'checks' | 'generator' = 'checks',
+  ): Promise<{
+    results: CheckResult[];
+    failed: CheckResult | undefined;
+    describe: (result: CheckResult) => string;
+    runId: string;
+    record: RunRecord;
+    files: string[];
+  }> {
+    const { emitter, ticketId, projectPath } = ctx;
+    const isGenerator = role === 'generator';
+    this.emitStageEvent(
+      emitter,
+      'stage.started',
+      'checks',
+      isGenerator ? `Running generator ${checks[0]!.name}` : `Running ${checks.length} check(s)`,
+    );
+
+    const startedAt = new Date();
+    const results: CheckResult[] = [];
+    for (const check of checks) {
+      const checkStartedAt = Date.now();
+      let result: CheckResult;
+      try {
+        result = await check.run({ projectPath });
+      } catch (err) {
+        result = {
+          name: check.name,
+          passed: false,
+          durationMs: Date.now() - checkStartedAt,
+          timedOut: false,
+          outputTail: err instanceof Error ? err.message : String(err),
+        };
+      }
+      results.push(result);
+      if (!result.passed) break;
+    }
+    const endedAt = new Date();
+    const failed = results.find((result) => !result.passed);
+    const describe = (result: CheckResult): string =>
+      result.passed ? 'passed' : result.timedOut ? 'timed out' : 'failed';
+
+    const outputFile = outputOf(failed, results.at(-1)!);
+    const output = outputFile ? `tickets/${ticketId}/${outputFile}` : null;
+    const runId = this.newRunId(startedAt);
+    const record: RunRecord = {
+      schema_version: 0,
+      run_id: runId,
+      project: ctx.projectId,
+      ticket: ticketId,
+      column: ctx.column,
+      role,
+      agent: null,
+      attempt,
+      executor,
+      model: null,
+      mode: null,
+      brief: null,
+      output,
+      transcript: runRecordPaths(ticketId, runId).transcript,
+      verdict: isGenerator ? null : failed ? 'CHECKS_FAILED' : 'CHECKS_PASSED',
+      started_at: startedAt.toISOString(),
+      ended_at: endedAt.toISOString(),
+      duration_ms: endedAt.getTime() - startedAt.getTime(),
+      exit: !failed ? 'ok' : failed.timedOut ? 'timeout' : 'failed',
+      usage: null,
+      cost_usd: 0,
+      cost_basis: 'none',
+      spec_pin: ctx.specPin,
+      error: failed
+        ? `${isGenerator ? 'Generator' : 'Check'} '${failed.name}' ${describe(failed)}`
+        : null,
+    };
+    const files = this.runRecordStore.write(projectPath, record, {
+      transcript: results
+        .map(
+          (result) =>
+            `## ${result.name}: ${describe(result)} (${result.durationMs}ms)\n\n${result.outputTail}\n`,
+        )
+        .join('\n'),
+    });
+
+    return { results, failed, describe, runId, record, files };
+  }
+
   private async runReview(
     ctx: RunContext,
     attempt: number,
@@ -944,7 +1458,7 @@ export class TicketRunUseCase implements TicketRunPort {
     const reviewContext = await this.contextAssembler.assemble(
       ticketId,
       projectPath,
-      ctx.columnSpec.column,
+      ctx.columnSpec.diffContext ?? 'none',
       ctx.specPin,
     );
     const enrichedContext =
@@ -956,7 +1470,10 @@ export class TicketRunUseCase implements TicketRunPort {
           )
         : reviewContext;
 
-    const reviewerPrompt = this.buildPromptFn(enrichedContext, ctx.reviewerAgentSpec);
+    const reviewerPrompt = this.buildPromptFn(
+      this.withCriteriaClaims(ctx, enrichedContext),
+      ctx.reviewerAgentSpec,
+    );
     const reviewerExecutor = this.createExecutor(ctx.reviewerAgentSpecResolved);
 
     this.emitStageEvent(emitter, 'stage.started', 'reviewer', 'Running reviewer executor', {
@@ -1287,12 +1804,6 @@ export class TicketRunUseCase implements TicketRunPort {
         result: { status: 'failed', ticketId, error: `Ticket ${ticketId} is already DONE.` },
       };
     }
-    if (ticket.column === Column.DOD_GATE) {
-      return {
-        ok: false,
-        result: { status: 'failed', ticketId, error: 'DoD gate is human-only' },
-      };
-    }
     if (ticket.subState === SubState.WORKING) {
       return {
         ok: false,
@@ -1437,18 +1948,30 @@ export class TicketRunUseCase implements TicketRunPort {
     };
   }
 
-  private resolveColumn(columnString: string): Column | null {
-    return isValidColumn(columnString) ? columnString : null;
-  }
-
-  private resolveWorkerExecutorMode(
-    columnSpec: ColumnSpec,
-    column: Column,
-  ): 'artifact' | 'agentic' {
-    if (columnSpec.executorMode) {
-      return columnSpec.executorMode;
-    }
-    return column === Column.IMPLEMENTATION ? 'agentic' : 'artifact';
+  /**
+   * For the reviewer of a spec-backed epic's decomposition: which criteria no
+   * task claims, so an unowned criterion is rejected here and not at integration.
+   */
+  private withCriteriaClaims(ctx: RunContext, context: AssembledContext): AssembledContext {
+    if (ctx.columnSpec.role !== 'decomposition' || !ctx.specPin) return context;
+    const trace = this.criteriaCollector.collect(
+      ctx.projectPath,
+      { id: ctx.ticketId, projectId: ctx.projectId },
+      ctx.specPin,
+    );
+    const list = (items: string[]): string => (items.length > 0 ? items.join(', ') : 'none');
+    return this.withExtraArtifact(
+      context,
+      'criteria-claims.md',
+      [
+        '# Criteria claims',
+        '',
+        'Every acceptance criterion of the spec must be claimed by a task (`aeos ticket create --implements`). Reject the breakdown while a criterion is unclaimed or a task claims an id the spec does not contain.',
+        '',
+        `- Unclaimed: ${list(trace.unclaimed)}`,
+        `- Unknown claims: ${list(trace.unknownClaims.map((claim) => `${claim.taskId} claims ${claim.id}`))}`,
+      ].join('\n'),
+    );
   }
 
   private supportsAgenticExecution(executorType: AgentSpec['executor']['type']): boolean {

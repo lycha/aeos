@@ -12,7 +12,13 @@ export interface TicketMoveInput {
 }
 
 export type TicketMoveResult =
-  | { status: 'moved'; ticketId: string; fromColumn: Column; toColumn: Column }
+  | {
+      status: 'moved';
+      ticketId: string;
+      fromColumn: Column;
+      toColumn: Column;
+      gateRecordId: string;
+    }
   | { status: 'error'; ticketId: string; error: string };
 
 export interface TicketMovePort {

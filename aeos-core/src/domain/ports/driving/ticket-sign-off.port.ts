@@ -15,6 +15,7 @@ export type TicketSignOffResult =
       status: 'signed_off';
       ticketId: string;
       previousSubState: SubStateOrNull;
+      gateRecordId: string;
     }
   | { status: 'error'; ticketId: string; error: string };
 

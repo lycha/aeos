@@ -106,3 +106,22 @@ describe('GhPullRequestGateway.create', () => {
     expect(gateway.create(request)).toEqual({ url: 'https://github.com/o/r/pull/9' });
   });
 });
+
+describe('GhPullRequestGateway.updateBody', () => {
+  it('reads the body of the pull request for the head branch and writes the updated one back', () => {
+    let written = '';
+    const { gateway, calls } = gatewayWith(({ args }) => {
+      if (args[1] === 'view') return JSON.stringify({ body: 'old body' });
+      written = fs.readFileSync(args[args.indexOf('--body-file') + 1]!, 'utf-8');
+      return '';
+    });
+
+    gateway.updateBody({ cwd: '/repo', head: 'aeos/AEOS-1', update: (body) => `${body}, updated` });
+
+    expect(calls.map((call) => call.args.slice(0, 3))).toEqual([
+      ['pr', 'view', 'aeos/AEOS-1'],
+      ['pr', 'edit', 'aeos/AEOS-1'],
+    ]);
+    expect(written).toBe('old body, updated');
+  });
+});

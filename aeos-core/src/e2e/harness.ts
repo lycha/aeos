@@ -8,15 +8,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { vi } from 'vitest';
 
-import { buildInitialTicketDocument } from '../application/services/ticket-document.js';
-import { buildProgram, createContainer } from '../cli/index.js';
+import { createContainer, runCli as runAeos } from '../cli/index.js';
 import type { Column } from '../domain/model/column.js';
 import type { SubStateOrNull } from '../domain/model/sub-state.js';
-import { TicketKind } from '../domain/model/ticket-kind.js';
 import { StubExecutor } from '../infrastructure/executor/stub-executor.adapter.js';
 import { PythonDecisionsLint } from '../infrastructure/spec/decisions-lint.adapter.js';
-import { getDb, resetDb } from '../infrastructure/persistence/database.js';
-import { SqliteTicketRepository } from '../infrastructure/persistence/sqlite-ticket.repository.js';
+import { resetDb } from '../infrastructure/persistence/database.js';
 
 /** `ticket create --spec` runs lint_decisions.py, which needs python3 with PyYAML and jsonschema. */
 export const pythonReady =
@@ -25,6 +22,17 @@ export const pythonReady =
 const pythonUserSite = spawnSync('python3', ['-m', 'site', '--user-site'], {
   encoding: 'utf-8',
 }).stdout?.trim();
+
+let workerTouch: string | null = null;
+
+/**
+ * From now until the project is cleaned up, every stub worker run also edits
+ * this file, as an agent straying outside its task would. A relative path
+ * resolves against the run's working directory. `null` stops it.
+ */
+export function stubWorkerTouches(file: string | null): void {
+  workerTouch = file;
+}
 
 export interface TempProject {
   /** A git repository with one commit; `process.cwd()` reports this path. */
@@ -38,6 +46,8 @@ export interface TempProject {
 export interface CliResult {
   /** Everything the command printed to stdout and stderr. */
   readonly output: string;
+  /** What it printed to stdout alone: under --json, one envelope. */
+  readonly stdout: string;
   readonly exitCode: number;
 }
 
@@ -52,7 +62,7 @@ export interface CliResult {
  * IMPLEMENTATION run must leave a real git diff. Rather than weaken that
  * guarantee, the stub is wrapped here so every IMPLEMENTATION run also writes
  * `stub-<ticketId>.txt` into its working directory, as a real engineer agent
- * would edit the repository.
+ * would edit the repository. (On the bug track the stub edits it itself.)
  */
 export function createTempProject(): TempProject {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-e2e-')));
@@ -86,18 +96,32 @@ export function createTempProject(): TempProject {
   }
 
   const stubRun = StubExecutor.prototype.run;
-  vi.spyOn(StubExecutor.prototype, 'run').mockImplementation(function (
+  vi.spyOn(StubExecutor.prototype, 'run').mockImplementation(async function (
     this: StubExecutor,
     invocation,
   ) {
-    if (invocation.column === 'IMPLEMENTATION' && invocation.workingDirectory) {
+    // A bug's two phases are the stub's own to play: it writes the test, then the fix.
+    if (
+      invocation.column === 'IMPLEMENTATION' &&
+      invocation.workingDirectory &&
+      !invocation.bugPhase
+    ) {
       fs.writeFileSync(
         path.join(invocation.workingDirectory, `stub-${invocation.ticketId}.txt`),
         'stub change\n',
         'utf-8',
       );
     }
-    return stubRun.call(this, invocation);
+    const result = await stubRun.call(this, invocation);
+    // The stub's own output says which role it played: preflight answers
+    // NO_BLOCKERS and a review carries a verdict; anything else was a worker.
+    const content = result.ok ? (result.content ?? '') : '';
+    if (workerTouch && content !== 'NO_BLOCKERS' && !content.includes('AEOS-VERDICT')) {
+      const target = path.resolve(invocation.workingDirectory ?? process.cwd(), workerTouch);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.appendFileSync(target, '\nedited by the stub\n', 'utf-8');
+    }
+    return result;
   });
 
   fs.writeFileSync(path.join(projectPath, 'README.md'), '# e2e\n', 'utf-8');
@@ -115,6 +139,7 @@ export function createTempProject(): TempProject {
     projectPath,
     aeosHome,
     cleanup() {
+      workerTouch = null;
       resetDb();
       vi.unstubAllEnvs();
       vi.restoreAllMocks();
@@ -156,30 +181,32 @@ export async function createEpic(title: string): Promise<string> {
   return id;
 }
 
-/** Runs `aeos <args>` in-process through Commander, capturing its output. */
+/** Runs `aeos <args>` in-process, as the entrypoint does, capturing its output. */
 export async function runCli(...args: string[]): Promise<CliResult> {
   const lines: string[] = [];
-  const capture = (...parts: unknown[]): void => {
-    lines.push(parts.join(' '));
-  };
-  const spies = [
-    vi.spyOn(console, 'log').mockImplementation(capture),
-    vi.spyOn(console, 'error').mockImplementation(capture),
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-      lines.push(String(chunk));
+  const stdout: string[] = [];
+  const capture =
+    (...also: string[][]) =>
+    (...parts: unknown[]): boolean => {
+      for (const sink of [lines, ...also]) sink.push(parts.join(' ').replace(/\n$/, ''));
       return true;
-    }),
+    };
+  const spies = [
+    vi.spyOn(console, 'log').mockImplementation(capture(stdout)),
+    vi.spyOn(console, 'error').mockImplementation(capture()),
+    vi.spyOn(process.stdout, 'write').mockImplementation(capture(stdout)),
+    // Commander's own usage errors, and the run events of --json.
+    vi.spyOn(process.stderr, 'write').mockImplementation(capture()),
   ];
   try {
-    await buildProgram().parseAsync(['node', 'aeos', ...args]);
+    await runAeos(['node', 'aeos', ...args], { stdout: { isTTY: false } });
   } finally {
     for (const spy of spies) spy.mockRestore();
   }
-  // Commands report failure through process.exitCode; left set, it would fail
-  // the whole test process.
+  // Left set, the exit code would fail the whole test process.
   const exitCode = Number(process.exitCode ?? 0);
   process.exitCode = undefined;
-  return { output: lines.join('\n'), exitCode };
+  return { output: lines.join('\n'), stdout: stdout.join('\n'), exitCode };
 }
 
 /** Reads a ticket's column and sub-state from the database. */
@@ -208,47 +235,27 @@ export async function driveColumn(ticketId: string): Promise<void> {
   }
 }
 
-/** `ticket dod-approve` prompts on stdin, so this calls its use case directly. */
-export function dodApprove(ticketId: string): void {
+/**
+ * `ticket dod-approve` prompts on stdin, so this calls its use case directly:
+ * the report is rebuilt and shown, then the answer is yes. `verified` are the
+ * criteria the person vouches for (`--verified`).
+ */
+export async function dodApprove(ticketId: string, verified: string[] = []): Promise<void> {
   const projectPath = process.cwd();
-  const container = createContainer();
-  const projectId = container.projectRepo.read(projectPath).id;
-  const result = container.ticketDodApprove.execute(projectId, projectPath, ticketId, true);
+  const useCase = createContainer().ticketDodApprove;
+  const projectId = createContainer().projectRepo.read(projectPath).id;
+  const shown = await useCase.review(projectId, projectPath, ticketId, verified);
+  if (!shown.ok) throw new Error(`dod-approve of ${ticketId} cannot be reviewed: ${shown.error}`);
+  const result = useCase.execute(projectId, projectPath, ticketId, true, undefined, shown.review);
   if (result.status !== 'approved') {
     throw new Error(`dod-approve of ${ticketId} did not approve: ${JSON.stringify(result)}`);
   }
 }
 
-/**
- * Creates a TASK with no parent, and returns its id.
- *
- * shortcut: inserted through the repository because no command creates a
- * standalone task yet; switch to `ticket create --bug` when I1-M4-003 lands.
- */
-export function createStandaloneTask(title: string): string {
-  const projectPath = process.cwd();
-  const container = createContainer();
-  const project = container.projectRepo.read(projectPath);
-  const ticket = new SqliteTicketRepository(getDb()).createAtomic(project.id, (nextNum) => {
-    const now = new Date().toISOString();
-    return {
-      id: `${project.key}-${nextNum}`,
-      projectId: project.id,
-      title,
-      kind: TicketKind.TASK,
-      parentId: null,
-      taskKey: null,
-      column: 'BACKLOG',
-      subState: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-  });
-  container.artifactStore.writeArtifact(
-    projectPath,
-    ticket.id,
-    `${ticket.id}-ticket.md`,
-    buildInitialTicketDocument(ticket),
-  );
-  return ticket.id;
+/** Creates a standalone task on the bug track (`ticket create --bug`), and returns its id. */
+export async function createStandaloneTask(title: string): Promise<string> {
+  const { output } = await runCli('ticket', 'create', title, '--bug');
+  const id = /Created \w+ (\S+):/.exec(output)?.[1];
+  if (!id) throw new Error(`ticket create --bug printed no id:\n${output}`);
+  return id;
 }

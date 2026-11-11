@@ -11,7 +11,6 @@ import type { ColumnSpec } from '../../domain/model/column-spec.js';
 import type { AgentSpec } from '../../domain/model/agent-spec.js';
 import type { AssembledContext } from '../../domain/model/assembled-context.js';
 import type { ExecutorChunkObserver } from '../../domain/model/executor-invocation.js';
-import { type Column, isValidColumn } from '../../domain/model/column.js';
 import { buildContextSection } from './prompt-builder.js';
 
 export type PreflightResult = { blocked: false } | { blocked: true; questionsPath: string };
@@ -40,8 +39,7 @@ export class PreflightService {
     // 2. Build the preflight-specific prompt
     const prompt = this.buildPrompt(ticketId, assembledContext, columnSpec, workerAgentSpec);
 
-    // 3. Derive column enum value from columnSpec.column string
-    const column = this.resolveColumn(columnSpec.column);
+    const column = columnSpec.column;
 
     // 4. Construct executor invocation and run
     const tempPath = join(tmpdir(), `preflight-${ticketId}-${randomUUID()}.md`);
@@ -118,13 +116,6 @@ export class PreflightService {
         '```',
       ].join('\n'),
     ].join('\n');
-  }
-
-  private resolveColumn(columnString: string): Column {
-    if (isValidColumn(columnString)) {
-      return columnString;
-    }
-    throw new Error(`Invalid column value: ${columnString}`);
   }
 
   private isNoBlockersResponse(content: string): boolean {

@@ -8,10 +8,15 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { ColumnRole, ColumnSpec } from '../domain/model/column-spec.js';
 import type { PullRequestGateway } from '../domain/ports/driven/pull-request-gateway.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
+import { templatePipelines } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// The shipped pipelines, whatever the project path.
+const pipelineLoader = { load: () => templatePipelines() };
 
 function createMockTicketRepo(): TicketRepository {
   return {
@@ -27,6 +32,7 @@ function createMockTicketRepo(): TicketRepository {
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
     setSpecCommit: vi.fn(),
+    setContractChange: vi.fn(),
   };
 }
 
@@ -77,23 +83,37 @@ function createMockStateMachine() {
 }
 
 /** The collaborators pull requests need, all saying yes by default. */
+/** The roles the shipped column specs declare. */
+const TEMPLATE_ROLES: Record<string, ColumnRole | undefined> = {
+  SPEC_REVIEW: 'spec-review',
+  TASK_BREAKDOWN: 'decomposition',
+  INTEGRATION_REVIEW: 'integration',
+  DOD_GATE: 'final-gate',
+};
+
 function createPullRequestMocks() {
   return {
     prGateway: {
       isAvailable: vi.fn().mockReturnValue({ ok: true }),
       create: vi.fn().mockReturnValue({ url: 'https://example.test/pull/7' }),
+      updateBody: vi.fn(),
     } satisfies PullRequestGateway,
     costRepo: {
-      record: vi.fn(),
+      record: vi.fn(() => ({ id: 'GATE-1' })),
       findByProject: vi.fn().mockReturnValue([]),
       findByTicket: vi.fn().mockReturnValue([]),
       findByFilters: vi.fn().mockReturnValue([]),
     } satisfies CostRepository,
     columnSpecLoader: {
-      load: vi.fn((column: string) => ({
-        outputArtifact:
-          column === 'INTEGRATION_REVIEW' ? 'integration-review.md' : 'code-review.md',
-      })),
+      load: vi.fn(
+        (column: string): Partial<ColumnSpec> => ({
+          column,
+          role: TEMPLATE_ROLES[column] ?? 'standard',
+          diffContext: column === 'CODE_REVIEW' ? 'task' : 'none',
+          outputArtifact:
+            column === 'INTEGRATION_REVIEW' ? 'integration-review.md' : 'code-review.md',
+        }),
+      ),
     } as unknown as ColumnSpecLoader,
     projectRepo: {
       readExecutorConfig: vi.fn().mockReturnValue({}),
@@ -108,7 +128,7 @@ const callOrder = (mock: unknown): number =>
   (mock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!;
 beforeEach(() => {
   gateRecorder.decidedBy.mockReset();
-  gateRecorder.record.mockReset();
+  gateRecorder.record.mockReset().mockReturnValue({ id: 'GATE-1' });
 });
 
 const PROJECT_ID = 'startup-a';
@@ -134,6 +154,7 @@ describe('TicketApproveUseCase', () => {
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let gitGateway: ReturnType<typeof createMockGitGateway>;
   let stateMachine: ReturnType<typeof createMockStateMachine>;
+  let pr: ReturnType<typeof createPullRequestMocks>;
   let useCase: TicketApproveUseCase;
 
   beforeEach(() => {
@@ -141,7 +162,7 @@ describe('TicketApproveUseCase', () => {
     artifactStore = createMockArtifactStore();
     gitGateway = createMockGitGateway();
     stateMachine = createMockStateMachine();
-    const pr = createPullRequestMocks();
+    pr = createPullRequestMocks();
     useCase = new TicketApproveUseCase(
       ticketRepo,
       artifactStore,
@@ -152,8 +173,88 @@ describe('TicketApproveUseCase', () => {
       pr.columnSpecLoader,
       pr.projectRepo,
       recorder,
+      pipelineLoader,
     );
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket());
+  });
+
+  describe('roles, not names', () => {
+    /** Declares `column` to have `role`, whatever the templates give a column of that name. */
+    const withRole = (column: string, role: ColumnRole): void => {
+      (pr.columnSpecLoader.load as ReturnType<typeof vi.fn>).mockImplementation(
+        (asked: string): Partial<ColumnSpec> => ({
+          column: asked,
+          role: asked === column ? role : 'standard',
+          outputArtifact: 'review.md',
+        }),
+      );
+    };
+
+    it('records the spec gate when an epic is approved out of a spec-review column of any name', () => {
+      withRole('TECH_SPEC', 'spec-review');
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        signedOffTicket('TECH_SPEC'),
+      );
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(
+        PROJECT_PATH,
+        signedOffTicket('TECH_SPEC'),
+        { gate: 'spec', verdict: 'approved', fromColumn: 'TECH_SPEC', toColumn: 'TASK_BREAKDOWN' },
+      );
+    });
+
+    it('records an ordinary approval out of a column that is merely called SPEC_REVIEW', () => {
+      withRole('TECH_SPEC', 'spec-review');
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(gateRecorder.record.mock.calls[0]![2]).toMatchObject({ gate: 'column-approval' });
+    });
+
+    it('holds an epic in a decomposition column of any name until its tasks are DONE', () => {
+      withRole('TECH_SPEC', 'decomposition');
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        signedOffTicket('TECH_SPEC'),
+      );
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
+        { ...signedOffTicket('QA'), id: 'AEOS-2', kind: 'TASK', parentId: TICKET_ID },
+      ]);
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({
+        status: 'error',
+        error: expect.stringContaining('AEOS-2 (QA)'),
+      });
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it('opens the pull request when an epic leaves an integration column of any name', () => {
+      withRole('TECH_SPEC', 'integration');
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        signedOffTicket('TECH_SPEC'),
+      );
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(pr.prGateway.create).toHaveBeenCalledTimes(1);
+      // ...and its body cites the review that column wrote.
+      const { body } = pr.prGateway.create.mock.calls[0]![0] as { body: string };
+      expect(body).toContain('.aeos/tickets/AEOS-1/AEOS-1-review.md');
+    });
+
+    it('opens none when an epic leaves a column that is merely called INTEGRATION_REVIEW', () => {
+      withRole('TECH_SPEC', 'integration');
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        signedOffTicket('INTEGRATION_REVIEW'),
+      );
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(pr.prGateway.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('gate record', () => {
@@ -233,6 +334,8 @@ describe('TicketApproveUseCase', () => {
       ticketId: TICKET_ID,
       fromColumn: 'SPEC_REVIEW',
       toColumn: 'TECH_SPEC',
+      pullRequestUrl: null,
+      gateRecordId: 'GATE-1',
     });
   });
 
@@ -300,6 +403,8 @@ describe('TicketApproveUseCase', () => {
       ticketId: TICKET_ID,
       fromColumn: 'BACKLOG',
       toColumn: 'SPEC_REVIEW',
+      pullRequestUrl: null,
+      gateRecordId: 'GATE-1',
     });
   });
 
@@ -330,6 +435,8 @@ describe('TicketApproveUseCase', () => {
       ticketId: TICKET_ID,
       fromColumn: 'BACKLOG',
       toColumn: 'SPEC_REVIEW',
+      pullRequestUrl: null,
+      gateRecordId: 'GATE-1',
     });
   });
 
@@ -440,6 +547,7 @@ describe('TicketApproveUseCase — per-task commit', () => {
       pr.columnSpecLoader,
       pr.projectRepo,
       recorder,
+      pipelineLoader,
     );
   });
 
@@ -452,6 +560,20 @@ describe('TicketApproveUseCase — per-task commit', () => {
     expect(gitGateway.commitAll).toHaveBeenCalledWith(
       PROJECT_PATH,
       '[AEOS-1] Test ticket\n\nTicket: AEOS-1\nEpic: AEOS-9',
+    );
+  });
+
+  it('adds an Implements trailer with the criteria the task claims', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...task('QA'),
+      implements: ['AC-1', 'AC-2'],
+    });
+
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(gitGateway.commitAll).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      '[AEOS-1] Test ticket\n\nTicket: AEOS-1\nEpic: AEOS-9\nImplements: AC-1, AC-2',
     );
   });
 
@@ -522,6 +644,7 @@ describe('TicketApproveUseCase — pull requests', () => {
       pr.columnSpecLoader,
       pr.projectRepo,
       recorder,
+      pipelineLoader,
     );
   });
 
@@ -688,6 +811,23 @@ describe('TicketApproveUseCase — pull requests', () => {
     expect(body).toContain('Code review:');
   });
 
+  it("puts a bug's reproduction, red then green, in its pull request", () => {
+    approving({ ...standaloneTaskAtQa(), track: 'bug' });
+    (artifactStore.artifactExists as ReturnType<typeof vi.fn>).mockImplementation(
+      (_path: string, _ticket: string, name: string) => name === 'AEOS-1-repro.md',
+    );
+    (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(
+      '# Reproduction\n\nCommand: `node repro.cjs`\n\n| Before the fix | 1 |\n',
+    );
+
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    const { body } = pr.prGateway.create.mock.calls[0]![0] as { body: string };
+    expect(body).toContain(
+      '## Reproduction\n\nCommand: `node repro.cjs`\n\n| Before the fix | 1 |',
+    );
+  });
+
   it('opens no pull request for a child task, or for an epic leaving any other column', () => {
     approving({ ...standaloneTaskAtQa(), parentId: 'AEOS-9' });
     useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
@@ -696,5 +836,102 @@ describe('TicketApproveUseCase — pull requests', () => {
 
     expect(pr.prGateway.create).not.toHaveBeenCalled();
     expect(gitGateway.push).not.toHaveBeenCalled();
+  });
+  describe('the contract gate', () => {
+    const PATHS = ['cli-contract.yaml', 'db/schema.sql'];
+    const carrying = (approvedBy: string | null = null): Ticket => ({
+      ...signedOffTicket('IMPLEMENTATION'),
+      kind: 'TASK',
+      parentId: 'AEOS-9',
+      contractChange: { paths: PATHS, approvedBy },
+    });
+
+    it('refuses a ticket that carries a contract change, and prints the paths and their diff', () => {
+      approving(carrying());
+      (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('+ALTER TABLE tickets');
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('error');
+      const { error } = result as { error: string };
+      expect(error).toContain('carries a contract change: cli-contract.yaml, db/schema.sql');
+      expect(error).toContain(`aeos ticket approve ${TICKET_ID} --contract`);
+      expect(error).toContain('+ALTER TABLE tickets');
+      expect(gitGateway.diff).toHaveBeenCalledWith(PROJECT_PATH, PATHS);
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it('with --contract, records a contract gate naming the paths before the ticket advances', () => {
+      approving(carrying());
+      gateRecorder.record
+        .mockReturnValueOnce({ id: 'GATE-4' })
+        .mockReturnValueOnce({ id: 'GATE-5' });
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { contract: true });
+
+      expect(result).toMatchObject({ status: 'advanced', gateRecordId: 'GATE-5' });
+      expect(gateRecorder.record.mock.calls.map((call) => call[2])).toEqual([
+        {
+          gate: 'contract',
+          verdict: 'approved',
+          reason: 'Contract change: cli-contract.yaml, db/schema.sql',
+        },
+        expect.objectContaining({ gate: 'column-approval' }),
+      ]);
+      expect(ticketRepo.setContractChange).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, {
+        paths: PATHS,
+        approvedBy: 'GATE-4',
+      });
+      expect(order(gateRecorder.record)).toBeLessThan(order(stateMachine.transition));
+    });
+
+    it('asks once: a change already approved at the contract gate advances without the flag', () => {
+      approving(carrying('GATE-4'));
+
+      expect(useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID).status).toBe('advanced');
+      expect(gateRecorder.record).toHaveBeenCalledTimes(1);
+      expect(ticketRepo.setContractChange).not.toHaveBeenCalled();
+    });
+
+    it('never lets the engine through: an auto advance is refused, whatever it passes', () => {
+      approving(carrying());
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, {
+        byEngine: true,
+        contract: true,
+      });
+
+      expect(result.status).toBe('error');
+      expect((result as { error: string }).error).toContain('carries a contract change');
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it('lists the contract changes of a ticket and of its tasks in the pull request body', () => {
+      approving({
+        ...epicAtIntegrationReview(),
+        contractChange: null,
+      });
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
+        { ...carrying('GATE-4'), id: 'AEOS-2' },
+        { ...signedOffTicket('DONE'), id: 'AEOS-3', kind: 'TASK' },
+      ]);
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const { body } = pr.prGateway.create.mock.calls[0]![0] as { body: string };
+      expect(body).toContain('## Contract changes');
+      expect(body).toContain('- `cli-contract.yaml` (AEOS-2, approved in GATE-4)');
+      expect(body).toContain('- `db/schema.sql` (AEOS-2, approved in GATE-4)');
+    });
+
+    it('has no contract section in the body of a pull request that changes none', () => {
+      approving(epicAtIntegrationReview());
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const { body } = pr.prGateway.create.mock.calls[0]![0] as { body: string };
+      expect(body).not.toContain('Contract changes');
+    });
   });
 });

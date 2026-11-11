@@ -31,6 +31,10 @@ jobs:
       - name: Schemas are current
         run: npm run schemas:check
 
+      # src/cli/generated/ and the command reference are generated from cli-contract.yaml; fail when stale.
+      - name: Generated CLI is current
+        run: npm run verify:generated
+
       - name: Typecheck
         run: npm run typecheck
 

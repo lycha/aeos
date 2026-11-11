@@ -3,55 +3,38 @@
 
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import { createContainer } from './container.js';
 import { runInkApp } from './ui/run-ink-app.js';
-import { registerInstallCommand } from './commands/install.command.js';
-import { registerProjectInitCommand } from './commands/project-init.command.js';
-import { registerProjectSyncCommand } from './commands/project-sync.command.js';
-import { registerTicketCreateCommand } from './commands/ticket-create.command.js';
-import { registerTicketListCommand } from './commands/ticket-list.command.js';
-import { registerTicketShowCommand } from './commands/ticket-show.command.js';
-import { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
-import { registerTicketRepinCommand } from './commands/ticket-repin.command.js';
-import { registerTicketResolveCommand } from './commands/ticket-resolve.command.js';
-import { registerTicketRunCommand } from './commands/ticket-run.command.js';
-import { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
-import { registerTicketSignOffCommand } from './commands/ticket-sign-off.command.js';
-import { registerTicketMoveCommand } from './commands/ticket-move.command.js';
-import { registerTicketReadyCommand } from './commands/ticket-ready.command.js';
-import { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
-import { registerOrchestratorCommand } from './commands/orchestrator.command.js';
-import { registerCostsCommand } from './commands/costs.command.js';
+import { handlers } from './commands/index.js';
+import { registerGenerated } from './generated/commands.gen.js';
+import { render, setProcessExit } from './render.js';
+import { createResources } from './resources.js';
+import { failed, stopped } from './result.js';
 
 export { createContainer } from './container.js';
 export type { Container } from './container.js';
-export { registerInstallCommand } from './commands/install.command.js';
-export { registerProjectInitCommand } from './commands/project-init.command.js';
-export { registerProjectSyncCommand } from './commands/project-sync.command.js';
-export { registerTicketCreateCommand } from './commands/ticket-create.command.js';
-export { registerTicketListCommand } from './commands/ticket-list.command.js';
-export { registerTicketShowCommand } from './commands/ticket-show.command.js';
-export { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
-export { registerTicketRepinCommand } from './commands/ticket-repin.command.js';
-export { registerTicketResolveCommand } from './commands/ticket-resolve.command.js';
-export { registerTicketRunCommand } from './commands/ticket-run.command.js';
-export { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
-export { registerTicketSignOffCommand } from './commands/ticket-sign-off.command.js';
-export { registerTicketMoveCommand } from './commands/ticket-move.command.js';
-export { registerTicketReadyCommand } from './commands/ticket-ready.command.js';
-export { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
+
+/** The command groups; the contract describes commands, not the words they hang from. */
+const GROUPS: Record<string, string> = {
+  project: 'Project management commands',
+  ticket: 'Ticket management commands',
+  orchestrator: 'Drive an epic and its tasks autonomously',
+};
 
 interface CliRuntimeDependencies {
   readonly stdout: Pick<NodeJS.WriteStream, 'isTTY'>;
   readonly createContainer: typeof createContainer;
-  readonly buildProgram: () => Command;
+  readonly buildProgram: typeof buildProgram;
   readonly runInkApp: typeof runInkApp;
 }
 
-export function buildProgram(): Command {
+/** `setExit` is told each command's exit code; the process's own, unless a caller keeps it. */
+export function buildProgram(setExit: (code: number) => void = setProcessExit): Command {
   const program = new Command();
   program
+    // A usage error is thrown, not exited on: `runCli` gives it the contract's code.
+    .exitOverride()
     .name('aeos')
     .version('0.1.0')
     .description(
@@ -75,63 +58,24 @@ export function buildProgram(): Command {
     );
 
   const container = createContainer();
-  registerInstallCommand(program, container.install);
-  registerProjectInitCommand(program, container.projectInit);
-  registerProjectSyncCommand(program, () => container.projectSync, container.projectRepo);
+  // Wiring, option types and resource guards are generated from
+  // cli-contract.yaml. A guard runs inside the action, so `aeos install` and
+  // `aeos project init` still run before .aeos/ (and state.db) exist.
+  registerGenerated(program, handlers, createResources(container), setExit);
+  for (const group of program.commands) {
+    if (group.name() in GROUPS) group.description(GROUPS[group.name()]);
+  }
 
-  // Ticket commands access the DB — resolve lazily inside the action callback,
-  // not at program build time. This allows `aeos install` and `aeos project init`
-  // to run before .aeos/ (and state.db) exist.
-  registerTicketCreateCommand(program, () => container.ticketCreate, container.projectRepo);
-  registerTicketListCommand(
-    program,
-    () => container.ticketList,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketShowCommand(
-    program,
-    () => container.ticketShow,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketAnswerCommand(program, () => container.ticketAnswer, container.projectRepo);
-  registerTicketRepinCommand(program, () => container.ticketRepin, container.projectRepo);
-  registerTicketResolveCommand(program, () => container.ticketResolve, container.projectRepo);
-  registerTicketRunCommand(
-    program,
-    () => container.ticketRun,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketApproveCommand(
-    program,
-    () => container.ticketApprove,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketSignOffCommand(program, () => container.ticketSignOff, container.projectRepo);
-  registerTicketMoveCommand(
-    program,
-    () => container.ticketMove,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketReadyCommand(program, () => container.ticketReady, container.projectRepo);
-  registerTicketDodApproveCommand(
-    program,
-    () => container.ticketDodApprove,
-    container.projectRepo,
-    container.rubricLoader,
-    container.artifactStore,
-  );
-  registerOrchestratorCommand(
-    program,
-    () => container.orchestrator,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerCostsCommand(program, () => container.costs, container.columnLabelsOfProject);
+  // Every command that acts on tickets is held to the accepted pipelines
+  // (I1-M4-005c). The ones that only read go on, with the accepted order.
+  const READ_ONLY = new Set(['ticket list', 'ticket show', 'orchestrator status']);
+  program.hook('preAction', (_program, action) => {
+    const group = action.parent?.name() ?? '';
+    if (!['ticket', 'orchestrator'].includes(group)) return;
+    if (READ_ONLY.has(`${group} ${action.name()}`)) return;
+    const projectPath = container.projectRepo.findRoot(process.cwd());
+    if (projectPath) container.checkPipelines(projectPath);
+  });
 
   return program;
 }
@@ -165,7 +109,32 @@ export async function runCli(
     return;
   }
 
-  await runtime.buildProgram().parseAsync(argv);
+  const program = runtime.buildProgram();
+  try {
+    await program.parseAsync(argv);
+  } catch (error) {
+    // Help and --version end this way, having printed what was asked for.
+    if (error instanceof CommanderError && error.exitCode === 0) return;
+    // What no command caught: Commander's own usage errors, which it has
+    // already written to stderr, and a refusal before the command ran.
+    const result =
+      error instanceof CommanderError
+        ? stopped('usage', 'USAGE', error.message, { text: '' })
+        : failed(error);
+    render(commandPath(program, commandArgs), result, commandArgs.includes('--json'));
+  }
+}
+
+/** The command the arguments name, as far as they name one: `ticket show`. */
+function commandPath(program: Command, args: readonly string[]): string {
+  const words: string[] = [];
+  let at: Command | undefined = program;
+  for (const arg of args) {
+    at = at.commands?.find((command) => command.name() === arg);
+    if (!at) break;
+    words.push(arg);
+  }
+  return words.join(' ');
 }
 
 // Only parse when run as CLI entrypoint (not when imported as module)
@@ -174,10 +143,5 @@ const isEntrypoint =
   process.argv[1] != null && realpathSync(process.argv[1]) === realpathSync(thisFile);
 
 if (isEntrypoint) {
-  void runCli().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    // eslint-disable-next-line no-console
-    console.error(`Error: ${message}`);
-    process.exitCode = 1;
-  });
+  void runCli().catch((error: unknown) => render('', failed(error), false));
 }

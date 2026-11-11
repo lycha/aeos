@@ -21,6 +21,7 @@ function createMockTicketRepo(): TicketRepository {
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
     setSpecCommit: vi.fn(),
+    setContractChange: vi.fn(),
   };
 }
 
@@ -125,8 +126,12 @@ describe('TicketShowUseCase', () => {
         '/test/project/.aeos',
         'c0ffee1',
         'features/checkout',
-        // Gate records live beside the spec and are not the spec moving.
-        ['features/checkout/gates.yaml'],
+        // Gate records and the conformance report live beside the spec and are not the spec moving.
+        [
+          'features/checkout/gates.yaml',
+          'features/checkout/conformance.yaml',
+          'features/checkout/conformance.md',
+        ],
       );
     });
   });

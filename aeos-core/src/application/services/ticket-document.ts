@@ -27,6 +27,9 @@ function renderMetadataBlock(ticket: Ticket): string {
   if (ticket.specPin) {
     lines.push(`- Spec: ${formatSpecPin(ticket.specPin)} (${ticket.specPin.path})`);
   }
+  if (ticket.implements?.length) {
+    lines.push(`- Implements: ${ticket.implements.join(', ')}`);
+  }
   lines.push(METADATA_END);
   return lines.join('\n');
 }

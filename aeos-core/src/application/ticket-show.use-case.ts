@@ -61,8 +61,11 @@ export class TicketShowUseCase implements TicketShowPort {
         this.artefactTree.root(input.projectPath),
         specPin.commit,
         specPin.path,
-        // Gate decisions are recorded beside the spec; they are not the spec.
-        [`${specPin.path}/gates.yaml`],
+        // Gate decisions and the conformance report are recorded beside the
+        // spec; they are not the spec.
+        ['gates.yaml', 'conformance.yaml', 'conformance.md'].map(
+          (file) => `${specPin.path}/${file}`,
+        ),
       );
 
     return { ok: true, ticket, artifacts, executions, runs, children, parent, specPin, specMoved };

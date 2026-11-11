@@ -4,7 +4,6 @@ import type BetterSqlite3 from 'better-sqlite3';
 
 import { initSchema, resetDb } from './database.js';
 import { SqliteTicketRepository } from './sqlite-ticket.repository.js';
-import { Column } from '../../domain/model/column.js';
 import { SubState } from '../../domain/model/sub-state.js';
 import { TicketKind } from '../../domain/model/ticket-kind.js';
 import { EscalationReason } from '../../domain/model/escalation.js';
@@ -21,7 +20,7 @@ function ticket(overrides: Partial<Ticket> = {}): Ticket {
     title: 'Epic',
     kind: TicketKind.EPIC,
     parentId: null,
-    column: Column.TECH_SPEC,
+    column: 'TECH_SPEC',
     subState: SubState.WORKING,
     createdAt: now,
     updatedAt: now,
@@ -127,6 +126,23 @@ describe('SqliteTicketRepository — spec pin', () => {
     expect(repo.findByProject('p')[0]?.specPin).toEqual(specPin);
   });
 
+  it('round-trips the criteria a task claims; none is null', () => {
+    repo.save(ticket({ implements: ['AC-1', 'AC-12a'] }));
+    repo.save(ticket({ id: 'AEOS-2' }));
+
+    expect(repo.findById('p', 'AEOS-1')?.implements).toEqual(['AC-1', 'AC-12a']);
+    expect(repo.findChildren('p', 'none')).toEqual([]);
+    expect(repo.findById('p', 'AEOS-2')?.implements).toBeNull();
+  });
+
+  it('round-trips the bug track; a ticket on no track reads back null', () => {
+    repo.save(ticket({ kind: 'TASK', track: 'bug' }));
+    repo.save(ticket({ id: 'AEOS-2' }));
+
+    expect(repo.findById('p', 'AEOS-1')?.track).toBe('bug');
+    expect(repo.findByProject('p').map((found) => found.track)).toEqual(['bug', null]);
+  });
+
   it('moves the commit of a pin and leaves the feature alone', () => {
     repo.save(
       ticket({ specPin: { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' } }),
@@ -139,5 +155,16 @@ describe('SqliteTicketRepository — spec pin', () => {
       commit: 'deadbee',
       path: 'features/checkout',
     });
+  });
+  it('round-trips a contract change; a ticket with none reads back null', () => {
+    repo.save(ticket({ kind: 'TASK' }));
+    expect(repo.findById('p', 'AEOS-1')?.contractChange).toBeNull();
+
+    const change = { paths: ['cli-contract.yaml', 'db/schema.sql'], approvedBy: null };
+    repo.setContractChange('p', 'AEOS-1', change);
+    expect(repo.findById('p', 'AEOS-1')?.contractChange).toEqual(change);
+
+    repo.setContractChange('p', 'AEOS-1', { ...change, approvedBy: 'GATE-2' });
+    expect(repo.findByProject('p')[0]?.contractChange?.approvedBy).toBe('GATE-2');
   });
 });

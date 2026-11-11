@@ -1,5 +1,7 @@
 column: TECH_SPEC
 label: Tech spec
+role: standard
+diffContext: none
 phase: PREPARE
 workerAgentFile: agents/architect-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml

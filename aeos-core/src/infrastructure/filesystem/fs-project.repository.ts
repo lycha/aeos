@@ -15,7 +15,10 @@ import { readTemplates } from './template-source.js';
 import {
   ProjectChecksSchema,
   ProjectProtectedPathsSchema,
+  ProjectCriteriaSchema,
   ProjectPullRequestsSchema,
+  ProjectGeneratorsSchema,
+  ProjectContractsSchema,
 } from '../spec-loader/schemas.js';
 import { scaffoldSkill } from './skill-source.js';
 
@@ -127,6 +130,12 @@ export class FsProjectRepository implements ProjectRepository {
       created.push(template.relativePath);
     }
 
+    // Scratch space (the test report read for conformance) stays out of the
+    // `.aeos` repository. Written here, not shipped as a template: npm drops
+    // `.gitignore` files from a package.
+    const gitignore = path.join(aeosRoot, '.gitignore');
+    if (!fs.existsSync(gitignore)) fs.writeFileSync(gitignore, 'tmp/\n', 'utf-8');
+
     // The aeos skill lets agentic executors drive the CLI (task decomposition).
     created.push(...scaffoldSkill(projectPath));
     return created;
@@ -170,6 +179,19 @@ export class FsProjectRepository implements ProjectRepository {
       throw new Error(
         `Invalid "pullRequests" in .aeos/project.json: ${pullRequests.error.message}`,
       );
+    }
+    const criteria = ProjectCriteriaSchema.optional().safeParse(config.criteria);
+    if (!criteria.success) {
+      throw new Error(`Invalid "criteria" in .aeos/project.json: ${criteria.error.message}`);
+    }
+    // A generator or a contract that was mistyped must not read as none declared.
+    const generators = ProjectGeneratorsSchema.optional().safeParse(config.generators);
+    if (!generators.success) {
+      throw new Error(`Invalid "generators" in .aeos/project.json: ${generators.error.message}`);
+    }
+    const contracts = ProjectContractsSchema.optional().safeParse(config.contracts);
+    if (!contracts.success) {
+      throw new Error(`Invalid "contracts" in .aeos/project.json: ${contracts.error.message}`);
     }
     if (config.checks === undefined) return config;
     const checks = ProjectChecksSchema.safeParse(config.checks);

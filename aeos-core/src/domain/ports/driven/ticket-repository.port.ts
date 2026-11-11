@@ -2,7 +2,7 @@
 
 import type { Column } from '../../model/column.js';
 import type { SubStateOrNull } from '../../model/sub-state.js';
-import type { Ticket, TicketEscalation } from '../../model/ticket.js';
+import type { ContractChange, Ticket, TicketEscalation } from '../../model/ticket.js';
 
 export interface TicketRepository {
   /** Returns the next auto-incrementing ticket number for the given project */
@@ -39,4 +39,6 @@ export interface TicketRepository {
   setPrUrl(projectId: string, ticketId: string, prUrl: string): void;
   /** Moves the commit of an epic's spec pin (`ticket repin`). The feature stays. */
   setSpecCommit(projectId: string, ticketId: string, commit: string): void;
+  /** Records the contract paths a ticket changed, and later the gate that approved them. */
+  setContractChange(projectId: string, ticketId: string, change: ContractChange | null): void;
 }

@@ -1,0 +1,66 @@
+# Approved by Kris, 10 Nov 2026 (signed off as drafted).
+#
+# Column order as data (package 4.5, tasks I1-M4-005a/b/c). This file replaces
+# the hard-coded EPIC_COLUMN_ORDER and TASK_COLUMN_ORDER in
+# src/domain/model/column.ts. It lives at .aeos/pipelines.yaml and a starter
+# copy ships in templates/.
+#
+# Rules the loader enforces (I1-M4-005b):
+#   - every pipeline starts at BACKLOG and ends at DONE
+#   - every column listed has a column spec in .aeos/column-specs/
+#   - an EPIC pipeline has exactly one column with role `decomposition`, and it
+#     comes before any column with role `integration` or `final-gate`
+#   - a pipeline has at most one `final-gate`, and it is the last column before DONE
+#   - a column identifier appears at most once per pipeline
+#   - the order of a kind may change only when every ticket of that kind is in
+#     BACKLOG or DONE (decided 10 Nov 2026; I1-M4-005c)
+
+pipelines_version: 0
+
+pipelines:
+  EPIC:
+    - BACKLOG
+    - SPEC_REVIEW          # renamed from PRODUCT_SCOPING (D3, I1-M3-003)
+    - TECH_SPEC
+    - TASK_BREAKDOWN
+    - INTEGRATION_REVIEW
+    - DOD_GATE
+    - DONE
+  TASK:
+    - BACKLOG
+    - IMPLEMENTATION
+    - CODE_REVIEW
+    - QA
+    - DONE
+
+# Roles and labels are declared in each column spec, not here, so a column's
+# behaviour travels with its spec. Shown for review of the vocabulary only.
+#
+#   role: standard        worker → checks → reviewer → gate. The default.
+#   role: spec-review     the worker reviews the pinned spec; the human approval
+#                         that follows is the spec gate.          (SPEC_REVIEW)
+#   role: decomposition   the worker creates child tickets; the epic cannot
+#                         leave until every child is DONE.     (TASK_BREAKDOWN)
+#   role: integration     the worker reviews the whole epic diff (base..HEAD).
+#                                                          (INTEGRATION_REVIEW)
+#   role: final-gate      human approval via `ticket dod-approve`; shows the
+#                         conformance report; never auto-advances.   (DOD_GATE)
+#
+# Example column spec additions:
+#
+#   column: TASK_BREAKDOWN
+#   label: Task breakdown
+#   role: decomposition
+#
+# Questions for the reviewer:
+# 1. Is `integration` a role, or an attribute (`diffContext: epic`) that any
+#    column may set? Today context-assembler.ts keys on the column name to
+#    decide which diff to inject. An attribute is more flexible; a role is
+#    simpler to validate.
+# 2. Should BACKLOG and DONE be implicit rather than listed?
+# 3. `spec-review` is proposed as a role because the spec gate is one of the
+#    three gates that always has a human, and I1-M3-004 records it by keying on
+#    the column name. Without a role, that name check survives I1-M4-005a and a
+#    project that renames or reorders the column silently loses its spec gate.
+#    If accepted, the loader also requires exactly one `spec-review` column in
+#    an EPIC pipeline, before the decomposition column.

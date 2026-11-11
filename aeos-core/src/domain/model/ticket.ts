@@ -20,6 +20,13 @@ export interface TicketEscalation {
   artifactPath?: string | null;
 }
 
+/** The contract paths a ticket's worker changed, and the gate record that approved them. */
+export interface ContractChange {
+  paths: string[];
+  /** `GATE-<n>` of the `contract` gate record; null until a person approves. */
+  approvedBy: string | null;
+}
+
 export interface Ticket {
   /** Ticket identifier, e.g. "AEOS-1" */
   id: string;
@@ -59,4 +66,16 @@ export interface Ticket {
    * none of its own: resolve it through `parentId`.
    */
   specPin?: SpecPin | null;
+  /**
+   * Acceptance criteria of the epic's spec a TASK claims (`--implements`),
+   * e.g. `['AC-1', 'AC-12a']`. Null when it claims none.
+   */
+  implements?: string[] | null;
+  /**
+   * The small-change track a standalone TASK travels (`ticket create --bug`):
+   * a bug must show a reproducing test red, then green. Null on no track.
+   */
+  track?: 'bug' | null;
+  /** Set when a worker of this ticket changed a path the project declares a contract. */
+  contractChange?: ContractChange | null;
 }

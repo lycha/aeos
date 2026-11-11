@@ -4,8 +4,7 @@
 // waits for its children. A TASK is one atomic unit of that decomposition and
 // runs the build pipeline on its own.
 //
-// The two follow different column sequences — see EPIC_COLUMN_ORDER and
-// TASK_COLUMN_ORDER in column.ts.
+// The two follow different column sequences: the project's pipelines file.
 
 export const TicketKind = {
   EPIC: 'EPIC',

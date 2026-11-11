@@ -3,10 +3,14 @@
 
 import { z } from 'zod';
 
+import { COLUMN_ROLES, DIFF_CONTEXTS } from '../../domain/model/column-spec.js';
+
 export const ColumnSpecSchema = z.object({
   column: z.string().min(1),
   // Length and uniqueness are checked across all columns, in `labelErrors`.
   label: z.string().optional(),
+  role: z.enum(COLUMN_ROLES).default('standard'),
+  diffContext: z.enum(DIFF_CONTEXTS).default('none'),
   executorMode: z.enum(['artifact', 'agentic']).optional(),
   requiresRepoDiff: z.boolean().optional(),
   runChecks: z.boolean().optional(),
@@ -36,6 +40,7 @@ export const AgentSpecSchema = z.object({
   taskInstruction: z.string().min(1),
   outputFormat: z.string().min(1),
   selfVerificationChecklist: z.array(z.string()).default([]),
+  bugTrack: z.object({ reproduce: z.string().min(1), fix: z.string().min(1) }).optional(),
   executor: z.object({
     type: z.enum(['claude-cli', 'auggie-cli', 'opencode-cli', 'ollama-cli', 'stub']),
     model: z.string().optional(),
@@ -55,5 +60,37 @@ export const ProjectChecksSchema = z.array(
 /** The `protectedPaths` list of `.aeos/project.json`. */
 export const ProjectProtectedPathsSchema = z.array(z.string().min(1));
 
+/** The `generators` list of `.aeos/project.json`. */
+export const ProjectGeneratorsSchema = z.array(
+  z.object({
+    name: z.string().min(1),
+    command: z.string().min(1),
+    inputs: z.array(z.string().min(1)).min(1),
+    outputs: z.array(z.string().min(1)).min(1),
+  }),
+);
+
+/** The `contracts` list of `.aeos/project.json`. */
+export const ProjectContractsSchema = z.array(z.string().min(1));
+
+/** The `criteria` object of `.aeos/project.json`. */
+export const ProjectCriteriaSchema = z.looseObject({
+  testGlobs: z.array(z.string().min(1)).optional(),
+  testReport: z
+    .object({
+      command: z.string().min(1),
+      path: z.string().min(1),
+      format: z.enum(['vitest-json']),
+    })
+    .optional(),
+});
+
 /** The `pullRequests` object of `.aeos/project.json`. */
 export const ProjectPullRequestsSchema = z.object({ enabled: z.boolean().optional() });
+
+const PipelineSchema = z.array(z.string().min(1));
+
+export const PipelinesSchema = z.strictObject({
+  pipelines_version: z.literal(0),
+  pipelines: z.strictObject({ EPIC: PipelineSchema, TASK: PipelineSchema }),
+});

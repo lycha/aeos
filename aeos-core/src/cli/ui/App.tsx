@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
-import type { Command } from 'commander';
 
 import type { Container } from '../container.js';
 import type { TicketRunPort, TicketRunResult } from '../../domain/ports/driving/ticket-run.port.js';
@@ -11,14 +10,14 @@ import {
   requestTicketRunInterrupt,
   type TicketRunShellState,
 } from './ticket-run-shell-state.js';
-import { executeShellCommand } from './shell-command-runner.js';
+import { executeShellCommand, type BuildProgram } from './shell-command-runner.js';
 
 type ViewMode = 'home' | 'output' | 'ticket-run';
 
 interface AppShellProps {
   readonly container: Container;
   readonly cwd: string;
-  readonly buildProgram: () => Command;
+  readonly buildProgram: BuildProgram;
 }
 
 interface ProjectContext {
@@ -282,6 +281,7 @@ export function AppShell({ container, cwd, buildProgram }: AppShellProps) {
     setTicketRunState(createInitialTicketRunShellState(commandLine));
 
     try {
+      container.checkPipelines(nextProjectContext.root);
       const result = await useCase.execute(
         nextProjectContext.id,
         nextProjectContext.root,

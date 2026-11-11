@@ -1,5 +1,7 @@
 column: INTEGRATION_REVIEW
 label: Integration review
+role: integration
+diffContext: epic
 phase: VERIFY
 # The epic's own column, reached once every child task is DONE. The worker
 # (integration-reviewer) reviews the WHOLE assembled feature — the base..HEAD

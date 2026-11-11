@@ -1,6 +1,6 @@
 // Use case — TicketApprove (advance column)
 
-import { Column, nextColumnFor } from '../domain/model/column.js';
+import { Column, columnOrderFor, nextColumnFor } from '../domain/model/column.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
@@ -9,8 +9,11 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { PullRequestGateway } from '../domain/ports/driven/pull-request-gateway.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
+import type { PipelineLoader } from '../domain/ports/driven/pipeline-loader.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { ColumnSpec } from '../domain/model/column-spec.js';
+import { columnSpecOf, findColumnSpec } from './services/column-roles.js';
 import { parseVerdict } from '../domain/services/verdict-parser.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type {
@@ -33,13 +36,14 @@ export class TicketApproveUseCase implements TicketApprovePort {
     private readonly columnSpecLoader: ColumnSpecLoader,
     private readonly projectRepo: ProjectRepository,
     private readonly gateRecorder: GateRecorder,
+    private readonly pipelineLoader: PipelineLoader,
   ) {}
 
   execute(
     projectId: string,
     projectPath: string,
     ticketId: string,
-    options: { byEngine?: boolean } = {},
+    options: { byEngine?: boolean; contract?: boolean } = {},
   ): TicketApproveResult {
     const ticket = this.ticketRepo.findById(projectId, ticketId);
     if (!ticket) {
@@ -64,9 +68,13 @@ export class TicketApproveUseCase implements TicketApprovePort {
       return { status: 'already_done', ticketId };
     }
 
-    // The epic join: an epic leaving TASK_BREAKDOWN is claiming its children
-    // are finished. Verify that rather than trusting it.
-    if (ticket.kind === TicketKind.EPIC && currentColumn === Column.TASK_BREAKDOWN) {
+    // What this column is for decides what leaving it means: never its name.
+    const columnSpec = columnSpecOf(this.columnSpecLoader, projectPath, currentColumn);
+    const role = columnSpec?.role ?? 'standard';
+
+    // The epic join: an epic leaving its decomposition column is claiming its
+    // children are finished. Verify that rather than trusting it.
+    if (ticket.kind === TicketKind.EPIC && role === 'decomposition') {
       const children = this.ticketRepo.findChildren(projectId, ticketId);
       const unfinished = children.filter((child) => child.column !== Column.DONE);
       if (unfinished.length > 0) {
@@ -78,12 +86,16 @@ export class TicketApproveUseCase implements TicketApprovePort {
         return {
           status: 'error',
           ticketId,
-          error: `Epic ${ticketId} has ${unfinished.length} unfinished task(s): ${summary}${overflow}. Finish them before advancing to DOD_GATE.`,
+          error: `Epic ${ticketId} has ${unfinished.length} unfinished task(s): ${summary}${overflow}. Finish them before advancing the epic.`,
         };
       }
     }
 
-    const nextColumn = nextColumnFor(ticket.kind, currentColumn);
+    const nextColumn = nextColumnFor(
+      this.pipelineLoader.load(projectPath),
+      ticket.kind,
+      currentColumn,
+    );
     if (!nextColumn) {
       return {
         status: 'error',
@@ -92,10 +104,26 @@ export class TicketApproveUseCase implements TicketApprovePort {
       };
     }
 
+    const byPerson = !options.byEngine;
+
+    // The contract gate always has a person: the engine is refused whatever it
+    // passes, and a person is shown what they would be approving.
+    const contractChange = ticket.contractChange?.approvedBy ? null : ticket.contractChange;
+    if (contractChange && !(byPerson && options.contract)) {
+      const paths = contractChange.paths.join(', ');
+      // shortcut: the diff against HEAD, which is the whole change until the
+      // task is committed at DONE; a path committed earlier shows as empty.
+      const diff = byPerson ? this.gitGateway.diff(projectPath, contractChange.paths).trim() : '';
+      return {
+        status: 'error',
+        ticketId,
+        error: `Ticket ${ticketId} carries a contract change: ${paths}. A contract is changed only with a person's approval: review it, then run \`aeos ticket approve ${ticketId} --contract\`.${diff ? `\n\n${diff}` : ''}`,
+      };
+    }
+
     // A person's approval is a gate decision. Who they are is asked now, before
     // anything is committed or pushed; the record itself is written last, so a
     // pull request that cannot be opened leaves no approval on record.
-    const byPerson = !options.byEngine;
     if (byPerson) this.gateRecorder.decidedBy(projectPath);
 
     // A finished task's work becomes one commit in the source repo. This is the
@@ -108,31 +136,45 @@ export class TicketApproveUseCase implements TicketApprovePort {
       const specPin = resolveSpecPin(this.ticketRepo, ticket);
       this.gitGateway.commitAll(
         projectPath,
-        buildTaskCommitMessage(ticket, specPin ? [['Spec', formatSpecPin(specPin)]] : []),
+        buildTaskCommitMessage(ticket, [
+          ...(specPin ? ([['Spec', formatSpecPin(specPin)]] as const) : []),
+          ...(ticket.implements?.length
+            ? ([['Implements', ticket.implements.join(', ')]] as const)
+            : []),
+        ]),
       );
     }
 
     // Before the transition, so a pull request that cannot be opened leaves the
     // ticket SIGNED_OFF and re-running approve retries it.
     const opensPullRequest =
-      (ticket.kind === TicketKind.EPIC && currentColumn === Column.INTEGRATION_REVIEW) ||
+      (ticket.kind === TicketKind.EPIC && role === 'integration') ||
       (taskFinished && ticket.parentId === null);
     if (
       opensPullRequest &&
       this.projectRepo.readExecutorConfig(projectPath)?.pullRequests?.enabled !== false
     ) {
-      const error = this.openPullRequest(projectId, projectPath, ticket);
+      const error = this.openPullRequest(projectId, projectPath, ticket, columnSpec);
       if (error) return { status: 'error', ticketId, error };
     }
 
+    if (contractChange) {
+      const { id } = this.gateRecorder.record(projectPath, ticket, {
+        gate: 'contract',
+        verdict: 'approved',
+        reason: `Contract change: ${contractChange.paths.join(', ')}`,
+      });
+      this.ticketRepo.setContractChange(projectId, ticketId, { ...contractChange, approvedBy: id });
+    }
+
+    let gateRecordId: string | undefined;
     if (byPerson) {
-      this.gateRecorder.record(projectPath, ticket, {
-        // shortcut: keyed on the column's name; I1-M4-005a replaces it with the column's role.
-        gate: currentColumn === Column.SPEC_REVIEW ? 'spec' : 'column-approval',
+      gateRecordId = this.gateRecorder.record(projectPath, ticket, {
+        gate: role === 'spec-review' ? 'spec' : 'column-approval',
         verdict: 'approved',
         fromColumn: currentColumn,
         toColumn: nextColumn,
-      });
+      }).id;
     }
 
     const transitionResult = this.stateMachine.transition(projectId, ticketId, nextColumn);
@@ -158,14 +200,26 @@ export class TicketApproveUseCase implements TicketApprovePort {
       subState: SubState.READY,
     });
 
-    return { status: 'advanced', ticketId, fromColumn: currentColumn, toColumn: nextColumn };
+    return {
+      status: 'advanced',
+      ticketId,
+      fromColumn: currentColumn,
+      toColumn: nextColumn,
+      pullRequestUrl: this.ticketRepo.findById(projectId, ticketId)?.prUrl ?? null,
+      ...(gateRecordId ? { gateRecordId } : {}),
+    };
   }
 
   /**
    * Pushes the ticket's `aeos/<id>` branch and opens its pull request against
    * the default branch. Returns the needs-human message when it cannot.
    */
-  private openPullRequest(projectId: string, projectPath: string, ticket: Ticket): string | null {
+  private openPullRequest(
+    projectId: string,
+    projectPath: string,
+    ticket: Ticket,
+    columnSpec: ColumnSpec | null,
+  ): string | null {
     const needsHuman = (cause: string): string =>
       `Cannot open a pull request for ${ticket.id}: ${cause} The ticket stays SIGNED_OFF; once that is fixed, re-run \`aeos ticket approve ${ticket.id}\`. For a project without pull requests, set "pullRequests": { "enabled": false } in .aeos/project.json.`;
 
@@ -181,7 +235,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
         base: this.gitGateway.defaultBranch(projectPath),
         head,
         title: `[${ticket.id}] ${ticket.title}`,
-        body: this.pullRequestBody(projectId, projectPath, ticket),
+        body: this.pullRequestBody(projectId, projectPath, ticket, columnSpec),
       });
       this.ticketRepo.setPrUrl(projectId, ticket.id, url);
       return null;
@@ -190,31 +244,48 @@ export class TicketApproveUseCase implements TicketApprovePort {
     }
   }
 
-  private pullRequestBody(projectId: string, projectPath: string, ticket: Ticket): string {
+  private pullRequestBody(
+    projectId: string,
+    projectPath: string,
+    ticket: Ticket,
+    /** The spec of the column being left. */
+    columnSpec: ColumnSpec | null,
+  ): string {
     const isEpic = ticket.kind === TicketKind.EPIC;
     const read = (filename: string): string | null =>
       this.artifactStore.artifactExists(projectPath, ticket.id, filename)
         ? this.artifactStore.readArtifact(projectPath, ticket.id, filename)
         : null;
 
-    const reviewColumn = isEpic ? Column.INTEGRATION_REVIEW : Column.CODE_REVIEW;
-    const reviewArtifact = `${ticket.id}-${this.columnSpecLoader.load(reviewColumn, projectPath).outputArtifact}`;
-    const reviewersVerdict = parseVerdict(read(reviewArtifact.replace('.md', '-review.md')) ?? '');
+    // An epic cites the review of the integration column it is leaving; a task,
+    // the review of the column that was given its diff.
+    const reviewSpec = isEpic
+      ? columnSpec
+      : findColumnSpec(
+          this.columnSpecLoader,
+          projectPath,
+          columnOrderFor(this.pipelineLoader.load(projectPath), ticket.kind),
+          (spec) => spec.diffContext === 'task',
+        );
+    const reviewArtifact = reviewSpec ? `${ticket.id}-${reviewSpec.outputArtifact}` : null;
+    const reviewersVerdict = parseVerdict(
+      (reviewArtifact && read(reviewArtifact.replace('.md', '-review.md'))) ?? '',
+    );
     const checksTable = (read(`${ticket.id}-checks.md`) ?? '')
       .split('\n')
       .filter((line) => line.startsWith('|'))
       .join('\n');
 
-    const ticketIds = [
-      ticket.id,
-      ...this.ticketRepo.findChildren(projectId, ticket.id).map((child) => child.id),
-    ];
+    const tickets = [ticket, ...this.ticketRepo.findChildren(projectId, ticket.id)];
+    const ticketIds = tickets.map((each) => each.id);
     return buildPullRequestBody({
       ticketId: ticket.id,
       title: ticket.title,
       reviewLabel: isEpic ? 'Integration review' : 'Code review',
       reviewPath:
-        read(reviewArtifact) === null ? null : `.aeos/tickets/${ticket.id}/${reviewArtifact}`,
+        reviewArtifact && read(reviewArtifact) !== null
+          ? `.aeos/tickets/${ticket.id}/${reviewArtifact}`
+          : null,
       reviewSummary: reviewersVerdict.ok
         ? `${reviewersVerdict.verdict.verdict}, ${reviewersVerdict.verdict.blockers} blockers, ${reviewersVerdict.verdict.warnings} warnings`
         : null,
@@ -223,6 +294,15 @@ export class TicketApproveUseCase implements TicketApprovePort {
         this.costRepo.findByTicket(projectId, id).map((record) => record.costUsd),
       ),
       specPin: resolveSpecPin(this.ticketRepo, ticket),
+      repro: read(`${ticket.id}-repro.md`),
+      contractChanges: tickets.flatMap((each) =>
+        (each.contractChange?.paths ?? []).map((changed) => ({
+          path: changed,
+          ticketId: each.id,
+          // Null only for the ticket being approved now, with `--contract`.
+          approvedBy: each.contractChange?.approvedBy ?? null,
+        })),
+      ),
     });
   }
 }

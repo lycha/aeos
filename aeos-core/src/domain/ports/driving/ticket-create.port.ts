@@ -34,6 +34,16 @@ export interface TicketCreateInput {
    * with `parentId`.
    */
   spec?: string;
+  /**
+   * Acceptance criteria of the epic's spec this task claims (`AC-1`, `AC-12a`).
+   * Refused without `parentId`.
+   */
+  implements?: string[];
+  /**
+   * Create a standalone TASK on the bug track: no parent, no spec. Refused
+   * with `parentId` or `spec`.
+   */
+  bug?: boolean;
 }
 
 export interface TicketCreateResult {

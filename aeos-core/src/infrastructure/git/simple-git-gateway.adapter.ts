@@ -72,8 +72,8 @@ export class SimpleGitGateway implements GitGateway {
     }
   }
 
-  diff(dir: string): string {
-    return execFileSync('git', ['diff', 'HEAD'], { cwd: dir, encoding: 'utf-8' });
+  diff(dir: string, paths: readonly string[] = []): string {
+    return execFileSync('git', ['diff', 'HEAD', '--', ...paths], { cwd: dir, encoding: 'utf-8' });
   }
 
   isRepo(dir: string): boolean {

@@ -25,6 +25,7 @@ function createMockTicketRepo(): TicketRepository {
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
     setSpecCommit: vi.fn(),
+    setContractChange: vi.fn(),
   };
 }
 
@@ -168,6 +169,8 @@ describe('TicketAnswerUseCase', () => {
         ok: true,
         ticketId: TICKET_ID,
         warnings: undefined,
+        promoted: [`${TICKET_ID}-decisions.md`],
+        specPin: pinned.specPin,
         amendedDecisions: ['NEW-1'],
       });
       expect(gateRecorder.record).toHaveBeenCalledExactlyOnceWith(PROJECT_PATH, pinned, {
@@ -261,7 +264,13 @@ describe('TicketAnswerUseCase', () => {
 
   it('should unblock a BLOCKED ticket with modified questions file', () => {
     const result = useCase.execute(defaultInput);
-    expect(result).toEqual({ ok: true, ticketId: TICKET_ID, warnings: undefined });
+    expect(result).toEqual({
+      ok: true,
+      ticketId: TICKET_ID,
+      warnings: undefined,
+      promoted: [`${TICKET_ID}-decisions.md`],
+      specPin: null,
+    });
   });
 
   it('should call setSubState with READY', () => {
@@ -354,7 +363,13 @@ describe('TicketAnswerUseCase', () => {
       new Date('2025-01-01T09:00:00Z'),
     );
     const result = useCase.execute({ ...defaultInput, confirmed: true });
-    expect(result).toEqual({ ok: true, ticketId: TICKET_ID, warnings: undefined });
+    expect(result).toEqual({
+      ok: true,
+      ticketId: TICKET_ID,
+      warnings: undefined,
+      promoted: [`${TICKET_ID}-decisions.md`],
+      specPin: null,
+    });
   });
 
   it('should return warning and skip decisions commit when promotion is legacy-skipped', () => {
@@ -365,6 +380,8 @@ describe('TicketAnswerUseCase', () => {
       updatedDecisionIds: [],
       supersededDecisionIds: [],
       warnings: ['Questions file is legacy or unsupported; skipped decision promotion.'],
+      promoted: [],
+      specPin: null,
     });
 
     const result = useCase.execute(defaultInput);
@@ -373,6 +390,8 @@ describe('TicketAnswerUseCase', () => {
       ok: true,
       ticketId: TICKET_ID,
       warnings: ['Questions file is legacy or unsupported; skipped decision promotion.'],
+      promoted: [],
+      specPin: null,
     });
     expect(gitGateway.commitFiles).toHaveBeenCalledWith(
       path.join(PROJECT_PATH, '.aeos'),

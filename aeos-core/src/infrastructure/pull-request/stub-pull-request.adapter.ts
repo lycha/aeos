@@ -13,4 +13,8 @@ export class StubPullRequestGateway implements PullRequestGateway {
   create(request: PullRequestRequest): { url: string } {
     return { url: `https://stub.invalid/pull/${request.head}` };
   }
+
+  updateBody(): void {
+    // No host to update.
+  }
 }

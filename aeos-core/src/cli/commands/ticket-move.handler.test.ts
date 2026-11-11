@@ -1,0 +1,189 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Command } from 'commander';
+import { programWith } from './program.fixture.js';
+import { columnLabels } from '../../domain/services/column-labels.js';
+import type { TicketMovePort } from '../../domain/ports/driving/ticket-move.port.js';
+import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { displayOrder } from '../../domain/model/column.js';
+import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
+
+// Every column of the shipped pipelines.
+const COLUMNS = displayOrder(templatePipelines());
+
+// The tech spec column is labelled; every other column shows its default.
+const labelsOf = () => columnLabels(COLUMNS, { TECH_SPEC: { label: 'Shaping' } }, null);
+
+function createMockTicketMoveUseCase(): TicketMovePort {
+  return {
+    execute: vi.fn().mockReturnValue({
+      status: 'moved',
+      ticketId: 'AEOS-1',
+      fromColumn: 'SPEC_REVIEW',
+      toColumn: 'QA',
+    }),
+  };
+}
+
+function createMockProjectRepo(): ProjectRepository {
+  return {
+    exists: vi.fn().mockReturnValue(true),
+    read: vi.fn().mockReturnValue({
+      uuid: 'u1',
+      id: 'proj-1',
+      name: 'Test',
+      key: 'AEOS',
+      path: '/test',
+      created_at: '2026-01-01',
+    }),
+    writeProject: vi.fn(),
+    scaffoldDefaults: vi.fn().mockReturnValue([]),
+    findRoot: vi.fn().mockReturnValue('/test'),
+    readExecutorConfig: vi.fn().mockReturnValue(null),
+    readConstraints: vi.fn().mockReturnValue(null),
+    writeConstraintsPlaceholder: vi.fn(),
+  };
+}
+
+const REASON = 'The reviewer misread AC-2.';
+
+describe('the ticket move handler', () => {
+  let program: Command;
+  let useCase: ReturnType<typeof createMockTicketMoveUseCase>;
+  let projectRepo: ReturnType<typeof createMockProjectRepo>;
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let savedExitCode: number | string | null | undefined;
+
+  beforeEach(() => {
+    program = new Command();
+    program.exitOverride();
+    useCase = createMockTicketMoveUseCase();
+    projectRepo = createMockProjectRepo();
+    programWith({ ticketMove: useCase, projectRepo, columnLabels: labelsOf }, program);
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    savedExitCode = process.exitCode;
+    process.exitCode = undefined;
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    process.exitCode = savedExitCode;
+  });
+
+  it('passes an uppercased target status to the use case', async () => {
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'qa',
+      '--reason',
+      REASON,
+    ]);
+    expect(useCase.execute).toHaveBeenCalledWith({
+      projectId: 'proj-1',
+      projectPath: '/test',
+      ticketId: 'AEOS-1',
+      targetColumn: 'QA',
+      reason: REASON,
+    });
+  });
+
+  it('prints a success message when the move succeeds', async () => {
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'QA',
+      '--reason',
+      REASON,
+    ]);
+    expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 moved: Spec review → Qa');
+  });
+
+  it("hands an unknown status on as typed: the use case knows the ticket's pipeline", async () => {
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'not-real',
+      '--reason',
+      REASON,
+    ]);
+    expect(useCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ targetColumn: 'not-real' }),
+    );
+  });
+
+  it('shows use case errors and sets exit code 1', async () => {
+    (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
+      status: 'error',
+      ticketId: 'AEOS-1',
+      error: 'Already in QA',
+    });
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'QA',
+      '--reason',
+      REASON,
+    ]);
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Error: Already in Qa');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('shows an error when not inside an AEOS project', async () => {
+    (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'QA',
+      '--reason',
+      REASON,
+    ]);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Run `aeos project init` in the project root.'),
+    );
+    expect(process.exitCode).toBe(4);
+  });
+
+  it('accepts a label for the target, in any case, and passes the identifier on', async () => {
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'shaping',
+      '--reason',
+      REASON,
+    ]);
+
+    expect(useCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ targetColumn: 'TECH_SPEC' }),
+    );
+  });
+
+  it('is refused without --reason, and the use case is not run', async () => {
+    // Commander refuses a missing required option before the action runs.
+    program.configureOutput({ writeErr: () => {} });
+
+    await expect(
+      program.parseAsync(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA']),
+    ).rejects.toThrow("required option '--reason <text>' not specified");
+    expect(useCase.execute).not.toHaveBeenCalled();
+  });
+});

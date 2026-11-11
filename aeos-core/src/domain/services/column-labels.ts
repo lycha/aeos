@@ -3,7 +3,7 @@
 // The identifier (`SPEC_REVIEW`) is what the database, the transition log,
 // gate records and the code use; it never changes. A label is display only.
 
-import { Column, COLUMN_ORDER, isValidColumn } from '../model/column.js';
+import { Column } from '../model/column.js';
 
 export type ColumnLabels = Readonly<Record<Column, string>>;
 
@@ -36,28 +36,32 @@ export function labelFor(
   return specs[column]?.label ?? projectConfig?.labels?.[column] ?? defaultLabel(column);
 }
 
+/** The label of each of `columns`, in that order (`displayOrder` of the project's pipelines). */
 export function columnLabels(
+  columns: readonly Column[],
   specs: Parameters<typeof labelFor>[1],
   projectConfig: Parameters<typeof labelFor>[2],
 ): ColumnLabels {
   return Object.fromEntries(
-    COLUMN_ORDER.map((column) => [column, labelFor(column, specs, projectConfig)]),
-  ) as ColumnLabels;
+    columns.map((column) => [column, labelFor(column, specs, projectConfig)]),
+  );
 }
 
 /** The column a person named, by identifier or by label, in any case. An identifier wins. */
 export function resolveColumn(input: string, labels: ColumnLabels): Column | null {
   const wanted = input.trim();
   const identifier = wanted.toUpperCase();
-  if (isValidColumn(identifier)) return identifier;
+  if (Object.hasOwn(labels, identifier)) return identifier;
   return (
-    COLUMN_ORDER.find((column) => labels[column].toLowerCase() === wanted.toLowerCase()) ?? null
+    Object.keys(labels).find((column) => labels[column].toLowerCase() === wanted.toLowerCase()) ??
+    null
   );
 }
 
 /** What is wrong with a project's labels; empty when nothing is. */
 export function labelErrors(sources: readonly LabelSource[]): string[] {
   const errors: string[] = [];
+  const identifiers = new Set([Column.BACKLOG, Column.DONE, ...sources.map((s) => s.column)]);
   const seen = new Map<string, LabelSource>();
   for (const entry of sources) {
     const label = entry.label.trim();
@@ -70,7 +74,7 @@ export function labelErrors(sources: readonly LabelSource[]): string[] {
       errors.push(`${where} is longer than ${MAX_LABEL_LENGTH} characters.`);
     }
     const identifier = label.toUpperCase();
-    if (isValidColumn(identifier) && identifier !== entry.column) {
+    if (identifiers.has(identifier) && identifier !== entry.column) {
       errors.push(`${where} is the identifier of another column, ${identifier}.`);
     }
     const earlier = seen.get(label.toLowerCase());
@@ -90,5 +94,7 @@ export function labelErrors(sources: readonly LabelSource[]): string[] {
  * with identifiers, which is how it is stored (halt messages are persisted).
  */
 export function withColumnLabels(text: string, labels: ColumnLabels): string {
-  return text.replace(/\b[A-Z][A-Z_]+\b/g, (word) => (isValidColumn(word) ? labels[word] : word));
+  return text.replace(/\b[A-Z][A-Z_]+\b/g, (word) =>
+    Object.hasOwn(labels, word) ? labels[word] : word,
+  );
 }

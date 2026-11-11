@@ -16,3 +16,5 @@ export * from './pull-request-gateway.port.js';
 export * from './artefact-tree.port.js';
 export * from './decisions-lint.port.js';
 export * from './gate-record-store.port.js';
+export * from './pipeline-loader.port.js';
+export * from './pipeline-state-repository.port.js';

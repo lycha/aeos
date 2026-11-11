@@ -5,6 +5,7 @@ import { Column } from '../model/column.js';
 import { SubState } from '../model/sub-state.js';
 import { TicketKind } from '../model/ticket-kind.js';
 import type { Ticket } from '../model/ticket.js';
+import type { ColumnRole } from '../model/column-spec.js';
 
 function epic(overrides: Partial<Ticket> = {}): Ticket {
   return {
@@ -13,7 +14,7 @@ function epic(overrides: Partial<Ticket> = {}): Ticket {
     title: 'Epic',
     kind: TicketKind.EPIC,
     parentId: null,
-    column: Column.SPEC_REVIEW,
+    column: 'SPEC_REVIEW',
     subState: SubState.READY,
     createdAt: 'x',
     updatedAt: 'y',
@@ -23,13 +24,25 @@ function epic(overrides: Partial<Ticket> = {}): Ticket {
 
 function task(id: string, overrides: Partial<Ticket> = {}): Ticket {
   return {
-    ...epic({ id, kind: TicketKind.TASK, parentId: 'AEOS-1', column: Column.IMPLEMENTATION }),
+    ...epic({ id, kind: TicketKind.TASK, parentId: 'AEOS-1', column: 'IMPLEMENTATION' }),
     ...overrides,
   };
 }
 
 const alwaysAuto = () => true;
 const neverAuto = () => false;
+
+/** The roles the shipped column specs declare. */
+const templateRoles: Partial<Record<string, ColumnRole>> = {
+  SPEC_REVIEW: 'spec-review',
+  TASK_BREAKDOWN: 'decomposition',
+  INTEGRATION_REVIEW: 'integration',
+  DOD_GATE: 'final-gate',
+};
+const rolesFrom =
+  (roles: Partial<Record<string, ColumnRole>>) =>
+  (column: Column): ColumnRole =>
+    roles[column] ?? 'standard';
 
 function decide(input: Partial<Parameters<typeof decideNextAction>[0]> = {}) {
   return decideNextAction({
@@ -39,9 +52,61 @@ function decide(input: Partial<Parameters<typeof decideNextAction>[0]> = {}) {
     costUnknown: false,
     budgetUsd: null,
     autoAdvance: alwaysAuto,
+    roleOf: rolesFrom(templateRoles),
     ...input,
   });
 }
+
+describe('decideNextAction — behaviour follows the role of a column, not its name', () => {
+  // A project whose decomposition column is called SLICING and whose final
+  // gate is called RELEASE. Neither name means anything to the scheduler.
+  const SLICING = 'SLICING' as Column;
+  const RELEASE = 'RELEASE' as Column;
+  const roleOf = rolesFrom({ SLICING: 'decomposition', RELEASE: 'final-gate' });
+
+  it('drives the children of an epic signed off in a decomposition column of any name', () => {
+    const sliced = epic({ column: SLICING, subState: SubState.SIGNED_OFF });
+
+    expect(
+      decide({ epic: sliced, roleOf, children: [task('AEOS-2', { subState: SubState.READY })] }),
+    ).toMatchObject({ kind: 'run', ticketId: 'AEOS-2' });
+    expect(decide({ epic: sliced, roleOf, children: [] })).toMatchObject({
+      kind: 'halt',
+      reason: HaltReason.AWAITING_DECOMPOSITION,
+    });
+  });
+
+  it('does not treat a column called TASK_BREAKDOWN as decomposition unless its spec says so', () => {
+    const action = decide({
+      epic: epic({ column: 'TASK_BREAKDOWN', subState: SubState.SIGNED_OFF }),
+      roleOf,
+      children: [task('AEOS-2', { subState: SubState.READY })],
+    });
+
+    // An ordinary signed-off column: the epic advances, the children are not driven from here.
+    expect(action).toMatchObject({ kind: 'advance', ticketId: 'AEOS-1' });
+  });
+
+  it.each([
+    ['auto', alwaysAuto, SubState.READY],
+    ['auto', alwaysAuto, SubState.SIGNED_OFF],
+    ['manual', neverAuto, SubState.SIGNED_OFF],
+  ] as const)(
+    'halts for a human at a final gate of any name, with advanceMode %s (%s, %s)',
+    (_mode, autoAdvance, subState) => {
+      const action = decide({ epic: epic({ column: RELEASE, subState }), roleOf, autoAdvance });
+
+      expect(action).toMatchObject({ kind: 'halt', reason: HaltReason.HUMAN_GATE });
+      if (action.kind === 'halt') expect(action.message).toContain('RELEASE');
+    },
+  );
+
+  it('runs a column called DOD_GATE like any other when it is not the final gate', () => {
+    expect(
+      decide({ epic: epic({ column: 'DOD_GATE', subState: SubState.READY }), roleOf }),
+    ).toMatchObject({ kind: 'run', ticketId: 'AEOS-1' });
+  });
+});
 
 describe('decideNextAction', () => {
   describe('budget', () => {
@@ -141,7 +206,7 @@ describe('decideNextAction', () => {
     it.each([SubState.WORKING, SubState.IN_REVIEW])(
       'halts with an actionable message for a stuck %s epic',
       (subState) => {
-        const action = decide({ epic: epic({ column: Column.TECH_SPEC, subState }) });
+        const action = decide({ epic: epic({ column: 'TECH_SPEC', subState }) });
 
         expect(action.kind).toBe('halt');
         if (action.kind !== 'halt') return;
@@ -154,7 +219,7 @@ describe('decideNextAction', () => {
 
     it('halts at DOD_GATE — final sign-off is human-only', () => {
       const action = decide({
-        epic: epic({ column: Column.DOD_GATE, subState: SubState.READY }),
+        epic: epic({ column: 'DOD_GATE', subState: SubState.READY }),
       });
 
       expect(action.kind).toBe('halt');
@@ -174,7 +239,7 @@ describe('decideNextAction', () => {
 
   describe('after decomposition', () => {
     const decomposedEpic = epic({
-      column: Column.TASK_BREAKDOWN,
+      column: 'TASK_BREAKDOWN',
       subState: SubState.SIGNED_OFF,
     });
 
@@ -263,7 +328,7 @@ describe('decideNextAction', () => {
     it('does not treat an unsigned TASK_BREAKDOWN epic as decomposed', () => {
       // Still working on tasks.md — the epic itself is the runnable thing.
       const action = decide({
-        epic: epic({ column: Column.TASK_BREAKDOWN, subState: SubState.READY }),
+        epic: epic({ column: 'TASK_BREAKDOWN', subState: SubState.READY }),
         children: [],
       });
 
@@ -274,8 +339,8 @@ describe('decideNextAction', () => {
   describe('per-column advance mode', () => {
     it('respects a column-specific manual gate while auto-advancing others', () => {
       const action = decide({
-        epic: epic({ column: Column.TECH_SPEC, subState: SubState.SIGNED_OFF }),
-        autoAdvance: (column) => column !== Column.TECH_SPEC,
+        epic: epic({ column: 'TECH_SPEC', subState: SubState.SIGNED_OFF }),
+        autoAdvance: (column) => column !== 'TECH_SPEC',
       });
 
       expect(action.kind).toBe('halt');

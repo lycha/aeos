@@ -86,14 +86,33 @@ export class StubExecutor implements Executor {
       );
     }
 
-    // Test hook, off unless set: a worker run also edits the named file, as an
-    // agent straying outside its task would. Relative paths resolve against
-    // the run's working directory.
-    const touch = process.env.AEOS_STUB_TOUCH;
-    if (touch && !isReviewInvocation(invocation.outputPath)) {
-      const target = path.resolve(invocation.workingDirectory ?? process.cwd(), touch);
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.appendFile(target, '\nedited by the stub\n', 'utf8');
+    // The final gate's worker is told which criteria to judge and must answer
+    // for each; a stub that does not would escalate every epic at the gate.
+    const judging = /Judge exactly these criteria: (.+)/.exec(invocation.prompt)?.[1];
+    if (judging && !isReviewInvocation(invocation.outputPath)) {
+      lines.push(
+        '<!-- AEOS-CONFORMANCE',
+        ...judging.split(',').map((id) => `${id.trim()}: pass | Judged by the stub executor.`),
+        '-->',
+        '',
+      );
+    }
+
+    // The bug track: a "test" that fails until the "fix" exists, and the
+    // command that runs it; then the fix.
+    if (invocation.bugPhase && invocation.workingDirectory) {
+      const fix = `stub-fix-${invocation.ticketId}.txt`;
+      if (invocation.bugPhase === 'reproduce') {
+        const test = `stub-repro-${invocation.ticketId}.cjs`;
+        await fs.writeFile(
+          path.join(invocation.workingDirectory, test),
+          `process.exit(require('node:fs').existsSync(${JSON.stringify(fix)}) ? 0 : 1);\n`,
+          'utf8',
+        );
+        lines.push('<!-- AEOS-REPRO', `command: node ${test}`, '-->', '');
+      } else {
+        await fs.writeFile(path.join(invocation.workingDirectory, fix), 'the fix\n', 'utf8');
+      }
     }
 
     const content = lines.join('\n');

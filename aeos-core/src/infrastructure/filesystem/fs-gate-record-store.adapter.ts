@@ -29,7 +29,11 @@ export class FsGateRecordStore implements GateRecordStore {
     private readonly gitGateway: GitGateway,
   ) {}
 
-  append(projectPath: string, record: Omit<GateRecord, 'id'>): GateRecord {
+  append(
+    projectPath: string,
+    record: Omit<GateRecord, 'id'>,
+    alongside?: (numbered: GateRecord) => Readonly<Record<string, string>>,
+  ): GateRecord {
     validatePathComponent(record.ticket, 'ticketId');
     const feature = record.spec_pin?.path.startsWith(FEATURE_PREFIX)
       ? record.spec_pin.path.slice(FEATURE_PREFIX.length)
@@ -47,10 +51,15 @@ export class FsGateRecordStore implements GateRecordStore {
       fs.writeFileSync(file, yaml.dump({ schema_version: 0, feature }) + 'records:\n', 'utf-8');
     }
     fs.appendFileSync(file, yaml.dump([numbered], { lineWidth: -1 }), 'utf-8');
+    const beside = Object.entries(alongside?.(numbered) ?? {}).map(([name, content]) => {
+      const besideFile = path.join(path.dirname(file), name);
+      fs.writeFileSync(besideFile, content, 'utf-8');
+      return besideFile;
+    });
     try {
       this.gitGateway.commitFiles(
         repoDir,
-        [file],
+        [file, ...beside],
         `[${record.ticket}][GATE][${numbered.id}][human][${record.gate}: ${record.verdict}]`,
       );
     } catch (err) {

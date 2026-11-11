@@ -134,4 +134,26 @@ describe('FsGateRecordStore', () => {
     );
     expect(store.list(projectPath, { feature: 'checkout' })).toEqual([first]);
   });
+
+  it('writes the files handed to it beside the gates file, in the same commit as the record', () => {
+    const record = store.append(
+      projectPath,
+      decision({ gate: 'definition-of-done', spec_pin: PIN }),
+      (numbered) => ({
+        'conformance.yaml': `cites: ${numbered.id}\n`,
+        'conformance.md': '# Report\n',
+      }),
+    );
+
+    expect(record.id).toBe('GATE-1');
+    expect(fs.readFileSync(path.join(aeosDir, 'features/checkout/conformance.yaml'), 'utf-8')).toBe(
+      'cites: GATE-1\n',
+    );
+    expect(git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort()).toEqual([
+      'features/checkout/conformance.md',
+      'features/checkout/conformance.yaml',
+      'features/checkout/gates.yaml',
+    ]);
+    expect(git('status', '--porcelain')).toBe('');
+  });
 });

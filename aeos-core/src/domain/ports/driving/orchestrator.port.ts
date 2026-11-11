@@ -57,4 +57,6 @@ export interface OrchestratorPort {
   /** Removes the epic's budget ceiling. Throws when the epic has no orchestrator state. */
   clearBudget(projectId: string, epicId: string): OrchestratorState;
   status(projectId: string, epicId?: string): OrchestratorState[];
+  /** Known spend recorded against the epic and its tasks. */
+  spentUsd(projectId: string, epicId: string): number;
 }

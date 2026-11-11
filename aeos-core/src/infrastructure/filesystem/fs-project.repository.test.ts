@@ -184,6 +184,46 @@ describe('FsProjectRepository.readExecutorConfig()', () => {
     expect(repo.readExecutorConfig(tmpDir)?.checks).toEqual(checks);
   });
 
+  it('returns criteria, and throws on a test report that is not fully described', () => {
+    const write = (criteria: unknown): void => {
+      fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.aeos', 'project.json'),
+        JSON.stringify({ id: 'my-project', criteria }),
+        'utf-8',
+      );
+    };
+    const testReport = {
+      command: 'npx vitest run --reporter=json --outputFile=.aeos/tmp/test-report.json',
+      path: '.aeos/tmp/test-report.json',
+      format: 'vitest-json',
+    };
+
+    write({ testGlobs: ['spec/**'], testReport });
+    expect(repo.readExecutorConfig(tmpDir)?.criteria).toEqual({
+      testGlobs: ['spec/**'],
+      testReport,
+    });
+
+    write({ testReport: { ...testReport, format: 'junit' } });
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "criteria" in .aeos\/project.json/,
+    );
+    write({ testReport: { command: 'npm test' } });
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(/Invalid "criteria"/);
+  });
+
+  it('ignores .aeos/tmp in the .aeos repository, and keeps a .gitignore that is already there', () => {
+    const gitignore = path.join(tmpDir, '.aeos', '.gitignore');
+
+    repo.scaffoldDefaults(tmpDir);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe('tmp/\n');
+
+    fs.writeFileSync(gitignore, 'mine\n');
+    repo.scaffoldDefaults(tmpDir);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe('mine\n');
+  });
+
   it('returns protectedPaths, and throws when the list is not a list of globs', () => {
     const write = (protectedPaths: unknown): void => {
       fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
@@ -200,6 +240,40 @@ describe('FsProjectRepository.readExecutorConfig()', () => {
     write('src/**');
     expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
       /Invalid "protectedPaths" in .aeos\/project.json/,
+    );
+  });
+
+  it('returns generators and contracts, and throws when either is malformed', () => {
+    const write = (config: object): void => {
+      fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.aeos', 'project.json'),
+        JSON.stringify({ id: 'my-project', ...config }),
+        'utf-8',
+      );
+    };
+    const generators = [
+      {
+        name: 'cli',
+        command: 'npm run generate:cli',
+        inputs: ['cli-contract.yaml'],
+        outputs: ['src/cli/generated/**'],
+      },
+    ];
+
+    write({ generators, contracts: ['db/schema.sql'] });
+    expect(repo.readExecutorConfig(tmpDir)).toMatchObject({
+      generators,
+      contracts: ['db/schema.sql'],
+    });
+
+    write({ generators: [{ name: 'cli', command: 'npm run generate:cli' }] });
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "generators" in .aeos\/project.json/,
+    );
+    write({ contracts: 'db/**' });
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "contracts" in .aeos\/project.json/,
     );
   });
 

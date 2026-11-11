@@ -38,6 +38,14 @@ export interface PullRequestBodyInput {
   readonly costs: readonly (number | null)[];
   /** The pinned spec of a spec-backed ticket. */
   readonly specPin?: SpecPin | null;
+  /** The content of a bug's `<ticket>-repro.md`: the test red, then green. */
+  readonly repro?: string | null;
+  /** Every contract path the ticket or one of its tasks changed. */
+  readonly contractChanges?: readonly {
+    readonly path: string;
+    readonly ticketId: string;
+    readonly approvedBy: string | null;
+  }[];
 }
 
 export function buildPullRequestBody(input: PullRequestBodyInput): string {
@@ -74,6 +82,28 @@ export function buildPullRequestBody(input: PullRequestBodyInput): string {
     '',
     input.checksTable ?? 'No checks were recorded for this ticket.',
     '',
+    ...(input.repro
+      ? [
+          '## Reproduction',
+          '',
+          // Under its own heading here; the link to its run means nothing on the code host.
+          input.repro.replace(/^# .*\n+/, '').replace(/\n*<!-- AEOS-RUN: \S+ -->\s*$/, ''),
+          '',
+        ]
+      : []),
+    ...(input.contractChanges?.length
+      ? [
+          '## Contract changes',
+          '',
+          'This pull request changes declared contracts. Each was approved by a person at the contract gate.',
+          '',
+          ...input.contractChanges.map(
+            (change) =>
+              `- \`${change.path}\` (${change.ticketId}, approved ${change.approvedBy ? `in ${change.approvedBy}` : 'with this approval'})`,
+          ),
+          '',
+        ]
+      : []),
     '## Conformance',
     '',
     '<!-- aeos:conformance -->',
@@ -84,4 +114,12 @@ export function buildPullRequestBody(input: PullRequestBodyInput): string {
     `Total cost: ${total}`,
     '',
   ].join('\n');
+}
+
+/** Replaces what stands under the conformance marker of a pull request body. */
+export function fillConformance(body: string, conformance: string): string {
+  return body.replace(
+    /(<!-- aeos:conformance -->\n)[\s\S]*?(?=\n\n## |\s*$)/,
+    (_match, marker: string) => `${marker}${conformance}`,
+  );
 }
