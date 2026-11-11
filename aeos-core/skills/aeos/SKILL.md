@@ -148,6 +148,7 @@ Exit codes:
 - `0` The AEOS home exists and the database is migrated.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 
 ### `aeos project init [options]`
 
@@ -166,6 +167,7 @@ Exit codes:
 - `0` The project is scaffolded.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos project sync [options]`
@@ -186,6 +188,7 @@ Exit codes:
 - `0` The comparison ran. Drift alone is not a failure.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket create [options] <title>`
@@ -211,6 +214,7 @@ Exit codes:
 - `0` The ticket exists. Under a parent the command is idempotent, so it may have existed already.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket list [options]`
@@ -229,6 +233,7 @@ Exit codes:
 - `0` The tickets, possibly none.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket show [options] <id>`
@@ -247,6 +252,7 @@ Exit codes:
 - `0` The ticket.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket answer [options] <id>`
@@ -266,6 +272,7 @@ Exit codes:
 - `0` The ticket is unblocked and its answers are promoted to decisions.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket resolve [options] <id>`
@@ -285,6 +292,7 @@ Exit codes:
 - `0` The ticket can be run again.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket run [options] <id>`
@@ -346,6 +354,7 @@ Exit codes:
 - `0` The ticket is SIGNED_OFF and the override is recorded as a gate.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket move [options] <id> <status>`
@@ -366,6 +375,7 @@ Exit codes:
 - `0` The ticket moved and the override is recorded as a gate.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket ready [options] <id>`
@@ -384,6 +394,7 @@ Exit codes:
 - `0` The ticket is READY.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket dod-approve [options] <id>`
@@ -423,6 +434,7 @@ Exit codes:
 - `0` The pin moved and the repin is recorded as a gate.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos orchestrator run [options] <epicId>`
@@ -463,6 +475,7 @@ Exit codes:
 - `0` The epic is paused.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos orchestrator resume [options] <epicId>`
@@ -481,6 +494,7 @@ Exit codes:
 - `0` The epic can be scheduled.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos orchestrator clear-budget [options] <epicId>`
@@ -499,6 +513,7 @@ Exit codes:
 - `0` The epic has no budget ceiling.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos orchestrator status [options] [epicId]`
@@ -517,6 +532,7 @@ Exit codes:
 - `0` One entry per epic, possibly none.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos costs [options]`
@@ -538,6 +554,7 @@ Exit codes:
 - `0` The spend that matches, possibly none. totalUsd covers known costs; unknownRecords counts the rest.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### Resources

@@ -125,6 +125,7 @@ globals:
     - $ref: "#/components/parameters/json"
   responses:
     "2": { $ref: "#/components/responses/usage" }
+    "3": { $ref: "#/components/responses/needsHuman" }
 
 # ── Reusable parts ────────────────────────────────────────────────────────
 components:
@@ -164,6 +165,8 @@ components:
       description: Invalid arguments or options. Nothing was attempted.
     missingResource:
       description: A resource in `requires` is not in place. envelope.error.resource names it.
+    needsHuman:
+      description: Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
     interrupted:
       description: The operator interrupted the run.
     confirmationRequired:
@@ -355,7 +358,7 @@ components:
 #   conditionalRequires   a resource needed only in the stated case; the
 #                handler asks the guard for it at that point
 #   parameters   in: argument (positional) | option (takes a value) | flag
-#   responses    by exit code; "2" comes from globals
+#   responses    by exit code; "2" and "3" come from globals
 commands:
 
   install:
