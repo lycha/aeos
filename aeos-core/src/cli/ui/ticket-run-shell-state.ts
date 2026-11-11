@@ -1,3 +1,4 @@
+import { formatCostUsd } from '../../domain/model/cost-record.js';
 import type { TicketRunEvent, TicketRunPhase } from '../../domain/model/ticket-run-event.js';
 
 const FULL_LAYOUT_COLUMNS = 120;
@@ -192,7 +193,7 @@ export function applyTicketRunEvent(
       break;
     case 'cost.recorded':
       appendLogLine(
-        `[cost] ${event.payload.role} | in=${event.payload.inputTokens} out=${event.payload.outputTokens} usd=${event.payload.costUsd.toFixed(4)}`,
+        `[cost] ${event.payload.role} | in=${event.payload.inputTokens} out=${event.payload.outputTokens} cost=${formatCostUsd(event.payload.costUsd)}`,
       );
       break;
     case 'executor.stdout.chunk':

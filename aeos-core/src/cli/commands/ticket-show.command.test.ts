@@ -8,6 +8,7 @@ function createMockTicketShowUseCase(): TicketShowPort {
   return {
     execute: vi.fn().mockReturnValue({
       ok: true,
+      runs: ['RUN-20261110T100000Z-ab12'],
       children: [],
       parent: null,
       ticket: {
@@ -29,6 +30,15 @@ function createMockTicketShowUseCase(): TicketShowPort {
           agent: 'worker-agent',
           column: 'PRODUCT_SCOPING',
           recordedAt: '2026-01-01T00:00:00.000Z',
+          costUsd: 0.0123,
+        },
+        {
+          executor: 'ollama-cli',
+          model: 'llama',
+          agent: 'reviewer-agent',
+          column: 'PRODUCT_SCOPING',
+          recordedAt: '2026-01-01T00:01:00.000Z',
+          costUsd: null,
         },
       ],
     }),
@@ -94,9 +104,21 @@ describe('registerTicketShowCommand', () => {
     expect(consoleSpy).toHaveBeenCalledWith('  • AEOS-1-prd.md');
   });
 
+  it('shows the cost of each execution, and unknown when it is null', () => {
+    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '  • PRODUCT_SCOPING (worker-agent): claude-cli / claude-opus-4-6 — $0.0123',
+    );
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '  • PRODUCT_SCOPING (reviewer-agent): ollama-cli / llama — unknown',
+    );
+  });
+
   it('should display em-dash for null sub_state', () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: true,
+      runs: [],
       children: [],
       parent: null,
       ticket: {
@@ -163,6 +185,7 @@ describe('registerTicketShowCommand', () => {
   it('should not display artifacts section when no artifacts exist', () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: true,
+      runs: [],
       children: [],
       parent: null,
       ticket: {
@@ -184,5 +207,13 @@ describe('registerTicketShowCommand', () => {
 
     const allCalls = consoleSpy.mock.calls.map((c: unknown[]) => c[0]);
     expect(allCalls).not.toContain('Artifacts:');
+  });
+
+  it('should list the run ids', () => {
+    program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+
+    const allCalls = consoleSpy.mock.calls.map((c: unknown[]) => c[0]);
+    expect(allCalls).toContain('Runs:');
+    expect(allCalls).toContain('  • RUN-20261110T100000Z-ab12');
   });
 });

@@ -1,6 +1,7 @@
 // CLI command — aeos ticket show
 
 import type { Command } from 'commander';
+import { formatCostUsd } from '../../domain/model/cost-record.js';
 import type { TicketShowPort } from '../../domain/ports/driving/ticket-show.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 
@@ -135,8 +136,19 @@ export function registerTicketShowCommand(
           const modelInfo = execution.model === 'unknown' ? '(unknown)' : execution.model;
           // eslint-disable-next-line no-console
           console.log(
-            `  • ${execution.column} (${execution.agent}): ${execution.executor} / ${modelInfo}`,
+            `  • ${execution.column} (${execution.agent}): ${execution.executor} / ${modelInfo} — ${formatCostUsd(execution.costUsd)}`,
           );
+        }
+      }
+
+      if (result.runs.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log('');
+        // eslint-disable-next-line no-console
+        console.log('Runs:');
+        for (const runId of result.runs) {
+          // eslint-disable-next-line no-console
+          console.log(`  • ${runId}`);
         }
       }
     });

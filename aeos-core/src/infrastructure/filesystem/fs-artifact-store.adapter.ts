@@ -8,7 +8,7 @@ import { aeosDir } from './fs-project.repository.js';
 const AEOS_DIR = '.aeos';
 const TICKETS_DIR = 'tickets';
 
-function validatePathComponent(value: string, name: string): void {
+export function validatePathComponent(value: string, name: string): void {
   if (value.includes('..') || value.includes(path.sep) || value.includes('/')) {
     throw new Error(`Invalid ${name}: must not contain path separators or '..' segments`);
   }

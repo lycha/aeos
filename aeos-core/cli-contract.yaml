@@ -885,6 +885,27 @@ commands:
       "1": { $ref: "#/components/responses/failure" }
       "4": { $ref: "#/components/responses/missingResource" }
 
+  orchestrator clear-budget:
+    operationId: orchestratorClearBudget
+    status: proposed
+    task: owner request, 10 Nov 2026
+    summary: Remove the budget ceiling from an epic
+    requires: [project, state_db]
+    parameters:
+      - $ref: "#/components/parameters/epicId"
+    responses:
+      "0":
+        description: The epic has no budget ceiling.
+        data:
+          type: object
+          additionalProperties: false
+          required: [epicId, budgetUsd]
+          properties:
+            epicId: { $ref: "#/components/schemas/TicketId" }
+            budgetUsd: { type: "null" }
+      "1": { $ref: "#/components/responses/failure" }
+      "4": { $ref: "#/components/responses/missingResource" }
+
   orchestrator status:
     operationId: orchestratorStatus
     summary: Show orchestrator state for one epic or all of them

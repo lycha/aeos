@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -19,7 +20,10 @@ import type { Ticket } from '../domain/model/ticket.js';
 import type { ColumnSpec } from '../domain/model/column-spec.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
 import type { AssembledContext } from '../domain/model/assembled-context.js';
+import type { ExecutorInvocation } from '../domain/model/executor-invocation.js';
 import type { TicketRunEvent } from '../domain/model/ticket-run-event.js';
+import type { RunRecord } from '../domain/model/run-record.js';
+import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
 
 // --- Mock factories ---
 
@@ -115,6 +119,14 @@ function createMockCostRepo(): CostRepository {
     record: vi.fn(),
     findByProject: vi.fn().mockReturnValue([]),
     findByTicket: vi.fn().mockReturnValue([]),
+    findByFilters: vi.fn().mockReturnValue([]),
+  };
+}
+
+function createMockRunRecordStore(): RunRecordStore {
+  return {
+    write: vi.fn((_projectPath: string, record: RunRecord) => [`/runs/${record.run_id}.json`]),
+    list: vi.fn().mockReturnValue([]),
   };
 }
 
@@ -253,6 +265,7 @@ describe('TicketRunUseCase', () => {
   let costRepo: ReturnType<typeof createMockCostRepo>;
   let executorConfigResolver: ReturnType<typeof createMockExecutorConfigResolver>;
   let configStore: ConfigStore;
+  let runRecordStore: ReturnType<typeof createMockRunRecordStore>;
   let buildPromptFn: (context: AssembledContext, agentSpec: AgentSpec) => string;
   let useCase: TicketRunUseCase;
 
@@ -272,6 +285,7 @@ describe('TicketRunUseCase', () => {
     costRepo = createMockCostRepo();
     executorConfigResolver = createMockExecutorConfigResolver();
     configStore = createMockConfigStore();
+    runRecordStore = createMockRunRecordStore();
     buildPromptFn = vi.fn().mockReturnValue('assembled prompt') as unknown as (
       context: AssembledContext,
       agentSpec: AgentSpec,
@@ -300,7 +314,19 @@ describe('TicketRunUseCase', () => {
       costRepo,
       executorConfigResolver,
       configStore,
+      runRecordStore,
     );
+  }
+
+  /** The records written so far, in order. */
+  function writtenRuns(): Array<{
+    record: RunRecord;
+    files: { brief: string; transcript: string };
+  }> {
+    return (runRecordStore.write as ReturnType<typeof vi.fn>).mock.calls.map((call) => ({
+      record: call[1] as RunRecord,
+      files: call[2] as { brief: string; transcript: string },
+    }));
   }
 
   // --- Happy path ---
@@ -340,7 +366,8 @@ describe('TicketRunUseCase', () => {
       defaultContext(),
       defaultColumnSpec(),
       defaultAgentSpec(),
-      executor,
+      // The worker executor, wrapped so the invocation can be recorded.
+      expect.objectContaining({ run: expect.any(Function) }),
       expect.any(Function),
     );
   });
@@ -393,6 +420,33 @@ describe('TicketRunUseCase', () => {
         (event) => event.type === 'executor.stderr.chunk' && event.payload.source === 'reviewer',
       ),
     ).toBe(true);
+  });
+
+  it('records an unknown cost as null when the executor reports no usage', async () => {
+    const events: TicketRunEvent[] = [];
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, undefined, {
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(costRepo.record).toHaveBeenCalledWith(expect.objectContaining({ costUsd: null }));
+    const costEvents = events.filter((event) => event.type === 'cost.recorded');
+    expect(costEvents.length).toBeGreaterThan(0);
+    for (const event of costEvents) expect(event.payload).toMatchObject({ costUsd: null });
+  });
+
+  it('records the reported cost when the executor reports usage', async () => {
+    const reported = await executor.run({} as ExecutorInvocation);
+    (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...reported,
+      usage: { inputTokens: 3, outputTokens: 4, costUsd: 0.5 },
+    });
+
+    await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(costRepo.record).toHaveBeenCalledWith(
+      expect.objectContaining({ inputTokens: 3, outputTokens: 4, costUsd: 0.5 }),
+    );
   });
 
   it('should create executors from worker and reviewer agent specs', async () => {
@@ -1142,5 +1196,281 @@ describe('TicketRunUseCase', () => {
     // Original context should not have been mutated
     expect(contextObj.priorArtifacts).toHaveLength(1);
     expect(contextObj.priorArtifacts[0].name).toBe('existing.md');
+  });
+
+  // --- Run records (I1-M1-003) ---
+
+  describe('run records', () => {
+    it('writes a record with the brief and the log for the worker and the reviewer', async () => {
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        artifactPath: '/tmp/artifact',
+        content: `${'A '.repeat(60)}\n\n${reviewWith('APPROVED')}`,
+        usage: { inputTokens: 10, outputTokens: 20, costUsd: 0.4 },
+        transcript: 'raw stream',
+      });
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const [worker, reviewer] = writtenRuns();
+      expect(worker!.record).toMatchObject({
+        schema_version: 0,
+        project: PROJECT_ID,
+        ticket: TICKET_ID,
+        column: 'IMPLEMENTATION',
+        role: 'worker',
+        agent: 'test-agent',
+        attempt: 1,
+        executor: 'claude-cli',
+        model: 'claude-opus-4-6',
+        mode: 'agentic',
+        output: 'tickets/AEOS-1/AEOS-1-impl.md',
+        verdict: null,
+        exit: 'ok',
+        usage: { input_tokens: 10, output_tokens: 20 },
+        cost_usd: 0.4,
+        cost_basis: 'executor-estimate',
+        spec_pin: null,
+        error: null,
+      });
+      expect(worker!.record.run_id).toMatch(/^RUN-\d{8}T\d{6}Z-[0-9a-z]{4}$/);
+      expect(worker!.files).toEqual({ brief: 'assembled prompt', transcript: 'raw stream' });
+      expect(reviewer!.record).toMatchObject({
+        role: 'reviewer',
+        mode: 'artifact',
+        output: 'tickets/AEOS-1/AEOS-1-impl-review.md',
+        verdict: 'APPROVED',
+        exit: 'ok',
+      });
+      expect(writtenRuns()).toHaveLength(2);
+    });
+
+    it('records the SHA-256 of the brief', async () => {
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const { record, files } = writtenRuns()[0]!;
+      expect(record.brief).toEqual({
+        path: `tickets/AEOS-1/runs/${record.run_id}.brief.md`,
+        sha256: createHash('sha256').update(files.brief).digest('hex'),
+      });
+      expect(record.transcript).toBe(`tickets/AEOS-1/runs/${record.run_id}.log`);
+    });
+
+    it('commits each record with the artefact it produced, and links the artefact to it', async () => {
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const [worker, reviewer] = writtenRuns();
+      const ticketDir = path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID);
+      const commits = (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls;
+      expect(commits.map((call) => call[1])).toEqual([
+        [path.join(ticketDir, 'AEOS-1-impl.md'), `/runs/${worker!.record.run_id}.json`],
+        [path.join(ticketDir, 'AEOS-1-impl-review.md'), `/runs/${reviewer!.record.run_id}.json`],
+      ]);
+
+      const written = (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.calls;
+      const lastLine = (filename: string): string =>
+        String(written.find((call) => call[2] === filename)![3])
+          .trimEnd()
+          .split('\n')
+          .pop()!;
+      expect(lastLine('AEOS-1-impl.md')).toBe(`<!-- AEOS-RUN: ${worker!.record.run_id} -->`);
+      expect(lastLine('AEOS-1-impl-review.md')).toBe(
+        `<!-- AEOS-RUN: ${reviewer!.record.run_id} -->`,
+      );
+    });
+
+    it('commits a failed worker run as a record alone, with exit failed and the error', async () => {
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: false,
+        reason: 'Model exploded',
+      });
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const { record, files } = writtenRuns()[0]!;
+      expect(record).toMatchObject({
+        role: 'worker',
+        exit: 'failed',
+        error: 'Model exploded',
+        output: null,
+        cost_usd: null,
+        cost_basis: 'unknown',
+      });
+      expect(files.transcript).toBe('Model exploded');
+      expect(gitGateway.commitFiles).toHaveBeenCalledWith(
+        path.join(PROJECT_PATH, '.aeos'),
+        [`/runs/${record.run_id}.json`],
+        `[${TICKET_ID}][RUN][${record.run_id}][worker][failed]`,
+      );
+    });
+
+    it('records a worker whose executor throws', async () => {
+      (executor.run as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('spawn ENOENT'));
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(writtenRuns()[0]!.record).toMatchObject({ exit: 'failed', error: 'spawn ENOENT' });
+      expect(gitGateway.commitFiles).toHaveBeenCalledOnce();
+    });
+
+    it('records a worker whose output fails validation as failed', async () => {
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        artifactPath: '/tmp/artifact',
+        content: 'too short',
+      });
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const { record } = writtenRuns()[0]!;
+      expect(record.exit).toBe('failed');
+      expect(record.error).toContain('Output validation failed');
+      expect(record.output).toBeNull();
+    });
+
+    it('records a timeout and an interruption as such', async () => {
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: false,
+        reason: 'Executor timeout after 300s',
+      });
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: false,
+        reason: 'Execution interrupted by operator',
+      });
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(writtenRuns().map((run) => run.record.exit)).toEqual(['timeout', 'interrupted']);
+    });
+
+    it('records an unknown cost as null with basis unknown', async () => {
+      // The default mock executor reports no usage.
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(writtenRuns()).toHaveLength(2);
+      for (const { record } of writtenRuns()) {
+        expect(record).toMatchObject({ usage: null, cost_usd: null, cost_basis: 'unknown' });
+      }
+    });
+
+    it('records a stub run as cost basis none', async () => {
+      (executorConfigResolver.resolveExecutorConfig as ReturnType<typeof vi.fn>).mockReturnValue({
+        executorType: 'stub',
+        timeoutMs: 300_000,
+      });
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        artifactPath: '/tmp/artifact',
+        content: `${'A '.repeat(60)}\n\n${reviewWith('APPROVED')}`,
+        usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      });
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(writtenRuns()[0]!.record).toMatchObject({
+        executor: 'stub',
+        model: null,
+        cost_usd: 0,
+        cost_basis: 'none',
+      });
+    });
+
+    it('records a failed reviewer and an unparseable verdict', async () => {
+      (executor.run as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, artifactPath: '/a', content: 'A '.repeat(60) })
+        .mockResolvedValueOnce({ ok: false, reason: 'Reviewer crashed' });
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(writtenRuns()[1]!.record).toMatchObject({
+        role: 'reviewer',
+        exit: 'failed',
+        error: 'Reviewer crashed',
+        verdict: null,
+      });
+
+      (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        artifactPath: '/a',
+        content: 'A '.repeat(60),
+      });
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(writtenRuns()[3]!.record).toMatchObject({
+        role: 'reviewer',
+        exit: 'ok',
+        verdict: 'UNPARSEABLE',
+      });
+    });
+
+    it('records the preflight invocation and commits it alone when it is clear', async () => {
+      (preflight.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_t, _p, _path, _ctx, _spec, _agent, preflightExecutor: Executor) => {
+          await preflightExecutor.run({
+            prompt: 'preflight prompt',
+            outputPath: '/tmp/preflight.md',
+            ticketId: TICKET_ID,
+            column: 'IMPLEMENTATION',
+          });
+          return { blocked: false };
+        },
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const { record, files } = writtenRuns()[0]!;
+      expect(record).toMatchObject({ role: 'preflight', attempt: 1, exit: 'ok', output: null });
+      expect(files.brief).toBe('preflight prompt');
+      expect((gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+        path.join(PROJECT_PATH, '.aeos'),
+        [`/runs/${record.run_id}.json`],
+        `[${TICKET_ID}][RUN][${record.run_id}][preflight][ok]`,
+      ]);
+    });
+
+    it('records the cost of each role, preflight included', async () => {
+      (preflight.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_t, _p, _path, _ctx, _spec, _agent, preflightExecutor: Executor) => {
+          await preflightExecutor.run({
+            prompt: 'preflight prompt',
+            outputPath: '/tmp/preflight.md',
+            ticketId: TICKET_ID,
+            column: 'IMPLEMENTATION',
+          });
+          return { blocked: false };
+        },
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(
+        (costRepo.record as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0].role),
+      ).toEqual(['preflight', 'worker', 'reviewer']);
+    });
+
+    it('commits a blocked preflight record with its questions', async () => {
+      (preflight.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_t, _p, _path, _ctx, _spec, _agent, preflightExecutor: Executor) => {
+          await preflightExecutor.run({
+            prompt: 'preflight prompt',
+            outputPath: '/tmp/preflight.md',
+            ticketId: TICKET_ID,
+            column: 'IMPLEMENTATION',
+          });
+          return { blocked: true, questionsPath: 'AEOS-1-questions.md' };
+        },
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const { record } = writtenRuns()[0]!;
+      expect(record.output).toBe('tickets/AEOS-1/AEOS-1-questions.md');
+      expect(gitGateway.commitFiles).toHaveBeenCalledWith(
+        path.join(PROJECT_PATH, '.aeos'),
+        [
+          path.join(PROJECT_PATH, '.aeos', 'tickets', TICKET_ID, 'AEOS-1-questions.md'),
+          `/runs/${record.run_id}.json`,
+        ],
+        `[${TICKET_ID}][QUESTIONS][v1][preflight][blocked]`,
+      );
+    });
   });
 });

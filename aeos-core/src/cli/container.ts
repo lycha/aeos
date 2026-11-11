@@ -15,6 +15,8 @@ import type { TicketMovePort } from '../domain/ports/driving/ticket-move.port.js
 import type { TicketReadyPort } from '../domain/ports/driving/ticket-ready.port.js';
 import type { TicketDodApprovePort } from '../domain/ports/driving/ticket-dod-approve.port.js';
 import type { OrchestratorPort } from '../domain/ports/driving/orchestrator.port.js';
+import type { CostsPort } from '../domain/ports/driving/costs.port.js';
+import { CostsUseCase } from '../application/costs.use-case.js';
 import { OrchestratorUseCase } from '../application/orchestrator.use-case.js';
 import { SqliteOrchestratorStateRepository } from '../infrastructure/persistence/sqlite-orchestrator-state.repository.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
@@ -23,6 +25,7 @@ import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.j
 import { FsConfigStore } from '../infrastructure/filesystem/fs-config.adapter.js';
 import { FsProjectRepository } from '../infrastructure/filesystem/fs-project.repository.js';
 import { FsArtifactStore } from '../infrastructure/filesystem/fs-artifact-store.adapter.js';
+import { FsRunRecordStore } from '../infrastructure/filesystem/fs-run-record-store.adapter.js';
 import { SimpleGitGateway } from '../infrastructure/git/simple-git-gateway.adapter.js';
 import { SqliteTicketRepository } from '../infrastructure/persistence/sqlite-ticket.repository.js';
 import { getDb } from '../infrastructure/persistence/database.js';
@@ -75,6 +78,7 @@ export interface Container {
   ticketReady: TicketReadyPort;
   ticketDodApprove: TicketDodApprovePort;
   orchestrator: OrchestratorPort;
+  costs: CostsPort;
   projectRepo: ProjectRepository;
   rubricLoader: RubricLoader;
   artifactStore: ArtifactStore;
@@ -85,6 +89,7 @@ export function createContainer(): Container {
   const projectRepo = new FsProjectRepository();
   const gitGateway = new SimpleGitGateway();
   const artifactStore = new FsArtifactStore();
+  const runRecordStore = new FsRunRecordStore();
 
   // Lazy singletons — only resolved when a command that needs the DB runs.
   // `install` and `project-init` do NOT need the DB (they create ~/.aeos/ first).
@@ -150,7 +155,7 @@ export function createContainer(): Container {
       return new TicketListUseCase(getTicketRepo());
     },
     get ticketShow() {
-      return new TicketShowUseCase(getTicketRepo(), artifactStore, getCostRepo());
+      return new TicketShowUseCase(getTicketRepo(), artifactStore, getCostRepo(), runRecordStore);
     },
     get ticketAnswer() {
       return new TicketAnswerUseCase(
@@ -191,6 +196,7 @@ export function createContainer(): Container {
         getCostRepo(),
         executorConfigResolver,
         configStore,
+        runRecordStore,
       );
     },
     get ticketApprove() {
@@ -220,6 +226,8 @@ export function createContainer(): Container {
         this.ticketRun,
         this.ticketApprove,
         gitGateway,
+        new YamlAgentSpecLoader(),
+        new ExecutorConfigResolver(projectRepo),
       );
     },
     get ticketDodApprove() {
@@ -230,6 +238,9 @@ export function createContainer(): Container {
         gitGateway,
         getCostRepo(),
       );
+    },
+    get costs() {
+      return new CostsUseCase(getCostRepo(), configStore);
     },
     projectRepo,
     rubricLoader: new FsRubricLoader(),

@@ -49,6 +49,14 @@ function emitClose(
   process.nextTick(() => child.emit('close', code, signal));
 }
 
+const STREAM_ARGS = ['--output-format', 'stream-json', '--verbose'];
+
+const assistantLine = (text: string): string =>
+  JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) + '\n';
+
+const resultLine = (fields: Record<string, unknown>): string =>
+  JSON.stringify({ type: 'result', ...fields }) + '\n';
+
 function setupExecFile(handler: (child: MockChildProcess) => void) {
   mockExecFile.mockImplementation(() => {
     const child = createMockChild();
@@ -90,7 +98,11 @@ describe('ClaudeCodeCliExecutor', () => {
     const invocation = makeInvocation();
     await executor.run(invocation);
 
-    expect(mockExecFile).toHaveBeenCalledWith('claude', ['--print', '-'], expect.any(Object));
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'claude',
+      ['--print', '-', ...STREAM_ARGS],
+      expect.any(Object),
+    );
   });
 
   it('uses agentic CLI args and working directory when mode is agentic', async () => {
@@ -116,6 +128,7 @@ describe('ClaudeCodeCliExecutor', () => {
         'acceptEdits',
         '--allowedTools',
         'Bash,Glob,Grep,LS,Read,Edit,MultiEdit,Write',
+        ...STREAM_ARGS,
       ],
       expect.objectContaining({ cwd: tmpDir, timeout: 0 }),
     );
@@ -131,22 +144,7 @@ describe('ClaudeCodeCliExecutor', () => {
 
     expect(mockExecFile).toHaveBeenCalledWith(
       'claude',
-      ['--print', '-', '--model', 'claude-opus-4-6'],
-      expect.any(Object),
-    );
-  });
-
-  it('passes --max-tokens flag when config.maxTokens is set', async () => {
-    executor = new ClaudeCodeCliExecutor({ maxTokens: 8000 });
-    setupExecFile((child) => {
-      child.stdout.write('output');
-      emitClose(child, 0);
-    });
-    await executor.run(makeInvocation());
-
-    expect(mockExecFile).toHaveBeenCalledWith(
-      'claude',
-      ['--print', '-', '--max-tokens', '8000'],
+      ['--print', '-', ...STREAM_ARGS, '--model', 'claude-opus-4-6'],
       expect.any(Object),
     );
   });
@@ -210,23 +208,107 @@ describe('ClaudeCodeCliExecutor', () => {
     expect(content).toBe('# Generated Output');
   });
 
-  it('streams stdout and stderr chunks to the invocation observer', async () => {
+  it('forwards assistant text to the observer in order and passes non-JSON lines through', async () => {
     const onChunk = vi.fn();
 
     setupExecFile((child) => {
-      child.stdout.write('hello ');
+      child.stdout.write(JSON.stringify({ type: 'system', subtype: 'init' }) + '\n');
+      // An event split across two chunks must still be parsed as one line.
+      const first = assistantLine('hello');
+      child.stdout.write(first.slice(0, 10));
+      child.stdout.write(first.slice(10));
       child.stderr.write('warn');
-      child.stdout.write('world');
+      child.stdout.write('not json\n');
+      child.stdout.write(assistantLine('world'));
+      child.stdout.write(resultLine({ result: 'hello world' }));
       emitClose(child, 0);
     });
 
     await executor.run(makeInvocation({ onChunk }));
 
     expect(onChunk.mock.calls).toEqual([
-      ['stdout', 'hello '],
+      ['stdout', 'hello\n'],
       ['stderr', 'warn'],
-      ['stdout', 'world'],
+      ['stdout', 'not json\n'],
+      ['stdout', 'world\n'],
     ]);
+  });
+
+  it('takes artefact, tokens and cost from the final result message', async () => {
+    const stream =
+      assistantLine('thinking aloud') +
+      resultLine({
+        result: '# Final artefact',
+        usage: {
+          input_tokens: 120,
+          output_tokens: 45,
+          cache_creation_input_tokens: 9,
+          cache_read_input_tokens: 7,
+        },
+        total_cost_usd: 0.0123,
+      });
+    setupExecFile((child) => {
+      child.stdout.write(stream);
+      emitClose(child, 0);
+    });
+
+    const invocation = makeInvocation();
+    const result = await executor.run(invocation);
+
+    expect(result).toEqual({
+      ok: true,
+      artifactPath: invocation.outputPath,
+      content: '# Final artefact',
+      usage: { inputTokens: 120, outputTokens: 45, costUsd: 0.0123 },
+      transcript: stream,
+    });
+    expect(await fs.readFile(invocation.outputPath, 'utf8')).toBe('# Final artefact');
+  });
+
+  it('writes the streamed text and leaves usage undefined when no result message arrives', async () => {
+    const stream = assistantLine('partial answer');
+    setupExecFile((child) => {
+      child.stdout.write(stream);
+      emitClose(child, 0);
+    });
+
+    const invocation = makeInvocation();
+    const result = await executor.run(invocation);
+
+    expect(result).toEqual({
+      ok: true,
+      artifactPath: invocation.outputPath,
+      content: 'partial answer\n',
+      usage: undefined,
+      transcript: stream,
+    });
+    expect(await fs.readFile(invocation.outputPath, 'utf8')).toBe('partial answer\n');
+  });
+
+  it('leaves usage undefined when the result message carries no cost', async () => {
+    setupExecFile((child) => {
+      child.stdout.write(
+        resultLine({ result: 'text', usage: { input_tokens: 1, output_tokens: 2 } }),
+      );
+      emitClose(child, 0);
+    });
+
+    const result = await executor.run(makeInvocation());
+
+    expect(result).toMatchObject({ ok: true, content: 'text', usage: undefined });
+  });
+
+  it('returns the error result text as the reason on non-zero exit', async () => {
+    setupExecFile((child) => {
+      child.stdout.write(
+        resultLine({ is_error: true, result: 'Credit balance is too low', total_cost_usd: 0 }),
+      );
+      emitClose(child, 1);
+    });
+
+    const result = await executor.run(makeInvocation());
+
+    expect(result).toEqual({ ok: false, reason: 'Credit balance is too low' });
   });
 
   it('writes stdout to outputPath on success', async () => {
@@ -328,7 +410,11 @@ describe('ClaudeCodeCliExecutor', () => {
         expect.stringContaining('[ClaudeCodeCliExecutor timeout diagnostics]'),
       );
       expect(stderrWriteSpy).toHaveBeenCalledWith(expect.stringContaining('timeoutMs: 50'));
-      expect(stderrWriteSpy).toHaveBeenCalledWith(expect.stringContaining('args: ["--print","-"]'));
+      expect(stderrWriteSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'args: ["--print","-","--output-format","stream-json","--verbose"]',
+        ),
+      );
       expect(stderrWriteSpy).toHaveBeenCalledWith(expect.stringContaining('promptPreview:'));
       expect(stderrWriteSpy).toHaveBeenCalledWith(expect.stringContaining('P'.repeat(1_000)));
     } finally {
@@ -342,7 +428,8 @@ describe('ClaudeCodeCliExecutor', () => {
     mockExecFile.mockImplementation(() => {
       const child = createMockChild();
       childRef = child;
-      // Don't close — simulate a long-running process
+      // Don't close — simulate a long-running process that has already streamed
+      process.nextTick(() => child.stdout.write(assistantLine('working')));
       (child.kill as ReturnType<typeof vi.fn>).mockImplementation(() => {
         emitClose(child, null, 'SIGTERM');
         return true;

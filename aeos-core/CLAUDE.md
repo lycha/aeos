@@ -79,6 +79,8 @@ Two invariants that were previously violated and are easy to re-break:
 
 `src/application/orchestrator.use-case.ts` drives an epic and its tasks. **The scheduler is a pure function, not an LLM** (`domain/services/orchestrator-policy.ts` → `decideNextAction`): ask what to do, do exactly that one thing, ask again. Putting a model in the control path would make "why did this advance?" unanswerable from the transition log. Every loop exit is a named `HaltReason`, including the successful ones. Per-epic status, pause state, and budget live in `orchestrator_state` (migration v3).
 
+**Unknown cost is `null`, never `0`.** `cost_records.cost_known` (migration v6) carries it; rows from before that migration read back as unknown. `reportsCost` in `domain/services/executor-capabilities.ts` says which executors report (`claude-cli`, `stub`). A budget is refused up front if any pipeline agent resolves to one that does not, and the policy halts with `COST_UNKNOWN` if a budgeted epic still ends up with a `null` cost record; `aeos orchestrator clear-budget <epicId>` (`OrchestratorPort.clearBudget`) sets the persisted budget to `null`, which is the only way out, since the `null` record stays. A failed executor run also records `null`. Each cost record carries its `role` (`preflight`/`worker`/`reviewer`, migration v7; absent on older rows); `aeos costs` (`costs.use-case.ts`) aggregates across all projects from the global DB and never folds an unknown cost into a total.
+
 ### Specs, rubrics, and agents are data, not code
 
 Column behaviour lives in YAML under a project's `.aeos/`:
@@ -100,6 +102,7 @@ Changing pipeline behaviour usually means editing YAML, not TypeScript. Loaders 
 
 - **SQLite at `~/.aeos/state.db`** — the source of truth for tickets, transitions, and costs. All projects share one DB, isolated by `project_id`. Path overridable via `AEOS_HOME`.
 - **`<project>/.aeos/tickets/<ticketId>/`** — artifacts, named `<ticketId>-<artifact>.md`. Ticket state is mirrored into a markdown file on disk via `syncTicketDocument`, but **git carries artifacts only** — no commit on sub-state transitions. SQLite is authoritative for state; committing every transition buried the artifact history a human actually reads. Don't reintroduce `[STATE]` commits.
+- **`<project>/.aeos/tickets/<ticketId>/runs/`** — one run record per executor invocation (`<run_id>.json`, `.brief.md`, `.log`), written by `writeRunRecord` in `TicketRunUseCase` through `RunRecordStore`, on success and failure alike. `domain/model/run-record.ts` mirrors the human-owned `run-record.schema.json` field for field; the end-to-end test validates every record against it. A record is committed with the artifact it produced (which ends with an `AEOS-RUN` link to it), or alone when there is none. Preflight is recorded by wrapping the executor handed to `PreflightService`.
 - `Ticket` carries `kind` (`EPIC`/`TASK`) and `parentId`. Migration v2 backfills existing rows as epics and folds retired `ARCH_SPIKE` tickets into `TECH_SPEC`. Migrations must be idempotent — `ALTER TABLE ADD COLUMN` is not, so guard with `hasColumn`.
 
 ### Executors

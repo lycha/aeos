@@ -1,0 +1,19 @@
+// Driven port — RunRecordStore: persist and list run records for a ticket
+
+import type { RunRecord } from '../../model/run-record.js';
+
+export interface RunRecordStore {
+  /**
+   * Writes the record, the brief and the raw executor output under
+   * `.aeos/tickets/<ticket>/runs/`. Returns the absolute paths of the three
+   * files, for the caller to commit.
+   */
+  write(
+    projectPath: string,
+    record: RunRecord,
+    files: { brief: string; transcript: string },
+  ): string[];
+
+  /** Records for a ticket, oldest first. Does not read briefs or logs. */
+  list(projectPath: string, ticketId: string): RunRecord[];
+}

@@ -64,6 +64,7 @@ function createMockCostRepo(): CostRepository {
     record: vi.fn(),
     findByProject: vi.fn().mockReturnValue([]),
     findByTicket: vi.fn().mockReturnValue([]),
+    findByFilters: vi.fn().mockReturnValue([]),
   };
 }
 
@@ -120,6 +121,15 @@ describe('TicketDodApproveUseCase', () => {
     if (result.status === 'approved') {
       expect(result.totalCostUsd).toBeCloseTo(0.15, 10);
     }
+  });
+
+  it('reports the total cost as unknown when any record is unknown', () => {
+    (costRepo.findByTicket as ReturnType<typeof vi.fn>).mockReturnValue([
+      { costUsd: 0.05 },
+      { costUsd: null },
+    ]);
+    const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, true);
+    expect(result).toMatchObject({ status: 'approved', totalCostUsd: null });
   });
 
   it('should transition column to DONE on approval', () => {

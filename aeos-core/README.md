@@ -17,9 +17,9 @@ An AI-assisted development pipeline that takes a ticket from idea to code review
 ## Install
 
 ```bash
-# From source
+# From source (the npm package is `@lycha/aeos`; the command it installs is `aeos`)
 git clone https://github.com/lycha/aeos.git
-cd aeos
+cd aeos/aeos-core
 npm install
 npm run build
 npm link
@@ -265,7 +265,7 @@ Notes:
 | `aeos project init [--name] [--key]`                         | Initialise `.aeos/` in the current directory                               |
 | `aeos ticket create <title> [--parent <epicId>]`             | Create a ticket in BACKLOG — an epic by default, a task with `--parent`    |
 | `aeos ticket list [--column]`                                | List tickets, optionally filtered by column                                |
-| `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, and recorded executions |
+| `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, recorded executions, and run ids |
 | `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |
 | `aeos ticket approve <id>`                                   | Advance a SIGNED_OFF ticket to the next column                             |
 | `aeos ticket sign-off <id>`                                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
@@ -274,7 +274,7 @@ Notes:
 | `aeos ticket resolve <id>`                                   | Resume an `ESCALATED` ticket after writing a decision in its `escalation.md` |
 | `aeos ticket dod-approve <id>`                               | Final human gate — mark ticket as DONE _(not yet implemented)_             |
 | `aeos dashboard`                                             | Cross-project Kanban summary _(not yet implemented)_                       |
-| `aeos costs [--project] [--ticket]`                          | LLM spend report _(not yet implemented)_                                   |
+| `aeos costs [--project] [--epic] [--ticket] [--since]`       | LLM spend report across all projects                                       |
 
 ## Epics and Tasks
 
@@ -354,6 +354,7 @@ Every exit is a named halt reason, including the successful ones.
 | `NEEDS_HUMAN`            | A ticket escalated, blocked, or was interrupted          |
 | `FAILED`                 | A ticket failed outright                                 |
 | `BUDGET_EXCEEDED`        | Spend reached the ceiling                                |
+| `COST_UNKNOWN`           | The epic has a ceiling, but a run recorded no known cost |
 
 ### Controls
 
@@ -362,6 +363,7 @@ Every exit is a named halt reason, including the successful ones.
 | `aeos orchestrator run <epicId> [--budget <usd>] [--max-steps <n>]` | Drive the epic; the budget persists for later runs |
 | `aeos orchestrator pause <epicId>`                                  | Refuse to schedule new work for this epic          |
 | `aeos orchestrator resume <epicId>`                                 | Allow scheduling again                             |
+| `aeos orchestrator clear-budget <epicId>`                           | Remove the budget ceiling (ends `COST_UNKNOWN`)    |
 | `aeos orchestrator status [epicId]`                                 | Show status, last halt reason, and budget          |
 
 ### One driver per epic
@@ -489,9 +491,37 @@ Domain is pure (zero external imports). Infrastructure implements domain ports. 
 
 ## Cost Tracking
 
-Every executor invocation (both agent and reviewer) records token usage and cost to a local SQLite database at `~/.aeos/state.db`. All projects share one database, isolated by `project_id`.
+Every executor invocation (preflight, worker and reviewer) records token usage and cost to a local SQLite database at `~/.aeos/state.db`. All projects share one database, isolated by `project_id`.
 
-`aeos ticket show <id>` surfaces this history back to the operator as an `Executions:` section showing the column, agent, executor, and model used.
+`claude-cli` runs with `--output-format stream-json --verbose`; tokens and cost come from the final `result` line of that stream. The cost is the CLI's client-side estimate, not billing data. The other executors do not report usage yet.
+
+An unknown cost is stored and shown as `unknown`, never as `$0.00`. Only `claude-cli` and `stub` report cost, so `aeos orchestrator run --budget` (or a budget persisted earlier) is refused when any agent of the epic or task columns resolves to `auggie-cli`, `opencode-cli` or `ollama-cli`; the message names the agent and the executor. Spend is the sum of known costs. If a run with an unknown cost is recorded against a budgeted epic anyway (an `--executor` override, or an executor failure), the orchestrator halts with `COST_UNKNOWN`. The unknown record stays, so every later budgeted run halts the same way; `aeos orchestrator clear-budget <epicId>` removes the persisted ceiling so the next `orchestrator run` without `--budget` proceeds. It errors if the epic has no orchestrator state.
+
+`aeos ticket show <id>` surfaces this history back to the operator as an `Executions:` section showing the column, agent, executor, model, and cost of each run.
+
+`aeos costs` reports the spend across every project in the database, so it works outside a project directory:
+
+```bash
+aeos costs                       # every project
+aeos costs --project AEOS        # one project, by key
+aeos costs --epic AEOS-1         # an epic and its child tasks
+aeos costs --ticket AEOS-2       # one ticket
+aeos costs --since 2026-11-01    # records from that date on
+```
+
+It shows a total per project and per ticket, and within a ticket per column and per role (`preflight`, `worker`, `reviewer`; records written before roles were stored show as `unrecorded`). Totals sum known costs only. A ticket whose records are all unknown shows `unknown`, and a footer counts the records left out. Preflight invocations are recorded too, so they count towards an orchestrator budget.
+
+## Run Records
+
+Every executor invocation (preflight, worker, reviewer) leaves three files under `.aeos/tickets/<ticket>/runs/`, whether it succeeded, failed, timed out or was interrupted:
+
+- `<run_id>.json`: the record (role, agent, executor, model, attempt, timings, exit, usage, cost, verdict), valid against `plugins/artefact-tree-pipeline/schemas/run-record.schema.json`
+- `<run_id>.brief.md`: the exact prompt the agent received; its SHA-256 is in the record
+- `<run_id>.log`: the raw executor output. An executor with no output stream logs the text it returned, and a failed run logs its failure reason.
+
+Run ids look like `RUN-20261110T101500Z-k3f9`. The files are committed to the `.aeos` repository in the same commit as the artifact or review the run produced; a run that produced none is committed alone as `[<ticket>][RUN][<run_id>][<role>][<exit>]`. Each artifact and review ends with `<!-- AEOS-RUN: <run_id> -->`, naming the run that wrote it. `aeos ticket show <id>` lists the ticket's run ids.
+
+Briefs and logs are not redacted and may contain source code. `.aeos/` has no remote by default; think before you add one.
 
 ## Development
 

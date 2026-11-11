@@ -11,6 +11,8 @@ import type { TicketRepository } from '../domain/ports/driven/ticket-repository.
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
 import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
+import type { AgentSpecLoader } from '../domain/ports/driven/agent-spec-loader.port.js';
+import type { ExecutorConfigResolver } from './services/executor-config-resolver.js';
 import type { OrchestratorStateRepository } from '../domain/ports/driven/orchestrator-state-repository.port.js';
 import type { TicketRunPort } from '../domain/ports/driving/ticket-run.port.js';
 import type { TicketApprovePort } from '../domain/ports/driving/ticket-approve.port.js';
@@ -40,6 +42,8 @@ describe('OrchestratorUseCase', () => {
   let costRepo: CostRepository;
   let stateRepo: OrchestratorStateRepository;
   let columnSpecLoader: ColumnSpecLoader;
+  let agentSpecLoader: AgentSpecLoader;
+  let executorConfigResolver: ExecutorConfigResolver;
   let configStore: ConfigStore;
   let ticketRun: TicketRunPort;
   let ticketApprove: TicketApprovePort;
@@ -63,6 +67,7 @@ describe('OrchestratorUseCase', () => {
       record: vi.fn(),
       findByProject: vi.fn().mockReturnValue([]),
       findByTicket: vi.fn().mockReturnValue([]),
+      findByFilters: vi.fn().mockReturnValue([]),
     };
     stateRepo = {
       find: vi.fn().mockReturnValue(null),
@@ -71,8 +76,18 @@ describe('OrchestratorUseCase', () => {
       touch: vi.fn(),
     };
     columnSpecLoader = {
-      load: vi.fn().mockReturnValue({ advanceMode: 'auto' }),
+      load: vi.fn().mockReturnValue({
+        advanceMode: 'auto',
+        workerAgentFile: 'agents/worker.yaml',
+        reviewerAgentFile: 'agents/reviewer.yaml',
+      }),
     } as unknown as ColumnSpecLoader;
+    agentSpecLoader = {
+      load: vi.fn((file: string) => ({ name: file.includes('worker') ? 'worker' : 'reviewer' })),
+    } as unknown as AgentSpecLoader;
+    executorConfigResolver = {
+      resolveExecutorConfig: vi.fn().mockReturnValue({ executorType: 'claude-cli' }),
+    } as unknown as ExecutorConfigResolver;
     configStore = {
       readConfig: vi.fn().mockReturnValue({
         model: 'claude-opus-4-8',
@@ -123,6 +138,8 @@ describe('OrchestratorUseCase', () => {
       ticketRun,
       ticketApprove,
       gitGateway,
+      agentSpecLoader,
+      executorConfigResolver,
     );
   });
 
@@ -173,6 +190,64 @@ describe('OrchestratorUseCase', () => {
 
     expect(result.haltReason).toBe(HaltReason.BUDGET_EXCEEDED);
     expect(result.steps).toHaveLength(0);
+    expect(ticketRun.execute).not.toHaveBeenCalled();
+  });
+
+  describe('budget on an executor that cannot report cost', () => {
+    const reviewerOnOllama = (): void => {
+      (executorConfigResolver.resolveExecutorConfig as ReturnType<typeof vi.fn>).mockImplementation(
+        (_path: string, agent: { name: string }) => ({
+          executorType: agent.name === 'reviewer' ? 'ollama-cli' : 'claude-cli',
+        }),
+      );
+    };
+
+    it('refuses a new budget before any run, naming the agent and executor', async () => {
+      reviewerOnOllama();
+
+      await expect(
+        useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { budgetUsd: 5 }),
+      ).rejects.toThrow(/'reviewer'.*'ollama-cli'/);
+
+      expect(ticketRun.execute).not.toHaveBeenCalled();
+      expect(stateRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses a persisted budget the same way', async () => {
+      reviewerOnOllama();
+      (stateRepo.find as ReturnType<typeof vi.fn>).mockReturnValue({
+        projectId: PROJECT_ID,
+        epicId: EPIC_ID,
+        status: OrchestratorStatus.IDLE,
+        haltReason: null,
+        message: null,
+        budgetUsd: 5,
+        updatedAt: new Date().toISOString(),
+      });
+
+      await expect(useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID)).rejects.toThrow(/'ollama-cli'/);
+      expect(ticketRun.execute).not.toHaveBeenCalled();
+    });
+
+    it('runs without a budget whatever the executor', async () => {
+      reviewerOnOllama();
+
+      const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { maxSteps: 1 });
+
+      expect(result.steps).toHaveLength(1);
+    });
+  });
+
+  it('halts with COST_UNKNOWN when a budgeted epic has an unknown cost', async () => {
+    (costRepo.findByTicket as ReturnType<typeof vi.fn>).mockReturnValue([
+      { costUsd: 1 },
+      { costUsd: null },
+    ]);
+
+    const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { budgetUsd: 5 });
+
+    expect(result.haltReason).toBe(HaltReason.COST_UNKNOWN);
+    expect(result.spentUsd).toBe(1);
     expect(ticketRun.execute).not.toHaveBeenCalled();
   });
 
@@ -514,6 +589,54 @@ describe('OrchestratorUseCase', () => {
 
       expect(state.status).toBe(OrchestratorStatus.IDLE);
       expect(state.haltReason).toBeNull();
+    });
+  });
+
+  describe('clear budget', () => {
+    const halted = {
+      projectId: PROJECT_ID,
+      epicId: EPIC_ID,
+      status: OrchestratorStatus.IDLE,
+      haltReason: HaltReason.COST_UNKNOWN,
+      message: 'unknown cost',
+      budgetUsd: 5,
+      updatedAt: 'x',
+    };
+
+    it('removes the ceiling and leaves the status alone', () => {
+      (stateRepo.find as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...halted,
+        status: OrchestratorStatus.PAUSED,
+      });
+
+      const state = useCase.clearBudget(PROJECT_ID, EPIC_ID);
+
+      expect(state.budgetUsd).toBeNull();
+      expect(state.status).toBe(OrchestratorStatus.PAUSED);
+      expect(stateRepo.upsert).toHaveBeenCalledWith(state);
+    });
+
+    it('refuses an epic the orchestrator has never driven', () => {
+      expect(() => useCase.clearBudget(PROJECT_ID, EPIC_ID)).toThrow(/no orchestrator state/);
+      expect(stateRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('lets an epic halted on COST_UNKNOWN run again without a budget', async () => {
+      let stored: unknown = halted;
+      (stateRepo.find as ReturnType<typeof vi.fn>).mockImplementation(() => stored);
+      (stateRepo.upsert as ReturnType<typeof vi.fn>).mockImplementation((state: unknown) => {
+        stored = state;
+      });
+      (costRepo.findByTicket as ReturnType<typeof vi.fn>).mockReturnValue([{ costUsd: null }]);
+
+      const before = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+      expect(before.haltReason).toBe(HaltReason.COST_UNKNOWN);
+
+      useCase.clearBudget(PROJECT_ID, EPIC_ID);
+      const after = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { maxSteps: 1 });
+
+      expect(after.haltReason).not.toBe(HaltReason.COST_UNKNOWN);
+      expect(ticketRun.execute).toHaveBeenCalled();
     });
   });
 });

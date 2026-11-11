@@ -157,6 +157,27 @@ CREATE TABLE IF NOT EXISTS orchestrator_state (
       }
     },
   },
+  {
+    version: 6,
+    description: 'Mark whether a cost record carries a known cost',
+    apply: (db) => {
+      // cost_usd is NOT NULL and SQLite cannot relax that in place, so "unknown"
+      // is a flag. Existing rows default to unknown: every one was written as 0
+      // by an executor that reported nothing.
+      if (!hasColumn(db, 'cost_records', 'cost_known')) {
+        db.exec(`ALTER TABLE cost_records ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0`);
+      }
+    },
+  },
+  {
+    version: 7,
+    description: 'Record the role (preflight, worker, reviewer) on a cost record',
+    apply: (db) => {
+      if (!hasColumn(db, 'cost_records', 'role')) {
+        db.exec(`ALTER TABLE cost_records ADD COLUMN role TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

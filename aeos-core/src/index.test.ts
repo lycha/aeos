@@ -16,4 +16,11 @@ describe('package', () => {
     expect(spdx).toBe('Apache-2.0');
     expect((JSON.parse(read('package.json')) as { license: string }).license).toBe(spdx);
   });
+
+  it('is published under the owner scope and keeps the aeos command', () => {
+    const pkg = JSON.parse(read('package.json')) as { name: string; bin: Record<string, string> };
+
+    expect(pkg.name).toBe('@lycha/aeos');
+    expect(Object.keys(pkg.bin)).toEqual(['aeos']);
+  });
 });

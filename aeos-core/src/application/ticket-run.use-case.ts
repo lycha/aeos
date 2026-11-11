@@ -22,6 +22,7 @@
 // Git carries artifacts only. Sub-state lives in SQLite; mirroring every
 // transition into git buried the artifact commits under state churn.
 
+import { createHash, randomInt } from 'node:crypto';
 import * as path from 'node:path';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { Executor } from '../domain/ports/driven/executor.port.js';
@@ -32,7 +33,10 @@ import type { AgentSpecLoader } from '../domain/ports/driven/agent-spec-loader.p
 import type { RubricLoader } from '../domain/ports/driven/rubric-loader.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { ConfigStore } from '../domain/ports/driven/config-store.port.js';
+import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
+import { runRecordPaths, type RunRecord } from '../domain/model/run-record.js';
 import type { ExecutorResult } from '../domain/model/executor-result.js';
+import type { CostRole } from '../domain/model/cost-record.js';
 import type { StateMachineService } from '../domain/services/state-machine.js';
 import type { ContextAssembler } from './services/context-assembler.js';
 import type { PreflightService } from './services/preflight.js';
@@ -87,6 +91,35 @@ interface RunContext {
   readonly reviewAbsPath: string;
 }
 
+/** One executor invocation, as much as the call site knows about it. */
+interface InvokedRun {
+  readonly role: 'preflight' | 'worker' | 'reviewer';
+  readonly agent: string;
+  readonly executor: string;
+  readonly model: string | undefined;
+  readonly mode: 'artifact' | 'agentic';
+  readonly attempt: number;
+  readonly prompt: string;
+  readonly result: ExecutorResult;
+  readonly startedAt: Date;
+  readonly endedAt: Date;
+  /** Filename of the artefact the run wrote, when it is kept. */
+  readonly output?: string;
+  readonly verdict?: RunRecord['verdict'];
+  /** Why the run failed although the executor itself succeeded. */
+  readonly error?: string;
+}
+
+interface WrittenRun {
+  readonly record: RunRecord;
+  readonly files: string[];
+}
+
+/** Appends the link from an artefact to the run that produced it, as its last line. */
+function linkToRun(content: string, runId: string): string {
+  return `${content.trimEnd()}\n\n<!-- AEOS-RUN: ${runId} -->\n`;
+}
+
 type AttemptOutcome =
   | { kind: 'reviewed'; verdict: ReviewVerdict; reviewContent: string }
   | { kind: 'failed'; error: string }
@@ -113,6 +146,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly costRepo: CostRepository,
     private readonly executorConfigResolver: ExecutorConfigResolver,
     private readonly configStore: ConfigStore,
+    private readonly runRecordStore: RunRecordStore,
   ) {}
 
   async execute(
@@ -523,6 +557,17 @@ export class TicketRunUseCase implements TicketRunPort {
       },
     );
 
+    const workerRun = {
+      role: 'worker',
+      agent: ctx.workerAgentSpec.name,
+      executor: ctx.workerExecutorType,
+      model: ctx.workerModel,
+      mode: workerMode,
+      attempt,
+      prompt,
+      startedAt: new Date(),
+    } as const;
+
     let executorResult: ExecutorResult;
     try {
       this.currentExecutor = ctx.workerExecutor;
@@ -544,6 +589,11 @@ export class TicketRunUseCase implements TicketRunPort {
         model: ctx.workerModel,
         mode: workerMode,
       });
+      this.recordRunAlone(ctx, {
+        ...workerRun,
+        result: { ok: false, reason: message },
+        endedAt: new Date(),
+      });
       if (this.isInterruptedReason(message)) {
         return { kind: 'interrupted', stage: 'worker', message };
       }
@@ -552,6 +602,7 @@ export class TicketRunUseCase implements TicketRunPort {
       this.currentExecutor = null;
       this.interruptStage = undefined;
     }
+    const run: InvokedRun = { ...workerRun, result: executorResult, endedAt: new Date() };
 
     this.recordCost(
       projectId,
@@ -561,6 +612,7 @@ export class TicketRunUseCase implements TicketRunPort {
       ctx.workerExecutorType,
       ctx.workerModel,
       executorResult,
+      'worker',
     );
     this.emitCostEvent(emitter, 'worker', executorResult);
 
@@ -572,6 +624,7 @@ export class TicketRunUseCase implements TicketRunPort {
         mode: workerMode,
       });
       this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+      this.recordRunAlone(ctx, run);
       if (this.isInterruptedReason(executorResult.reason)) {
         return { kind: 'interrupted', stage: 'worker', message: executorResult.reason };
       }
@@ -607,6 +660,7 @@ export class TicketRunUseCase implements TicketRunPort {
         const error = 'Agentic implementation produced no repository changes';
         this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
         this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+        this.recordRunAlone(ctx, { ...run, error });
         return { kind: 'failed', error };
       }
     }
@@ -616,6 +670,7 @@ export class TicketRunUseCase implements TicketRunPort {
       const error = `Output validation failed: ${validation.violations.join('; ')}`;
       this.emitStageEvent(emitter, 'stage.failed', 'validation', error);
       this.artifactStore.removeArtifact(projectPath, ticketId, ctx.artifactFilename);
+      this.recordRunAlone(ctx, { ...run, error });
       return { kind: 'failed', error };
     }
 
@@ -624,13 +679,23 @@ export class TicketRunUseCase implements TicketRunPort {
     // ── Commit the artifact ──────────────────────────────────────
     const revision = attempt > 1 ? `v${attempt}` : 'v1';
     const workerCommitMessage = `[${ticketId}][${columnSpec.outputArtifact}][${revision}][${ctx.workerAgentSpec.name}][${attempt > 1 ? 'revise' : 'create'}]`;
-    this.artifactStore.writeArtifact(projectPath, ticketId, ctx.artifactFilename, content);
+    const written = this.writeRunRecord(ctx, { ...run, output: ctx.artifactFilename });
+    this.artifactStore.writeArtifact(
+      projectPath,
+      ticketId,
+      ctx.artifactFilename,
+      linkToRun(content, written.record.run_id),
+    );
     emitter.emit({
       type: 'artifact.written',
       phase: 'artifact',
       payload: { role: 'worker', path: ctx.artifactAbsPath },
     });
-    this.gitGateway.commitFiles(aeosDir, [ctx.artifactAbsPath], workerCommitMessage);
+    this.gitGateway.commitFiles(
+      aeosDir,
+      [ctx.artifactAbsPath, ...written.files],
+      workerCommitMessage,
+    );
     emitter.emit({
       type: 'artifact.committed',
       phase: 'artifact',
@@ -686,6 +751,17 @@ export class TicketRunUseCase implements TicketRunPort {
       mode: 'artifact',
     });
 
+    const reviewerRun = {
+      role: 'reviewer',
+      agent: ctx.reviewerAgentSpec.name,
+      executor: ctx.reviewerExecutorType,
+      model: ctx.reviewerModel,
+      mode: 'artifact',
+      attempt,
+      prompt: reviewerPrompt,
+      startedAt: new Date(),
+    } as const;
+
     let reviewResult: ExecutorResult;
     try {
       this.currentExecutor = reviewerExecutor;
@@ -706,14 +782,16 @@ export class TicketRunUseCase implements TicketRunPort {
         model: ctx.reviewerModel,
         mode: 'artifact',
       });
+      reviewResult = { ok: false, reason: message };
       if (this.isInterruptedReason(message)) {
+        this.recordRunAlone(ctx, { ...reviewerRun, result: reviewResult, endedAt: new Date() });
         return { kind: 'interrupted', stage: 'reviewer', message };
       }
-      reviewResult = { ok: false, reason: message };
     } finally {
       this.currentExecutor = null;
       this.interruptStage = undefined;
     }
+    const run: InvokedRun = { ...reviewerRun, result: reviewResult, endedAt: new Date() };
 
     this.recordCost(
       projectId,
@@ -723,6 +801,7 @@ export class TicketRunUseCase implements TicketRunPort {
       ctx.reviewerExecutorType,
       ctx.reviewerModel,
       reviewResult,
+      'reviewer',
     );
     this.emitCostEvent(emitter, 'reviewer', reviewResult);
 
@@ -733,6 +812,7 @@ export class TicketRunUseCase implements TicketRunPort {
         model: ctx.reviewerModel,
         mode: 'artifact',
       });
+      this.recordRunAlone(ctx, run);
       if (this.isInterruptedReason(reviewResult.reason)) {
         return { kind: 'interrupted', stage: 'reviewer', message: reviewResult.reason };
       }
@@ -751,13 +831,28 @@ export class TicketRunUseCase implements TicketRunPort {
 
     const reviewContent = reviewResult.content ?? '';
     const reviewCommitMessage = `[${ticketId}][REVIEW][${revision}][${ctx.reviewerAgentSpec.name}][create]`;
-    this.artifactStore.writeArtifact(projectPath, ticketId, ctx.reviewFilename, reviewContent);
+    const parsed = parseVerdict(reviewContent);
+    const written = this.writeRunRecord(ctx, {
+      ...run,
+      output: ctx.reviewFilename,
+      verdict: parsed.ok ? parsed.verdict.verdict : 'UNPARSEABLE',
+    });
+    this.artifactStore.writeArtifact(
+      projectPath,
+      ticketId,
+      ctx.reviewFilename,
+      linkToRun(reviewContent, written.record.run_id),
+    );
     emitter.emit({
       type: 'artifact.written',
       phase: 'artifact',
       payload: { role: 'reviewer', path: ctx.reviewAbsPath },
     });
-    this.gitGateway.commitFiles(aeosDir, [ctx.reviewAbsPath], reviewCommitMessage);
+    this.gitGateway.commitFiles(
+      aeosDir,
+      [ctx.reviewAbsPath, ...written.files],
+      reviewCommitMessage,
+    );
     emitter.emit({
       type: 'artifact.committed',
       phase: 'artifact',
@@ -768,7 +863,6 @@ export class TicketRunUseCase implements TicketRunPort {
       },
     });
 
-    const parsed = parseVerdict(reviewContent);
     if (!parsed.ok) {
       this.emitStageEvent(emitter, 'stage.failed', 'reviewer', parsed.reason, {
         role: 'reviewer',
@@ -808,6 +902,46 @@ export class TicketRunUseCase implements TicketRunPort {
       mode: 'artifact',
     });
 
+    // PreflightService owns the invocation, so the executor is wrapped to see
+    // the prompt and the result it would otherwise keep to itself.
+    let invoked: Pick<InvokedRun, 'prompt' | 'result' | 'startedAt' | 'endedAt'> | undefined;
+    const recordingExecutor: Executor = {
+      run: async (invocation) => {
+        const startedAt = new Date();
+        const settle = (result: ExecutorResult): ExecutorResult => {
+          invoked = { prompt: invocation.prompt, result, startedAt, endedAt: new Date() };
+          this.recordCost(
+            projectId,
+            ticketId,
+            ctx.column,
+            ctx.workerAgentSpec.name,
+            ctx.workerExecutorType,
+            ctx.workerModel,
+            result,
+            'preflight',
+          );
+          return result;
+        };
+        try {
+          return settle(await ctx.workerExecutor.run(invocation));
+        } catch (err) {
+          settle({ ok: false, reason: err instanceof Error ? err.message : String(err) });
+          throw err;
+        }
+      },
+      interrupt: () => ctx.workerExecutor.interrupt(),
+    };
+    const preflightRun = (): InvokedRun | undefined =>
+      invoked && {
+        role: 'preflight',
+        agent: ctx.workerAgentSpec.name,
+        executor: ctx.workerExecutorType,
+        model: ctx.workerModel,
+        mode: 'artifact',
+        attempt: 1,
+        ...invoked,
+      };
+
     let preflightResult;
     try {
       this.currentExecutor = ctx.workerExecutor;
@@ -819,10 +953,12 @@ export class TicketRunUseCase implements TicketRunPort {
         ctx.baseContext,
         ctx.columnSpec,
         ctx.workerAgentSpec,
-        ctx.workerExecutor,
+        recordingExecutor,
         this.createChunkObserver(emitter, 'preflight'),
       );
     } catch (err) {
+      const failedRun = preflightRun();
+      if (failedRun) this.recordRunAlone(ctx, failedRun);
       const message = err instanceof Error ? err.message : String(err);
       this.emitStageEvent(emitter, 'stage.failed', 'preflight', message, {
         role: 'preflight',
@@ -852,12 +988,20 @@ export class TicketRunUseCase implements TicketRunPort {
       },
     );
 
-    if (!preflightResult.blocked) return { kind: 'clear' };
+    // Undefined when preflight is disabled for the column: nothing was invoked.
+    const run = preflightRun();
+    if (!preflightResult.blocked) {
+      if (run) this.recordRunAlone(ctx, run);
+      return { kind: 'clear' };
+    }
 
     const questionsAbsPath = path.join(aeosDir, 'tickets', ticketId, preflightResult.questionsPath);
+    const runFiles = run
+      ? this.writeRunRecord(ctx, { ...run, output: preflightResult.questionsPath }).files
+      : [];
     this.gitGateway.commitFiles(
       aeosDir,
-      [questionsAbsPath],
+      [questionsAbsPath, ...runFiles],
       `[${ticketId}][QUESTIONS][v1][preflight][blocked]`,
     );
 
@@ -1049,6 +1193,75 @@ export class TicketRunUseCase implements TicketRunPort {
     );
   }
 
+  /** Writes the record, the brief and the log of one executor invocation. */
+  private writeRunRecord(ctx: RunContext, run: InvokedRun): WrittenRun {
+    const { result } = run;
+    const error = run.error ?? (result.ok ? null : result.reason);
+    const usage = result.ok ? result.usage : undefined;
+    const costUsd = usage?.costUsd ?? null;
+    const timestamp = run.startedAt.toISOString().replace(/[-:]|\.\d+/g, '');
+    const runId = `RUN-${timestamp}-${randomInt(36 ** 4)
+      .toString(36)
+      .padStart(4, '0')}`;
+    const paths = runRecordPaths(ctx.ticketId, runId);
+
+    const record: RunRecord = {
+      schema_version: 0,
+      run_id: runId,
+      project: ctx.projectId,
+      ticket: ctx.ticketId,
+      column: ctx.column,
+      role: run.role,
+      agent: run.agent,
+      attempt: run.attempt,
+      executor: run.executor,
+      model: run.model ?? null,
+      mode: run.mode,
+      brief: {
+        path: paths.brief,
+        sha256: createHash('sha256').update(run.prompt).digest('hex'),
+      },
+      output: run.output ? `tickets/${ctx.ticketId}/${run.output}` : null,
+      transcript: paths.transcript,
+      verdict: run.verdict ?? null,
+      started_at: run.startedAt.toISOString(),
+      ended_at: run.endedAt.toISOString(),
+      duration_ms: run.endedAt.getTime() - run.startedAt.getTime(),
+      exit:
+        error === null
+          ? 'ok'
+          : this.isInterruptedReason(error)
+            ? 'interrupted'
+            : error.startsWith('Executor timeout')
+              ? 'timeout'
+              : 'failed',
+      usage: usage ? { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens } : null,
+      cost_usd: costUsd,
+      cost_basis:
+        costUsd === null ? 'unknown' : run.executor === 'stub' ? 'none' : 'executor-estimate',
+      spec_pin: null,
+      error,
+    };
+
+    // A failed executor returns no stream, so its reason is all the log there is.
+    const transcript = result.ok ? (result.transcript ?? result.content ?? '') : result.reason;
+    const files = this.runRecordStore.write(ctx.projectPath, record, {
+      brief: run.prompt,
+      transcript,
+    });
+    return { record, files };
+  }
+
+  /** For a run that left no artefact to be committed with. */
+  private recordRunAlone(ctx: RunContext, run: InvokedRun): void {
+    const { record, files } = this.writeRunRecord(ctx, run);
+    this.gitGateway.commitFiles(
+      ctx.aeosDir,
+      files,
+      `[${ctx.ticketId}][RUN][${record.run_id}][${record.role}][${record.exit}]`,
+    );
+  }
+
   private recordCost(
     projectId: string,
     ticketId: string,
@@ -1057,9 +1270,11 @@ export class TicketRunUseCase implements TicketRunPort {
     executor: string,
     model: string | undefined,
     result: ExecutorResult,
+    role: CostRole,
   ): void {
     const usage = result.ok ? result.usage : undefined;
     this.costRepo.record({
+      role,
       ticketId,
       projectId,
       column,
@@ -1068,7 +1283,7 @@ export class TicketRunUseCase implements TicketRunPort {
       model: model ?? 'unknown',
       inputTokens: usage?.inputTokens ?? 0,
       outputTokens: usage?.outputTokens ?? 0,
-      costUsd: usage?.costUsd ?? 0,
+      costUsd: usage?.costUsd ?? null,
       recordedAt: new Date().toISOString(),
     });
   }
@@ -1153,7 +1368,7 @@ export class TicketRunUseCase implements TicketRunPort {
         role,
         inputTokens: usage?.inputTokens ?? 0,
         outputTokens: usage?.outputTokens ?? 0,
-        costUsd: usage?.costUsd ?? 0,
+        costUsd: usage?.costUsd ?? null,
       },
     });
   }

@@ -1,8 +1,13 @@
 // Adapter — SQLite implementation of CostRepository port
 
 import type BetterSqlite3 from 'better-sqlite3';
-import type { CostRepository } from '../../domain/ports/driven/cost-repository.port.js';
-import type { CostRecord } from '../../domain/model/cost-record.js';
+import type {
+  CostFilters,
+  CostRepository,
+} from '../../domain/ports/driven/cost-repository.port.js';
+import type { CostRecord, CostRole } from '../../domain/model/cost-record.js';
+
+const COLUMNS = `c.ticket_id, c.project_id, c."column", c.agent, c.executor, c.model, c.input_tokens, c.output_tokens, c.cost_usd, c.cost_known, c.recorded_at, c.role`;
 
 export class SqliteCostRepository implements CostRepository {
   constructor(private readonly db: BetterSqlite3.Database) {}
@@ -10,8 +15,8 @@ export class SqliteCostRepository implements CostRepository {
   record(cost: CostRecord): void {
     this.db
       .prepare(
-        `INSERT INTO cost_records (ticket_id, project_id, "column", agent, executor, model, input_tokens, output_tokens, cost_usd, recorded_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO cost_records (ticket_id, project_id, "column", agent, executor, model, input_tokens, output_tokens, cost_usd, cost_known, recorded_at, role)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         cost.ticketId,
@@ -22,8 +27,10 @@ export class SqliteCostRepository implements CostRepository {
         cost.model,
         cost.inputTokens,
         cost.outputTokens,
-        cost.costUsd,
+        cost.costUsd ?? 0,
+        cost.costUsd === null ? 0 : 1,
         cost.recordedAt,
+        cost.role ?? null,
       );
   }
 
@@ -31,8 +38,7 @@ export class SqliteCostRepository implements CostRepository {
     return this.mapRows(
       this.db
         .prepare(
-          `SELECT ticket_id, project_id, "column", agent, executor, model, input_tokens, output_tokens, cost_usd, recorded_at
-           FROM cost_records WHERE project_id = ? ORDER BY recorded_at ASC`,
+          `SELECT ${COLUMNS} FROM cost_records c WHERE c.project_id = ? ORDER BY c.recorded_at ASC`,
         )
         .all(projectId),
     );
@@ -42,10 +48,44 @@ export class SqliteCostRepository implements CostRepository {
     return this.mapRows(
       this.db
         .prepare(
-          `SELECT ticket_id, project_id, "column", agent, executor, model, input_tokens, output_tokens, cost_usd, recorded_at
-           FROM cost_records WHERE project_id = ? AND ticket_id = ? ORDER BY recorded_at ASC`,
+          `SELECT ${COLUMNS} FROM cost_records c
+           WHERE c.project_id = ? AND c.ticket_id = ? ORDER BY c.recorded_at ASC`,
         )
         .all(projectId, ticketId),
+    );
+  }
+
+  findByFilters(filters: CostFilters): CostRecord[] {
+    const where: string[] = [];
+    const params: string[] = [];
+    if (filters.projectId) {
+      where.push('c.project_id = ?');
+      params.push(filters.projectId);
+    }
+    if (filters.ticketId) {
+      where.push('c.ticket_id = ?');
+      params.push(filters.ticketId);
+    }
+    if (filters.epicId) {
+      where.push(
+        `(c.ticket_id = ? OR c.ticket_id IN
+           (SELECT t.id FROM tickets t WHERE t.project_id = c.project_id AND t.parent_id = ?))`,
+      );
+      params.push(filters.epicId, filters.epicId);
+    }
+    if (filters.since) {
+      // recorded_at is an ISO timestamp, so a YYYY-MM-DD prefix compares correctly.
+      where.push('c.recorded_at >= ?');
+      params.push(filters.since);
+    }
+    return this.mapRows(
+      this.db
+        .prepare(
+          `SELECT ${COLUMNS} FROM cost_records c
+           ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+           ORDER BY c.project_id ASC, c.recorded_at ASC, c.id ASC`,
+        )
+        .all(...params),
     );
   }
 
@@ -59,8 +99,9 @@ export class SqliteCostRepository implements CostRepository {
       model: r.model as string,
       inputTokens: r.input_tokens as number,
       outputTokens: r.output_tokens as number,
-      costUsd: r.cost_usd as number,
+      costUsd: r.cost_known ? (r.cost_usd as number) : null,
       recordedAt: r.recorded_at as string,
+      ...(r.role ? { role: r.role as CostRole } : {}),
     }));
   }
 }

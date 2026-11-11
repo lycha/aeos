@@ -1,5 +1,5 @@
 {
-  "name": "aeos",
+  "name": "@lycha/aeos",
   "version": "1.0.0",
   "description": "An AI-assisted development pipeline that takes a ticket from idea to code review using specialised LLM agents",
   "type": "module",
@@ -30,7 +30,8 @@
     "smoke-test:opencode": "npx tsx src/infrastructure/executor/opencode-cli-executor.smoke-test.ts"
   },
   "keywords": [],
-  "author": "",
+  "author": "Krzysztof Jackowski",
+  "homepage": "http://aeosdev.com/",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -46,6 +47,7 @@
     "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
     "@vitest/coverage-v8": "^4.1.3",
+    "ajv": "^8.20.0",
     "eslint": "^10.2.0",
     "eslint-config-prettier": "^10.1.8",
     "ink-testing-library": "^4.0.0",

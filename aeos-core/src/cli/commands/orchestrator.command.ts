@@ -1,4 +1,4 @@
-// CLI command — aeos orchestrator run | pause | resume | status
+// CLI command — aeos orchestrator run | pause | resume | clear-budget | status
 
 import type { Command } from 'commander';
 import type { OrchestratorPort } from '../../domain/ports/driving/orchestrator.port.js';
@@ -136,6 +136,18 @@ export function registerOrchestratorCommand(
       const state = getOrchestrator().resume(project.id, epicId);
       // eslint-disable-next-line no-console
       console.log(`▶ ${state.epicId} resumed`);
+    });
+
+  orchestratorCmd
+    .command('clear-budget')
+    .description('Remove the budget ceiling from an epic')
+    .argument('<epicId>', 'Epic ticket ID')
+    .action((epicId: string) => {
+      const project = resolveProject();
+      if (!project) return;
+      const state = getOrchestrator().clearBudget(project.id, epicId);
+      // eslint-disable-next-line no-console
+      console.log(`✓ ${state.epicId} budget cleared (no ceiling)`);
     });
 
   orchestratorCmd

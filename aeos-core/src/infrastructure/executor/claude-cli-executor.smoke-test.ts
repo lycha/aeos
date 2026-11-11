@@ -69,7 +69,17 @@ async function main(): Promise<void> {
     }
     console.log('✓ ClaudeCodeCliExecutor: output is non-empty valid text');
 
-    // --- 5. Structured git commit ---
+    // --- 5. Usage and cost reported ---
+    if (!result.usage?.costUsd || result.usage.costUsd <= 0) {
+      console.error(`✗ Expected a cost greater than zero, got ${result.usage?.costUsd}`);
+      process.exit(1);
+    }
+    console.log(
+      `✓ ClaudeCodeCliExecutor: ${result.usage.inputTokens} input tokens, ` +
+        `${result.usage.outputTokens} output tokens, cost $${result.usage.costUsd}`,
+    );
+
+    // --- 6. Structured git commit ---
     const git = new SimpleGitGateway();
     git.init(tmpDir);
     // Configure git user for the temp repo
