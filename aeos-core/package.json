@@ -11,6 +11,10 @@
   },
   "files": [
     "dist",
+    "!dist/e2e",
+    "!dist/**/*.test.*",
+    "!dist/**/*.smoke-test.*",
+    "!dist/**/*.fixture.*",
     "templates",
     "cli-contract.yaml",
     "skills",

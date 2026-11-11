@@ -230,6 +230,7 @@ Set `AEOS_EXECUTOR=stub` to exercise the pipeline without real LLM calls. The co
 - ESM throughout (`"type": "module"`, `module: NodeNext`). **Relative imports must carry the `.js` extension**, including from `.ts` sources.
 - Each layer has a barrel `index.ts`; import across layers through those.
 - Tests are colocated (`*.test.ts` next to the source). `*.smoke-test.ts` files are excluded from the Vitest `include` glob and run via tsx.
+- Test code (`*.test.*`, `*.smoke-test.*`, `*.fixture.*`, `e2e/`) is compiled into `dist/` by the build, so typecheck covers it, but the negations in `files` of `package.json` keep it out of the published package; a test in `src/index.test.ts` holds that with `npm pack --dry-run` (it reads `dist/`, so build first).
 - TUI components are `.tsx` and tested with `ink-testing-library`.
 - ESLint: `@typescript-eslint/no-explicit-any` is an **error**; `no-console` warns (CLI output goes through `render.ts`, Ink or explicit writers, not stray `console.log`).
 - TypeScript is `strict`.
