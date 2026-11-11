@@ -75,8 +75,7 @@ export function pipelineErrors(
 
     const finalGates = withRole('final-gate');
     if (finalGates.length !== 1) {
-      // Stricter than the approved file's "at most one" (owner, 11 Nov 2026):
-      // without it nothing halts for a person before DONE.
+      // Without one nothing halts for a person before DONE.
       errors.push(
         `${count(finalGates, 'final-gate')}; it needs exactly one.${
           finalGates.length === 0
