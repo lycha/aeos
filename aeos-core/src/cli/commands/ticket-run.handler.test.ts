@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 
-import { registerTicketRunCommand } from './ticket-run.command.js';
+import { programWith } from './program.fixture.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketRunPort } from '../../domain/ports/driving/ticket-run.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
@@ -43,7 +43,7 @@ function createMockProjectRepo(): ProjectRepository {
   };
 }
 
-describe('registerTicketRunCommand', () => {
+describe('the ticket run handler', () => {
   let program: Command;
   let useCase: ReturnType<typeof createMockTicketRunUseCase>;
   let projectRepo: ReturnType<typeof createMockProjectRepo>;
@@ -56,11 +56,9 @@ describe('registerTicketRunCommand', () => {
     program.exitOverride();
     useCase = createMockTicketRunUseCase();
     projectRepo = createMockProjectRepo();
-    registerTicketRunCommand(
+    programWith(
+      { ticketRun: useCase, projectRepo, columnLabels: () => columnLabels(COLUMNS, {}, null) },
       program,
-      () => useCase,
-      projectRepo,
-      () => columnLabels(COLUMNS, {}, null),
     );
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

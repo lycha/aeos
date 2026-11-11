@@ -436,7 +436,11 @@ The API of AEOS is its command line. `cli-contract.yaml`, at the package root, d
 
 ```bash
 npm run verify:contract   # lint the contract, then compare the built CLI with it
+npm run generate:cli      # regenerate src/cli/generated/ and the command reference from the contract
+npm run verify:generated  # fail if either differs from what the contract generates
 ```
+
+Command registration is generated from the contract, not written by hand: `scripts/generate-cli.mjs` writes `src/cli/generated/` (the Commander tree, the argument and option types of every command, each command's required resources, the environment table) and the command reference under [Commands](#commands) and in `skills/aeos/SKILL.md`. Never edit generated code; it is a protected path, and CI fails when it is stale. What is hand-written is one handler per command in `src/cli/commands/` and the resource guards in `src/cli/resources.ts`. Before a handler runs, each resource its command requires is checked, and the first one missing stops the command with the contract's description and fix (exit `1` until I1-M4-004c makes it `4`). Help text is the contract's current wording; a `pending` rewording shows once the contract makes it current. An item the contract marks `proposed` is not generated, except the built ones listed as `LANDED` in the generator until the contract's markers are updated.
 
 The check fails when a command, argument, option, flag, summary or description differs between the two, or when an `AEOS_*` variable is read and not declared (or declared and never read). What the contract marks `proposed` and the CLI does not have yet is listed as pending, not as an error; what it marks `proposed` or `pending` and the CLI already has is listed as landed, for a person to update the markers. It does not yet check required resources, exit codes or output shapes.
 
@@ -450,13 +454,13 @@ Always protected, whatever the configuration says:
 .aeos/project.json        .aeos/rubrics/**         .aeos/schemas/**
 .aeos/pipelines.yaml      .aeos/column-specs/**    .aeos/features/**
 .aeos/CONSTRAINTS.md      .aeos/agents/**          .aeos/contexts/**
-.aeos/tickets/*/runs/**   **/cli-contract.yaml
+.aeos/tickets/*/runs/**   **/cli-contract.yaml     src/cli/generated/**
 ```
 
 Add project paths with `protectedPaths` in `.aeos/project.json`; the list can only add to the defaults:
 
 ```json
-{ "protectedPaths": ["src/cli/generated/**"] }
+{ "protectedPaths": ["db/migrations/**"] }
 ```
 
 Globs are relative to the project root: `*` matches within one path segment, `**` any number of segments. Detection is a diff after the run, so it works for every executor; it does not stop the write or any read. Two limits: a protected file that already had uncommitted changes before the run is not checked (commit `.aeos/` edits before running), and two runs in the same project at the same time can be blamed for each other's writes.
@@ -495,23 +499,420 @@ Notes:
 
 ## Commands
 
-| Command                                                      | Description                                                                |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `aeos install`                                               | One-time global setup (`~/.aeos/`, global gitignore)                       |
-| `aeos project init [--name] [--key]`                         | Initialise `.aeos/` in the current directory                               |
-| `aeos ticket create <title> [--parent <epicId>] [--spec <feature>] [--implements <ids>] [--bug]` | Create a ticket in BACKLOG — an epic with `--spec` (required for an epic), a task with `--parent`, claiming criteria with `--implements`, or a standalone bug with `--bug` |
-| `aeos ticket list [--column]`                                | List tickets, optionally filtered by column                                |
-| `aeos ticket show <id>`                                      | Show ticket details, column, sub-state, artifacts, recorded executions, and run ids |
-| `aeos ticket run <id> [--executor <type>] [--model <model>]` | Run the current column: pre-flight → agent → validate → review             |
-| `aeos ticket approve <id>`                                   | Advance a SIGNED_OFF ticket to the next column                             |
-| `aeos ticket sign-off <id> --reason <text>`                  | Manual override — set a ticket sub-state to SIGNED_OFF                     |
-| `aeos ticket move <id> <status> --reason <text>`             | Human override — move a ticket directly to any workflow status             |
-| `aeos ticket answer <id>`                                    | Unblock a `BLOCKED` ticket after answering pre-flight questions            |
-| `aeos ticket repin <id>`                                     | Move a spec-backed ticket's pin to the current spec after an amendment     |
-| `aeos ticket resolve <id>`                                   | Resume an `ESCALATED` ticket after writing a decision in its `escalation.md` |
-| `aeos ticket dod-approve <id> [--reason <text>] [--verified <ids>]` | Final human gate — review the conformance report and mark the epic DONE |
-| `aeos dashboard`                                             | Cross-project Kanban summary _(not yet implemented)_                       |
-| `aeos costs [--project] [--epic] [--ticket] [--since]`       | LLM spend report across all projects                                       |
+The reference below is generated from `cli-contract.yaml` (`npm run generate:cli`), so it cannot drift from the CLI. The exit codes are the contract's: until I1-M4-004c lands, every failure still exits `1` (and an interrupted orchestrator run `130`). `aeos dashboard` is in the contract and not built yet.
+
+<!-- BEGIN GENERATED CLI REFERENCE -->
+<!-- Generated from cli-contract.yaml by `npm run generate:cli`. Do not edit between the markers. -->
+
+### `aeos install [options]`
+
+One-time global setup
+
+Requires: nothing.
+
+Exit codes:
+
+- `0` The AEOS home exists and the database is migrated.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+
+### `aeos project init [options]`
+
+Initialise a project in the current directory
+
+| Parameter | Description |
+| --- | --- |
+| `--name <name>` | Project name (defaults to directory name) |
+| `--key <key>` | Ticket prefix key (2–4 uppercase letters) |
+
+Requires: `aeos_home`.
+
+Exit codes:
+
+- `0` The project is scaffolded.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos project sync [options]`
+
+Reconcile this project's column specs, agents, and rubrics with the current templates
+
+| Parameter | Description |
+| --- | --- |
+| `--apply` | Write files that are missing from the project |
+| `--force` | Also overwrite drifted files (each backed up to <file>.bak). Implies --apply |
+| `--diff` | Show a line diff for each drifted file |
+
+Requires: `project`.
+
+Exit codes:
+
+- `0` The comparison ran. Drift alone is not a failure.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket create [options] <title>`
+
+Create a new ticket (an epic by default, or a task with --parent)
+
+| Parameter | Description |
+| --- | --- |
+| `<title>` | Ticket title |
+| `--parent <epicId>` | Create this ticket as a task under the given epic, skipping scoping and spec |
+| `--key <taskKey>` | Stable decomposition key (e.g. T-001); idempotency matches on it instead of the title |
+| `--body <markdown>` | Markdown description for the ticket (e.g. a task breakdown block). Prefer --body-file for multi-line content |
+| `--body-file <path>` | Read the ticket description from a file (robust for multi-line markdown) |
+| `--spec <feature>` | Back this epic with the spec at .aeos/features/<feature>. Refused unless the decisions lint is clean |
+| `--bug` | Create a standalone bug task that must show a reproducing test red, then green |
+| `--implements <ids>` | Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2) |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The ticket exists. Under a parent the command is idempotent, so it may have existed already.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket list [options]`
+
+List all tickets in the current project
+
+| Parameter | Description |
+| --- | --- |
+| `--column <column>` | Filter by pipeline column |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The tickets, possibly none.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket show [options] <id>`
+
+Show details of a single ticket
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The ticket.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket answer [options] <id>`
+
+Unblock a BLOCKED ticket after answering preflight questions
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The ticket is unblocked and its answers are promoted to decisions.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket resolve [options] <id>`
+
+Resume an ESCALATED ticket after writing a decision in its escalation.md
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The ticket can be run again.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket run [options] <id>`
+
+Run the full column cycle for a ticket (preflight → executor → review → sign-off)
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--executor <type>` | Override executor type (claude-cli, auggie-cli, opencode-cli, ollama-cli) |
+| `--model <model>` | Override model identifier |
+
+Requires: `project`, `state_db`, `executor`.
+
+Exit codes:
+
+- `0` The ticket ended SIGNED_OFF.
+- `1` The ticket ended FAILED, or the run broke before it had a result.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `3` The ticket ended ESCALATED or BLOCKED. data.escalation says why and where to look.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+- `130` Interrupted. The ticket is left INTERRUPTED.
+
+### `aeos ticket approve [options] <id>`
+
+Advance a SIGNED_OFF ticket to the next pipeline column
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+
+Requires: `project`, `state_db`, `git_repo`.
+
+Exit codes:
+
+- `0` The ticket moved to the next column and the approval is recorded as a gate.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `3` A gate refused the approval, e.g. the ticket carries a contract change and --contract was not given.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket sign-off [options] <id>`
+
+Manually set a ticket sub-state to SIGNED_OFF
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--reason <text>` (required) | Why the review is being overridden. Recorded as a gate |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The ticket is SIGNED_OFF and the override is recorded as a gate.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket move [options] <id> <status>`
+
+Move a ticket to any workflow status
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+| `<status>` | Target workflow status / column |
+| `--reason <text>` (required) | Why the normal path is being bypassed. Recorded as a gate |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The ticket moved and the override is recorded as a gate.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket ready [options] <id>`
+
+Set a ticket sub-state to READY
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The ticket is READY.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket dod-approve [options] <id>`
+
+Review DoD checklist and approve a DOD_GATE ticket as DONE
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--reason <text>` | Required when any criterion is failed or unverified |
+| `--verified <ids>` | Criteria a person vouches for, comma-separated (e.g. AC-3,AC-7). Each gains a human instrument citing the gate record |
+
+Requires: `project`, `state_db`, `git_repo`.
+
+Exit codes:
+
+- `0` The decision is recorded as a gate. `approved` is false when the person answered no; the ticket then stays where it is.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `3` Refused. A criterion is failed or unverified and --reason was not given, or stdin is not a terminal.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos ticket repin [options] <id>`
+
+Move a spec-backed ticket's pin to the current spec after an amendment
+
+| Parameter | Description |
+| --- | --- |
+| `<id>` | Ticket ID (e.g. AEOS-1) |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The pin moved and the repin is recorded as a gate.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos orchestrator run [options] <epicId>`
+
+Run an epic until it completes, needs a human, or hits its budget
+
+| Parameter | Description |
+| --- | --- |
+| `<epicId>` | Epic ticket ID |
+| `--budget <usd>` | USD ceiling for this epic (persisted for later runs) |
+| `--max-steps <n>` | Safety bound on scheduled actions |
+
+Requires: `project`, `state_db`, `git_repo`, `executor`.
+
+Exit codes:
+
+- `0` Halted COMPLETE.
+- `1` Halted FAILED, or the run broke before it had a result.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `3` Halted NEEDS_HUMAN, HUMAN_GATE, AWAITING_APPROVAL, AWAITING_DECOMPOSITION, BUDGET_EXCEEDED or COST_UNKNOWN.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+- `130` Halted INTERRUPTED.
+
+### `aeos orchestrator pause [options] <epicId>`
+
+Stop scheduling new work for an epic (in-flight runs finish)
+
+| Parameter | Description |
+| --- | --- |
+| `<epicId>` | Epic ticket ID |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The epic is paused.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos orchestrator resume [options] <epicId>`
+
+Allow an epic to be scheduled again
+
+| Parameter | Description |
+| --- | --- |
+| `<epicId>` | Epic ticket ID |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The epic can be scheduled.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos orchestrator clear-budget [options] <epicId>`
+
+Remove the budget ceiling from an epic
+
+| Parameter | Description |
+| --- | --- |
+| `<epicId>` | Epic ticket ID |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` The epic has no budget ceiling.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos orchestrator status [options] [epicId]`
+
+Show orchestrator state for one epic or all of them
+
+| Parameter | Description |
+| --- | --- |
+| `[epicId]` | Epic ticket ID |
+
+Requires: `project`, `state_db`.
+
+Exit codes:
+
+- `0` One entry per epic, possibly none.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos costs [options]`
+
+Report model spend
+
+| Parameter | Description |
+| --- | --- |
+| `--project <key>` | Limit to one project |
+| `--epic <id>` | One epic and its child tasks |
+| `--ticket <id>` | One ticket |
+| `--since <date>` | Records from this date on (YYYY-MM-DD) |
+
+Requires: `state_db`.
+
+Exit codes:
+
+- `0` The spend that matches, possibly none. totalUsd covers known costs; unknownRecords counts the rest.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### Resources
+
+| Resource | What must be in place | Fix |
+| --- | --- | --- |
+| `aeos_home` | The AEOS home directory exists (AEOS_HOME, default ~/.aeos). | Run `aeos install`. |
+| `project` | An initialised project. `.aeos/project.json` is found from the working directory upward. | Run `aeos project init` in the project root. |
+| `state_db` | The state database at <AEOS_HOME>/state.db can be opened and migrated. | Run `aeos install`, or check AEOS_HOME. |
+| `git_repo` | The project root is inside a git work tree. | Run `git init`, or run the command from the repository. |
+| `executor` | The executor CLI resolved for this run is on PATH. | Install the executor, or choose another with --executor. |
+
+### Environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AEOS_HOME` | `~/.aeos` | Directory holding state.db and global configuration. |
+| `AEOS_EXECUTOR` | unset | Set to `stub` to run every agent with the offline stub executor. No model is called and nothing is spent. |
+| `AEOS_GIT_ISOLATION` | unset | Set to `none` to stop the orchestrator isolating an epic's work on its own branch. |
+
+### Exit-code vocabulary
+
+| Code | Name | Meaning |
+| --- | --- | --- |
+| 0 | success | The command did what was asked. |
+| 1 | failure | Something broke: executor crash, validation rejection, unexpected error. |
+| 2 | usage | Invalid arguments or options. Nothing was attempted. |
+| 3 | needs_human | The pipeline worked and stopped for a person: escalated, blocked, awaiting approval, a gate, budget exceeded. |
+| 4 | missing_resource | A required resource is not in place. Nothing was attempted. |
+| 130 | interrupted | The operator interrupted the run. |
+<!-- END GENERATED CLI REFERENCE -->
 
 ## Epics and Tasks
 
@@ -820,7 +1221,7 @@ src/
 │   ├── filesystem/  # Config store, artifact store, project repo, rubric loader
 │   ├── git/         # Git gateway (init, commit, commitFiles)
 │   └── spec-loader/ # YAML+Zod column/agent spec loaders
-├── cli/             # Driving adapter — Commander.js commands + composition root
+├── cli/             # Driving adapter — command handlers, generated registration, composition root
 └── shared/          # Cross-cutting — errors, types, config
 ```
 
@@ -872,6 +1273,8 @@ npm run test:coverage  # With V8 coverage
 npm run lint           # ESLint + Prettier check
 npm run lint:fix       # Auto-fix
 npm run typecheck      # tsc --noEmit (strict mode)
+npm run generate:cli   # Regenerate src/cli/generated/ and the command reference from cli-contract.yaml
+npm run verify:generated  # Fail if generated code or the reference is stale
 npm run smoke-test:auggie   # Real Auggie CLI smoke test (external tool required)
 npm run smoke-test:opencode # Real OpenCode CLI smoke test (external tool required)
 ```

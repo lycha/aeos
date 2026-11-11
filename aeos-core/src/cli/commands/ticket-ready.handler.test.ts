@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
-import { registerTicketReadyCommand } from './ticket-ready.command.js';
+import { programWith } from './program.fixture.js';
 import type { TicketReadyPort } from '../../domain/ports/driving/ticket-ready.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 
@@ -34,7 +34,7 @@ function createMockProjectRepo(): ProjectRepository {
   };
 }
 
-describe('registerTicketReadyCommand', () => {
+describe('the ticket ready handler', () => {
   let program: Command;
   let useCase: ReturnType<typeof createMockTicketReadyUseCase>;
   let projectRepo: ReturnType<typeof createMockProjectRepo>;
@@ -47,7 +47,7 @@ describe('registerTicketReadyCommand', () => {
     program.exitOverride();
     useCase = createMockTicketReadyUseCase();
     projectRepo = createMockProjectRepo();
-    registerTicketReadyCommand(program, () => useCase, projectRepo);
+    programWith({ ticketReady: useCase, projectRepo }, program);
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     savedExitCode = process.exitCode;
@@ -91,7 +91,7 @@ describe('registerTicketReadyCommand', () => {
     (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
     program.parse(['node', 'aeos', 'ticket', 'ready', 'AEOS-1']);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'Error: No AEOS project found. Run "aeos project init" first.',
+      expect.stringContaining('Run `aeos project init` in the project root.'),
     );
     expect(process.exitCode).toBe(1);
   });

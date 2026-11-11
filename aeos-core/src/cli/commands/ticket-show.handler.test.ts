@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
-import { registerTicketShowCommand } from './ticket-show.command.js';
+import { programWith } from './program.fixture.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { TicketShowPort } from '../../domain/ports/driving/ticket-show.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
@@ -74,7 +74,7 @@ function createMockProjectRepo(): ProjectRepository {
   };
 }
 
-describe('registerTicketShowCommand', () => {
+describe('the ticket show handler', () => {
   let program: Command;
   let useCase: ReturnType<typeof createMockTicketShowUseCase>;
   let projectRepo: ReturnType<typeof createMockProjectRepo>;
@@ -87,7 +87,7 @@ describe('registerTicketShowCommand', () => {
     program.exitOverride();
     useCase = createMockTicketShowUseCase();
     projectRepo = createMockProjectRepo();
-    registerTicketShowCommand(program, () => useCase, projectRepo, labelsOf);
+    programWith({ ticketShow: useCase, projectRepo, columnLabels: labelsOf }, program);
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     savedExitCode = process.exitCode;
@@ -205,7 +205,7 @@ describe('registerTicketShowCommand', () => {
     program.parse(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      "Error: Not inside an AEOS project. Run 'aeos project init' first.",
+      expect.stringContaining('Run `aeos project init` in the project root.'),
     );
     expect(process.exitCode).toBe(1);
   });

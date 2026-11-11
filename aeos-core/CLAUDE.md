@@ -26,6 +26,9 @@ npm run test:coverage  # V8 coverage
 npm run typecheck      # tsc --noEmit (strict)
 npm run lint           # schemas:check + eslint + prettier --check
 npm run lint:fix
+npm run verify:contract   # lint cli-contract.yaml, compare the built CLI with it
+npm run generate:cli      # regenerate src/cli/generated/ and the command reference
+npm run verify:generated  # fail when they are stale
 ```
 
 Run a single test file or case:
@@ -56,9 +59,9 @@ cli/ → application/ → domain/ ← infrastructure/
 - **`src/domain/`** — pure. Zero external imports, no I/O. Contains `model/` (Ticket, Column, SubState, specs, events), `services/` (`state-machine.ts`, `output-validation.ts`), and `ports/` split into `driving/` (use-case interfaces the CLI calls) and `driven/` (interfaces infrastructure implements).
 - **`src/application/`** — use cases, one per CLI verb (`ticket-run.use-case.ts`, `ticket-approve.use-case.ts`, …), plus `services/` for context assembly, prompt building, preflight, decision promotion, and executor-config resolution.
 - **`src/infrastructure/`** — adapters: `persistence/` (better-sqlite3), `filesystem/`, `git/` (simple-git), `executor/`, `spec-loader/` (YAML + Zod).
-- **`src/cli/`** — Commander.js commands in `commands/`, the Ink/React TUI in `ui/`, and the composition root `container.ts`.
+- **`src/cli/`** — one handler per command in `commands/`, the Commander registration generated from the contract in `generated/`, the resource guards in `resources.ts`, the Ink/React TUI in `ui/`, and the composition root `container.ts`.
 
-When adding a capability, the shape is: driving port → use case → driven port(s) → adapter(s) → wire in `container.ts` → Commander command. Adding an import of Node built-ins or npm packages into `domain/` is a layering violation.
+When adding a capability, the shape is: driving port → use case → driven port(s) → adapter(s) → wire in `container.ts` → a handler for the command the contract describes (see Generated command registration). Adding an import of Node built-ins or npm packages into `domain/` is a layering violation.
 
 ### Composition root
 
@@ -128,8 +131,18 @@ On a spec-backed ticket `TicketAnswerUseCase` hands the answered questions (`Dec
 - `contract-schema.ts`: Zod schema of the file *after* `$ref` resolution, all `strictObject`, so an unknown key fails with its path. JSON Schemas (`data`, parameter `schema`) are opaque records.
 - `load-contract.ts`: `parseContract` resolves every `{ $ref: "#/components/…" }` over the raw YAML first (a reference that points nowhere, has sibling keys or loops throws naming it), validates, then appends `globals.parameters` and merges `globals.responses` into every command. `loadContract()` reads the approved file.
 - `lint-contract.ts`: `lintContract`, the hand-edit checks of the task (declared resources and exit codes, a `"0"` response with data, `"4"` when resources are required, a task on everything proposed, unique `operationId`s, argument positions, option/flag shape, the parameter-schema keyword subset).
-- `verify-contract.ts`: `verifyContract(contract, program, envRead)` walks Commander's leaf commands and returns `{ mismatches, pending, landed }`. An item with `status: proposed` that is absent is `pending`; present, it is `landed` and must match. Text may be the current or the `pending` wording (then `landed`), never a third. `envVariablesRead(srcDir)` greps `process.env.AEOS_*` in non-test code (`*.test.*`, `*.smoke-test.*`, `*.fixture.*` and `e2e/` are test code). `requires`, `responses`, `prompt` and schema constraints are not compared yet (I1-M4-004b/c).
+- `verify-contract.ts`: `verifyContract(contract, program, envRead)` walks Commander's leaf commands and returns `{ mismatches, pending, landed }`. An item with `status: proposed` that is absent is `pending`; present, it is `landed` and must match. Text may be the current or the `pending` wording (then `landed`), never a third. `envVariablesRead(srcDir)` greps `process.env.AEOS_*` in non-test code (`*.test.*`, `*.smoke-test.*`, `*.fixture.*` and `e2e/` are test code). `requires` is generated from the contract (I1-M4-004b); `responses`, `prompt` and schema constraints are not compared yet (I1-M4-004c).
 - `main.ts` is `npm run verify:contract` (via `tsx`); `verify-contract.test.ts` runs the same comparison in `npm test` and asserts there is no mismatch.
+
+### Generated command registration
+
+`scripts/generate-cli.mjs` (plain Node, run before the build; `npm run generate:cli`) reads the contract, resolves `$ref`s and applies the globals itself (`--resolved` prints that, and a test holds it equal to `loadContract()`), and writes `src/cli/generated/`: `commands.gen.ts` (`registerGenerated(program, handlers, resources)`, the whole Commander tree, and the `Handlers` interface), `types.gen.ts` (`<OperationId>Args`/`Options`), `resources.gen.ts` (`ResourceName`, `RESOURCES`, `COMMAND_RESOURCES`, `Declared<Id>`), `environment.gen.ts`, and the command reference between the `GENERATED CLI REFERENCE` markers of `README.md` and `skills/aeos/SKILL.md`. **Never edit any of it**: `src/cli/generated/**` is a built-in protected path, excluded from Prettier (`.prettierignore`), and `npm run verify:generated` (CI, and a test in `generate-cli.test.ts`) fails when a committed file differs.
+
+- **What is generated.** Everything `existing`, with the current summary and description, never the `pending` one. Anything `proposed` is skipped, except the ids in `LANDED` at the top of the generator: built items the contract still marks proposed (what `verify:contract` lists as landed). The generator stops on an entry the contract no longer marks proposed, so the list shrinks as the owner updates the markers. A proposed resource (`python`, `gh`) has no guard and is left out of every `requires`.
+- **Handlers.** `src/cli/commands/<name>.handler.ts` exports `Handlers['<operationId>']`: `async (args, options, context)`. No Commander call and no resource check belongs there (a test greps for `.command(`/`.option(`); `commands/index.ts` collects them as `handlers`. `context` (`CommandContext` in `src/cli/resources.ts`) carries the `container`, `projectPath` (for a command that requires `project`) and `require(resource)`, typed to the resources that command declares, for a `conditionalRequires` case.
+- **Guards.** `createResources(container)` in `src/cli/resources.ts` has one check per resource. The generated `run` checks a command's `requires` in order inside the action, prints the contract's description and fix for the first one missing, sets exit code 1 (004c makes it 4) and does not call the handler. Because guards run in the action, `install` and `project init` never touch `state.db`. The `executor` guard only checks a `--executor` override (see the `shortcut` comment there).
+- **Group descriptions** (`project`, `ticket`, `orchestrator`) are not in the contract; `buildProgram` sets them (`GROUPS` in `src/cli/index.ts`).
+- **Tests.** `commands/program.fixture.ts` (`programWith(container)`) registers the generated tree with the real handlers over a mocked container; only the `project` guard is real there, since the others would open this machine's database. Handler tests parse real argv through it.
 
 ### Column roles
 

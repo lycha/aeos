@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import type { ConformanceReport } from '../../domain/model/conformance-report.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import type { TicketDodApprovePort } from '../../domain/ports/driving/ticket-dod-approve.port.js';
-import { registerTicketDodApproveCommand } from './ticket-dod-approve.command.js';
+import { programWith } from './program.fixture.js';
 
 // What the person types, in order; every question asked is logged with the output.
 const answers: string[] = [];
@@ -32,7 +32,7 @@ const report = {
 } as unknown as ConformanceReport;
 const review = { report, prUrl: 'https://github.com/o/r/pull/7' };
 
-describe('registerTicketDodApproveCommand', () => {
+describe('the ticket dod-approve handler', () => {
   let program: Command;
   let useCase: { review: ReturnType<typeof vi.fn>; execute: ReturnType<typeof vi.fn> };
   const run = (...args: string[]): Promise<Command> =>
@@ -47,10 +47,16 @@ describe('registerTicketDodApproveCommand', () => {
       review: vi.fn().mockResolvedValue({ ok: true, review }),
       execute: vi.fn().mockReturnValue({ status: 'approved', ticketId: 'AEOS-1', totalCostUsd: 0 }),
     };
-    registerTicketDodApproveCommand(program, () => useCase as TicketDodApprovePort, {
-      findRoot: () => '/test',
-      read: () => ({ id: 'proj-1' }),
-    } as unknown as ProjectRepository);
+    programWith(
+      {
+        ticketDodApprove: useCase as TicketDodApprovePort,
+        projectRepo: {
+          findRoot: () => '/test',
+          read: () => ({ id: 'proj-1' }),
+        } as unknown as ProjectRepository,
+      },
+      program,
+    );
     for (const method of ['log', 'error'] as const) {
       vi.spyOn(console, method).mockImplementation((...parts) => printed.push(parts.join(' ')));
     }

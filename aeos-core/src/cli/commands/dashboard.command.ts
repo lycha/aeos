@@ -1,1 +1,0 @@
-// CLI command — aeos dashboard

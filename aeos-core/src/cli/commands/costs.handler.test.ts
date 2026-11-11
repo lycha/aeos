@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
-import { registerCostsCommand } from './costs.command.js';
+import { programWith } from './program.fixture.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { CostsPort, CostReport } from '../../domain/ports/driving/costs.port.js';
 import { displayOrder } from '../../domain/model/column.js';
@@ -31,16 +31,18 @@ describe('aeos costs', () => {
     vi.spyOn(console, 'error').mockImplementation(capture);
     execute = vi.fn();
     program = new Command().name('aeos').exitOverride().configureOutput({ writeOut: capture });
-    registerCostsCommand(
+    programWith(
+      {
+        costs: { execute } as CostsPort,
+        // Labels are per project: only `aeos` labels its tech spec column.
+        columnLabelsOfProject: (projectId) =>
+          columnLabels(
+            COLUMNS,
+            projectId === 'aeos' ? { TECH_SPEC: { label: 'Shaping' } } : {},
+            null,
+          ),
+      },
       program,
-      () => ({ execute }) as CostsPort,
-      // Labels are per project: only `aeos` labels its tech spec column.
-      (projectId) =>
-        columnLabels(
-          COLUMNS,
-          projectId === 'aeos' ? { TECH_SPEC: { label: 'Shaping' } } : {},
-          null,
-        ),
     );
     report({ totalUsd: 0, unknownRecords: 0, byProject: [] });
   });

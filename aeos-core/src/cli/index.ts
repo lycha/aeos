@@ -6,41 +6,19 @@ import { realpathSync } from 'node:fs';
 import { Command } from 'commander';
 import { createContainer } from './container.js';
 import { runInkApp } from './ui/run-ink-app.js';
-import { registerInstallCommand } from './commands/install.command.js';
-import { registerProjectInitCommand } from './commands/project-init.command.js';
-import { registerProjectSyncCommand } from './commands/project-sync.command.js';
-import { registerTicketCreateCommand } from './commands/ticket-create.command.js';
-import { registerTicketListCommand } from './commands/ticket-list.command.js';
-import { registerTicketShowCommand } from './commands/ticket-show.command.js';
-import { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
-import { registerTicketRepinCommand } from './commands/ticket-repin.command.js';
-import { registerTicketResolveCommand } from './commands/ticket-resolve.command.js';
-import { registerTicketRunCommand } from './commands/ticket-run.command.js';
-import { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
-import { registerTicketSignOffCommand } from './commands/ticket-sign-off.command.js';
-import { registerTicketMoveCommand } from './commands/ticket-move.command.js';
-import { registerTicketReadyCommand } from './commands/ticket-ready.command.js';
-import { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
-import { registerOrchestratorCommand } from './commands/orchestrator.command.js';
-import { registerCostsCommand } from './commands/costs.command.js';
+import { handlers } from './commands/index.js';
+import { registerGenerated } from './generated/commands.gen.js';
+import { createResources } from './resources.js';
 
 export { createContainer } from './container.js';
 export type { Container } from './container.js';
-export { registerInstallCommand } from './commands/install.command.js';
-export { registerProjectInitCommand } from './commands/project-init.command.js';
-export { registerProjectSyncCommand } from './commands/project-sync.command.js';
-export { registerTicketCreateCommand } from './commands/ticket-create.command.js';
-export { registerTicketListCommand } from './commands/ticket-list.command.js';
-export { registerTicketShowCommand } from './commands/ticket-show.command.js';
-export { registerTicketAnswerCommand } from './commands/ticket-answer.command.js';
-export { registerTicketRepinCommand } from './commands/ticket-repin.command.js';
-export { registerTicketResolveCommand } from './commands/ticket-resolve.command.js';
-export { registerTicketRunCommand } from './commands/ticket-run.command.js';
-export { registerTicketApproveCommand } from './commands/ticket-approve.command.js';
-export { registerTicketSignOffCommand } from './commands/ticket-sign-off.command.js';
-export { registerTicketMoveCommand } from './commands/ticket-move.command.js';
-export { registerTicketReadyCommand } from './commands/ticket-ready.command.js';
-export { registerTicketDodApproveCommand } from './commands/ticket-dod-approve.command.js';
+
+/** The command groups; the contract describes commands, not the words they hang from. */
+const GROUPS: Record<string, string> = {
+  project: 'Project management commands',
+  ticket: 'Ticket management commands',
+  orchestrator: 'Drive an epic and its tasks autonomously',
+};
 
 interface CliRuntimeDependencies {
   readonly stdout: Pick<NodeJS.WriteStream, 'isTTY'>;
@@ -75,57 +53,13 @@ export function buildProgram(): Command {
     );
 
   const container = createContainer();
-  registerInstallCommand(program, container.install);
-  registerProjectInitCommand(program, container.projectInit);
-  registerProjectSyncCommand(program, () => container.projectSync, container.projectRepo);
-
-  // Ticket commands access the DB — resolve lazily inside the action callback,
-  // not at program build time. This allows `aeos install` and `aeos project init`
-  // to run before .aeos/ (and state.db) exist.
-  registerTicketCreateCommand(program, () => container.ticketCreate, container.projectRepo);
-  registerTicketListCommand(
-    program,
-    () => container.ticketList,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketShowCommand(
-    program,
-    () => container.ticketShow,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketAnswerCommand(program, () => container.ticketAnswer, container.projectRepo);
-  registerTicketRepinCommand(program, () => container.ticketRepin, container.projectRepo);
-  registerTicketResolveCommand(program, () => container.ticketResolve, container.projectRepo);
-  registerTicketRunCommand(
-    program,
-    () => container.ticketRun,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketApproveCommand(
-    program,
-    () => container.ticketApprove,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketSignOffCommand(program, () => container.ticketSignOff, container.projectRepo);
-  registerTicketMoveCommand(
-    program,
-    () => container.ticketMove,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerTicketReadyCommand(program, () => container.ticketReady, container.projectRepo);
-  registerTicketDodApproveCommand(program, () => container.ticketDodApprove, container.projectRepo);
-  registerOrchestratorCommand(
-    program,
-    () => container.orchestrator,
-    container.projectRepo,
-    container.columnLabels,
-  );
-  registerCostsCommand(program, () => container.costs, container.columnLabelsOfProject);
+  // Wiring, option types and resource guards are generated from
+  // cli-contract.yaml. A guard runs inside the action, so `aeos install` and
+  // `aeos project init` still run before .aeos/ (and state.db) exist.
+  registerGenerated(program, handlers, createResources(container));
+  for (const group of program.commands) {
+    if (group.name() in GROUPS) group.description(GROUPS[group.name()]);
+  }
 
   // Every command that acts on tickets is held to the accepted pipelines
   // (I1-M4-005c). The ones that only read go on, with the accepted order.

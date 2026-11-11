@@ -1,3 +1,5 @@
 dist/
 node_modules/
 coverage/
+# Generated from cli-contract.yaml; formatting it would make it differ from the generator.
+src/cli/generated/

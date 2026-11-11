@@ -21,6 +21,8 @@ export const DEFAULT_PROTECTED_PATHS: readonly string[] = [
   '.aeos/tickets/*/runs/**',
   // The human-owned CLI contract, wherever the project keeps it.
   '**/cli-contract.yaml',
+  // What `npm run generate:cli` writes from it; an edit there is an edit to the generator's output.
+  'src/cli/generated/**',
 ];
 
 /** The defaults plus the project's `protectedPaths`. */

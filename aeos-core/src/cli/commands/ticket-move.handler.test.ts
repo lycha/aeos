@@ -1,15 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
-import { registerTicketSignOffCommand } from './ticket-sign-off.command.js';
-import type { TicketSignOffPort } from '../../domain/ports/driving/ticket-sign-off.port.js';
+import { programWith } from './program.fixture.js';
+import { columnLabels } from '../../domain/services/column-labels.js';
+import type { TicketMovePort } from '../../domain/ports/driving/ticket-move.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import { displayOrder } from '../../domain/model/column.js';
+import { templatePipelines } from '../../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
 
-function createMockTicketSignOffUseCase(): TicketSignOffPort {
+// Every column of the shipped pipelines.
+const COLUMNS = displayOrder(templatePipelines());
+
+// The tech spec column is labelled; every other column shows its default.
+const labelsOf = () => columnLabels(COLUMNS, { TECH_SPEC: { label: 'Shaping' } }, null);
+
+function createMockTicketMoveUseCase(): TicketMovePort {
   return {
     execute: vi.fn().mockReturnValue({
-      status: 'signed_off',
+      status: 'moved',
       ticketId: 'AEOS-1',
-      previousSubState: 'FAILED',
+      fromColumn: 'SPEC_REVIEW',
+      toColumn: 'QA',
     }),
   };
 }
@@ -36,9 +46,9 @@ function createMockProjectRepo(): ProjectRepository {
 
 const REASON = 'The reviewer misread AC-2.';
 
-describe('registerTicketSignOffCommand', () => {
+describe('the ticket move handler', () => {
   let program: Command;
-  let useCase: ReturnType<typeof createMockTicketSignOffUseCase>;
+  let useCase: ReturnType<typeof createMockTicketMoveUseCase>;
   let projectRepo: ReturnType<typeof createMockProjectRepo>;
   let consoleSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -47,9 +57,9 @@ describe('registerTicketSignOffCommand', () => {
   beforeEach(() => {
     program = new Command();
     program.exitOverride();
-    useCase = createMockTicketSignOffUseCase();
+    useCase = createMockTicketMoveUseCase();
     projectRepo = createMockProjectRepo();
-    registerTicketSignOffCommand(program, () => useCase, projectRepo);
+    programWith({ ticketMove: useCase, projectRepo, columnLabels: labelsOf }, program);
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     savedExitCode = process.exitCode;
@@ -62,46 +72,62 @@ describe('registerTicketSignOffCommand', () => {
     process.exitCode = savedExitCode;
   });
 
-  it('passes the ticket id and project info to the use case', () => {
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
+  it('passes an uppercased target status to the use case', () => {
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'qa', '--reason', REASON]);
     expect(useCase.execute).toHaveBeenCalledWith({
       projectId: 'proj-1',
       projectPath: '/test',
       ticketId: 'AEOS-1',
+      targetColumn: 'QA',
       reason: REASON,
     });
   });
 
-  it('prints a success message when manual sign-off succeeds', () => {
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
-    expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 signed off (previous state: FAILED)');
+  it('prints a success message when the move succeeds', () => {
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA', '--reason', REASON]);
+    expect(consoleSpy).toHaveBeenCalledWith('✓ Ticket AEOS-1 moved: Spec review → Qa');
+  });
+
+  it("hands an unknown status on as typed: the use case knows the ticket's pipeline", () => {
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'not-real', '--reason', REASON]);
+    expect(useCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ targetColumn: 'not-real' }),
+    );
   });
 
   it('shows use case errors and sets exit code 1', () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       status: 'error',
       ticketId: 'AEOS-1',
-      error: 'Ticket AEOS-1 is already SIGNED_OFF',
+      error: 'Already in QA',
     });
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Error: Ticket AEOS-1 is already SIGNED_OFF');
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA', '--reason', REASON]);
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Error: Already in Qa');
     expect(process.exitCode).toBe(1);
   });
 
   it('shows an error when not inside an AEOS project', () => {
     (projectRepo.findRoot as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1', '--reason', REASON]);
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA', '--reason', REASON]);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'Error: No AEOS project found. Run "aeos project init" first.',
+      expect.stringContaining('Run `aeos project init` in the project root.'),
     );
     expect(process.exitCode).toBe(1);
+  });
+
+  it('accepts a label for the target, in any case, and passes the identifier on', () => {
+    program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'shaping', '--reason', REASON]);
+
+    expect(useCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ targetColumn: 'TECH_SPEC' }),
+    );
   });
 
   it('is refused without --reason, and the use case is not run', () => {
     // Commander refuses a missing required option before the action runs.
     program.configureOutput({ writeErr: () => {} });
 
-    expect(() => program.parse(['node', 'aeos', 'ticket', 'sign-off', 'AEOS-1'])).toThrow(
+    expect(() => program.parse(['node', 'aeos', 'ticket', 'move', 'AEOS-1', 'QA'])).toThrow(
       "required option '--reason <text>' not specified",
     );
     expect(useCase.execute).not.toHaveBeenCalled();

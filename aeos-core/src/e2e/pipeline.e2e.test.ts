@@ -987,17 +987,26 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(clash.output).toContain('column-specs/qa.yaml');
   });
 
+  it('stops a command whose resource is missing, with the fix from the contract', async () => {
+    const early = await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    expect(early.exitCode).toBe(1);
+    expect(early.output).toContain('a required resource is not in place: aeos_home');
+    expect(early.output).toContain('Run `aeos install`.');
+    expect(fs.existsSync(path.join(project.projectPath, '.aeos'))).toBe(false);
+
+    await runCli('install');
+    const outside = await runCli('ticket', 'list');
+    expect(outside.exitCode).toBe(1);
+    expect(outside.output).toContain(
+      'An initialised project. `.aeos/project.json` is found from the working directory upward.',
+    );
+    expect(outside.output).toContain('Run `aeos project init` in the project root.');
+  });
+
   it('fails a run that touches a protected path, in either repository, and restores it', async () => {
     await runCli('install');
     await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
     const aeosDir = path.join(project.projectPath, '.aeos');
-    const configFile = path.join(aeosDir, 'project.json');
-    const config = JSON.parse(fs.readFileSync(configFile, 'utf-8')) as object;
-    fs.writeFileSync(
-      configFile,
-      JSON.stringify({ ...config, protectedPaths: ['src/cli/generated/**'] }),
-      'utf-8',
-    );
     const failedRun = (ticketId: string): RunRecord => {
       const dir = path.join(aeosDir, 'tickets', ticketId, 'runs');
       return fs
@@ -1025,10 +1034,10 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(failedRun(epic).error).toContain(rubric);
     expect(validateRunRecord(failedRun(epic)), JSON.stringify(validateRunRecord.errors)).toBe(true);
 
-    // Project repository: a new file under a configured glob.
+    // Project repository: generated code, protected with no configuration.
     const task = await createStandaloneTask('A task that writes generated code');
     await runCli('ticket', 'approve', task);
-    const generated = 'src/cli/generated/commands.ts';
+    const generated = 'src/cli/generated/commands.gen.ts';
 
     stubWorkerTouches(generated);
     const taskRun = await runCli('ticket', 'run', task);

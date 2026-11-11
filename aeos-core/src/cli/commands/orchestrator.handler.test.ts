@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
-import { registerOrchestratorCommand } from './orchestrator.command.js';
+import { programWith } from './program.fixture.js';
 import { columnLabels } from '../../domain/services/column-labels.js';
 import type { OrchestratorPort } from '../../domain/ports/driving/orchestrator.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
@@ -20,14 +20,16 @@ describe('aeos orchestrator clear-budget', () => {
     program = new Command();
     program.exitOverride();
     clearBudget = vi.fn().mockReturnValue({ epicId: 'AEOS-1', budgetUsd: null });
-    registerOrchestratorCommand(
-      program,
-      () => ({ clearBudget, status }) as unknown as OrchestratorPort,
+    programWith(
       {
-        findRoot: vi.fn().mockReturnValue('/test'),
-        read: vi.fn().mockReturnValue({ id: 'proj-1' }),
-      } as unknown as ProjectRepository,
-      () => columnLabels(COLUMNS, { TECH_SPEC: { label: 'Shaping' } }, null),
+        orchestrator: { clearBudget, status } as unknown as OrchestratorPort,
+        projectRepo: {
+          findRoot: vi.fn().mockReturnValue('/test'),
+          read: vi.fn().mockReturnValue({ id: 'proj-1' }),
+        } as unknown as ProjectRepository,
+        columnLabels: () => columnLabels(COLUMNS, { TECH_SPEC: { label: 'Shaping' } }, null),
+      },
+      program,
     );
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -61,13 +63,13 @@ describe('aeos orchestrator clear-budget', () => {
     expect(consoleSpy).toHaveBeenCalledWith('✓ AEOS-1 budget cleared (no ceiling)');
   });
 
-  it('lets the "no orchestrator state" error reach the CLI error handler', () => {
+  it('lets the "no orchestrator state" error reach the CLI error handler', async () => {
     clearBudget.mockImplementation(() => {
       throw new Error('Epic AEOS-1 has no orchestrator state');
     });
 
-    expect(() => program.parse(['node', 'aeos', 'orchestrator', 'clear-budget', 'AEOS-1'])).toThrow(
-      /no orchestrator state/,
-    );
+    await expect(
+      program.parseAsync(['node', 'aeos', 'orchestrator', 'clear-budget', 'AEOS-1']),
+    ).rejects.toThrow(/no orchestrator state/);
   });
 });
