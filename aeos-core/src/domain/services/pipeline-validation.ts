@@ -74,9 +74,17 @@ export function pipelineErrors(
     }
 
     const finalGates = withRole('final-gate');
-    if (finalGates.length > 1) {
-      errors.push(`${count(finalGates, 'final-gate')}; it may have at most one.`);
-    } else if (finalGates.length === 1 && middle.at(-1) !== finalGates[0]) {
+    if (finalGates.length !== 1) {
+      // Stricter than the approved file's "at most one" (owner, 11 Nov 2026):
+      // without it nothing halts for a person before DONE.
+      errors.push(
+        `${count(finalGates, 'final-gate')}; it needs exactly one.${
+          finalGates.length === 0
+            ? ' Column specs written before roles existed declare none: run `aeos project sync` to see which are behind the templates (`--force` updates them).'
+            : ''
+        }`,
+      );
+    } else if (middle.at(-1) !== finalGates[0]) {
       errors.push(
         `Column ${finalGates[0]} (final-gate) of the ${kind} pipeline must be the last column before DONE.`,
       );

@@ -198,7 +198,7 @@ The file is checked every time it is loaded, and a command that needs it fails w
 - every column listed (other than `BACKLOG` and `DONE`) has a column spec in `.aeos/column-specs/`
 - an `EPIC` pipeline has exactly one `spec-review` column, before the `decomposition` column
 - an `EPIC` pipeline has exactly one `decomposition` column, before any `integration` or `final-gate` column
-- a pipeline has at most one `final-gate` column, and it is the last before `DONE`
+- an `EPIC` pipeline has exactly one `final-gate` column, and it is the last before `DONE`. Column specs scaffolded before roles existed declare none, so such a project is refused until `aeos project sync --force` brings them up to the templates
 - a `TASK` pipeline has no `spec-review`, `decomposition` or `final-gate` column
 - only the kinds `EPIC` and `TASK` exist; any other key is refused
 
@@ -558,6 +558,7 @@ For anyone scripting on "non-zero means failed, and it is always `1`":
 - **A missing resource exits `4`** (no project, no `aeos install`, an unknown `costs --project`), not `1`.
 - **`ticket approve` on a ticket that is already done exits `1`** (`ALREADY_DONE`); it used to print the same line and exit `0`. Declining the confirmation of `ticket answer` or `ticket resolve` exits `0`, as it always did: nothing went wrong and nothing changed (`data` is `{ ticketId, declined: true }`).
 - **Questions are on stderr**, and so is the conformance report `ticket dod-approve` shows before asking. Without a terminal no command waits on stdin any more (see above).
+- **An epic pipeline with no `final-gate` column is refused.** A project whose column specs were scaffolded before roles existed fails every `ticket` and `orchestrator` command that changes state until `aeos project sync --force` updates them (each overwritten file is backed up to `<file>.bak`).
 - **Two error messages are reworded**: an executor that is not one of the four, and a `--key` that is not 2–4 uppercase letters, are now reported by the generated parameter check (`--executor must be one of …, got 'x'.`). All other text output is what it was.
 
 <!-- BEGIN GENERATED CLI REFERENCE -->

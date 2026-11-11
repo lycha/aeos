@@ -68,6 +68,18 @@ describe('YamlPipelineLoader', () => {
     );
   });
 
+  it('refuses a project whose column specs predate roles, pointing at project sync', () => {
+    const specs = path.join(tmpDir, '.aeos', 'column-specs');
+    for (const name of fs.readdirSync(specs)) {
+      const spec = path.join(specs, name);
+      fs.writeFileSync(spec, fs.readFileSync(spec, 'utf-8').replace(/^role:.*\n/m, ''));
+    }
+
+    expect(() => loader.load(tmpDir)).toThrow(
+      /EPIC pipeline has no column with role `final-gate`.*aeos project sync/,
+    );
+  });
+
   it('refuses a column with no column spec, naming the column', () => {
     write({
       pipelines_version: 0,

@@ -60,7 +60,9 @@ describe('pipelineErrors', () => {
 
   it('requires exactly one decomposition column in an EPIC pipeline', () => {
     expect(
-      errors({ EPIC: ['BACKLOG', 'SPEC_REVIEW', 'TECH_SPEC', 'INTEGRATION_REVIEW', 'DONE'] }),
+      errors({
+        EPIC: ['BACKLOG', 'SPEC_REVIEW', 'TECH_SPEC', 'INTEGRATION_REVIEW', 'DOD_GATE', 'DONE'],
+      }),
     ).toEqual([expect.stringMatching(/EPIC pipeline has no column with role `decomposition`/)]);
   });
 
@@ -79,7 +81,16 @@ describe('pipelineErrors', () => {
     ).toEqual([expect.stringMatching(/TASK_BREAKDOWN.*before INTEGRATION_REVIEW/)]);
   });
 
-  it('allows at most one final-gate, and only as the last column before DONE', () => {
+  it('requires a final-gate column in an EPIC pipeline, and says how to get one', () => {
+    // A project scaffolded before column roles: specs with no role are standard.
+    expect(pipelineErrors({ EPIC, TASK }, () => 'standard')).toContainEqual(
+      expect.stringMatching(
+        /EPIC pipeline has no column with role `final-gate`; it needs exactly one.*aeos project sync/,
+      ),
+    );
+  });
+
+  it('allows only one final-gate, and only as the last column before DONE', () => {
     expect(
       errors({
         EPIC: [
@@ -106,7 +117,10 @@ describe('pipelineErrors', () => {
     ).toEqual([expect.stringMatching(/EPIC pipeline has no column with role `spec-review`/)]);
     expect(
       pipelineErrors(
-        { EPIC: ['BACKLOG', 'SPEC_REVIEW', 'SPEC_AGAIN', 'TASK_BREAKDOWN', 'DONE'], TASK },
+        {
+          EPIC: ['BACKLOG', 'SPEC_REVIEW', 'SPEC_AGAIN', 'TASK_BREAKDOWN', 'DOD_GATE', 'DONE'],
+          TASK,
+        },
         (column) => (column === 'SPEC_AGAIN' ? 'spec-review' : roleOf(column)),
       ),
     ).toEqual([expect.stringMatching(/EPIC pipeline has 2 columns with role `spec-review`/)]);
