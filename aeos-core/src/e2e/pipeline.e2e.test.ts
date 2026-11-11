@@ -1052,7 +1052,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(fs.existsSync(path.join(project.projectPath, generated))).toBe(false);
     expect(failedRun(task).error).toContain(generated);
   });
-  it('runs a generator before an agentic worker, and holds a contract change for a person', async () => {
+  it('runs a generator before a worker that edits the repository, and holds a contract change for a person', async () => {
     await runCli('install');
     // Columns advance on their own here, so it is the orchestrator that meets the contract gate.
     const configFile = path.join(project.aeosHome, 'config.json');
@@ -1110,19 +1110,15 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     git(project.projectPath, 'add', '-A');
     git(project.projectPath, 'commit', '-m', 'aeos project init');
 
-    // The epic's decomposition column is the first agentic one: the generator runs there.
+    // The epic's decomposition column is agentic but requires no repository
+    // diff, and the epic's branch is all that keeps it off the default one: no
+    // generator runs there.
     const epic = await createEpic('An epic');
     await runCli('ticket', 'approve', epic);
     const first = await runCli('orchestrator', 'run', epic);
     expect(first.output).toContain('AWAITING_DECOMPOSITION');
-    expect(fs.readFileSync(inProject('generated/api.txt'), 'utf-8')).toBe('version: 1\n');
-    expect(git(project.projectPath, 'log', '--format=%s')).toContain(`[${epic}][GENERATED] api`);
-    const generatorRuns = runsOf(epic).filter((record) => record.role === 'generator');
-    expect(generatorRuns).toHaveLength(1);
-    expect(generatorRuns[0]).toMatchObject({ executor: 'shell', cost_basis: 'none', exit: 'ok' });
-    expect(validateRunRecord(generatorRuns[0]), JSON.stringify(validateRunRecord.errors)).toBe(
-      true,
-    );
+    expect(fs.existsSync(inProject('generated/api.txt'))).toBe(false);
+    expect(runsOf(epic).filter((record) => record.role === 'generator')).toEqual([]);
 
     // A task whose worker edits a declared contract. Its run passes review;
     // the engine's own advance is what is refused.
@@ -1134,8 +1130,15 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(second.output).toContain('carries a contract change: db/schema.sql');
     expect(second.exitCode).toBe(3);
     expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
-    // The generator's inputs have not changed since: it did not run again.
-    expect(runsOf(task).filter((record) => record.role === 'generator')).toEqual([]);
+    // The task's implementation column is where the generator runs.
+    expect(fs.readFileSync(inProject('generated/api.txt'), 'utf-8')).toBe('version: 1\n');
+    expect(git(project.projectPath, 'log', '--format=%s')).toContain(`[${task}][GENERATED] api`);
+    const generatorRuns = runsOf(task).filter((record) => record.role === 'generator');
+    expect(generatorRuns).toHaveLength(1);
+    expect(generatorRuns[0]).toMatchObject({ executor: 'shell', cost_basis: 'none', exit: 'ok' });
+    expect(validateRunRecord(generatorRuns[0]), JSON.stringify(validateRunRecord.errors)).toBe(
+      true,
+    );
     expect((await runCli('ticket', 'show', task)).output).toContain(
       'Contract change: db/schema.sql (needs approval',
     );

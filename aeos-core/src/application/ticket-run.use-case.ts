@@ -693,8 +693,9 @@ export class TicketRunUseCase implements TicketRunPort {
 
     // ── Generators ───────────────────────────────────────────────
     // On the first attempt only: later ones carry the worker's uncommitted
-    // work, which a commit of generated files must not sweep up.
-    if (workerMode === 'agentic' && attempt === 1) {
+    // work, which a commit of generated files must not sweep up. Only where the
+    // worker edits the repository: any other column may be on the default branch.
+    if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false && attempt === 1) {
       const failure = await this.runGenerators(ctx);
       if (failure) return failure;
     }

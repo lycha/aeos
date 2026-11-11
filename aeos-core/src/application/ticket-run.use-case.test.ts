@@ -2851,6 +2851,20 @@ describe('TicketRunUseCase', () => {
       expect(checksRunner.run).not.toHaveBeenCalled();
     });
 
+    it('does not run generators on an agentic column that requires no repository diff', async () => {
+      // A decomposition column: nothing isolates it from the default branch.
+      generators = [GENERATOR];
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ requiresRepoDiff: false }),
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(checksRunner.run).not.toHaveBeenCalled();
+      expect(projectCommits()).toEqual([]);
+    });
+
     it('fails the attempt with the output of a generator that fails, and never runs the worker', async () => {
       generators = [GENERATOR];
       checksRunner.run.mockResolvedValue({
