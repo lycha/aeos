@@ -84,7 +84,7 @@ children you created and drives each through its own build pipeline.
 ```sh
 aeos ticket list                 # tickets in this project; tasks nest under their epic
 aeos ticket show <ID>            # kind, parent/children, column, state, artifacts
-aeos ticket create "<title>"     # a new epic (no --parent)
+aeos ticket create "<title>" --spec <feature>   # a new epic, backed by .aeos/features/<feature>
 ```
 
 Do **not** run `aeos ticket run`, `aeos ticket approve`, or `aeos orchestrator`
