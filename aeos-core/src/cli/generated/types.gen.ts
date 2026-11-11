@@ -109,6 +109,7 @@ export interface TicketApproveArgs {
 }
 
 export interface TicketApproveOptions {
+  contract?: boolean;
   json?: boolean;
 }
 

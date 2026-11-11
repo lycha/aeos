@@ -28,7 +28,7 @@ import type { RunRecordStore } from '../domain/ports/driven/run-record-store.por
 import type { ChecksRunner } from '../domain/ports/driven/checks-runner.port.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
 import type { Check } from '../domain/model/check.js';
-import type { CheckConfig } from '../domain/model/project-executor-config.js';
+import type { CheckConfig, GeneratorConfig } from '../domain/model/project-executor-config.js';
 import { CheckRegistry } from './checks/check-registry.js';
 import type { CriteriaCollector } from './services/criteria-collector.js';
 import { traceCriteria } from '../domain/services/criteria-trace.js';
@@ -55,6 +55,7 @@ function createMockTicketRepo(): TicketRepository {
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
     setSpecCommit: vi.fn(),
+    setContractChange: vi.fn(),
   };
 }
 
@@ -300,6 +301,10 @@ describe('TicketRunUseCase', () => {
   let buildPromptFn: (context: AssembledContext, agentSpec: AgentSpec) => string;
   let projectChecks: CheckConfig[] | undefined;
   let protectedPaths: string[] | undefined;
+  let generators: GeneratorConfig[] | undefined;
+  let contracts: string[] | undefined;
+  /** What `.aeos/tmp/generators.json` holds. */
+  let generatorStamps: Record<string, string>;
   let projectRepo: ProjectRepository;
   let checksRunner: { run: ReturnType<typeof vi.fn> };
   let checkRegistry: CheckRegistry;
@@ -329,8 +334,11 @@ describe('TicketRunUseCase', () => {
     projectChecks = undefined;
     gateRecords = [];
     protectedPaths = undefined;
+    generators = undefined;
+    contracts = undefined;
+    generatorStamps = {};
     projectRepo = {
-      readExecutorConfig: () => ({ checks: projectChecks, protectedPaths }),
+      readExecutorConfig: () => ({ checks: projectChecks, protectedPaths, generators, contracts }),
     } as unknown as ProjectRepository;
     checksRunner = {
       run: vi
@@ -381,6 +389,12 @@ describe('TicketRunUseCase', () => {
       criteriaCollector as unknown as CriteriaCollector,
       conformanceService as unknown as ConformanceService,
       fileHasher as FileHasher,
+      {
+        read: () => generatorStamps,
+        write: (_projectPath, stamps) => {
+          generatorStamps = stamps;
+        },
+      },
     );
   }
 
@@ -739,6 +753,37 @@ describe('TicketRunUseCase', () => {
         error: expect.stringContaining('bugTrack'),
       });
       expect(executor.run).not.toHaveBeenCalled();
+    });
+    it('halts a fix that touches a contract path: it is a behaviour change, not a bug fix', async () => {
+      contracts = ['db/**'];
+      const changed = [TEST_FILE];
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockImplementation((dir: string) =>
+        dir === PROJECT_PATH ? [...changed] : [],
+      );
+      (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (invocation: ExecutorInvocation) => {
+          if (invocation.bugPhase === 'fix') changed.push('db/schema.sql');
+          return {
+            ok: true,
+            artifactPath: invocation.outputPath,
+            content: invocation.bugPhase === 'reproduce' ? reproduceNotes : notes,
+          };
+        },
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'escalated', reason: 'CONTRACT_CHANGE' });
+      expect((result as { message: string }).message).toContain(
+        'this fix changes a contract; it is a behaviour change, not a bug fix',
+      );
+      expect((result as { message: string }).message).toContain('db/schema.sql');
+      // The reviewer is not asked, and the ticket carries the change for the person who decides.
+      expect(phases()).toEqual(['reproduce', 'fix']);
+      expect(ticketRepo.setContractChange).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, {
+        paths: ['db/schema.sql'],
+        approvedBy: null,
+      });
     });
   });
 
@@ -2697,6 +2742,185 @@ describe('TicketRunUseCase', () => {
 
       expect(result.status).toBe('success');
       expect(restored()).toEqual([]);
+    });
+  });
+  describe('generators and the contract gate', () => {
+    const GENERATOR: GeneratorConfig = {
+      name: 'api',
+      command: 'npm run generate:api',
+      inputs: ['api.yaml'],
+      outputs: ['gen/**'],
+    };
+    // What `git status` would list in the project; committing there clears it.
+    let dirty: string[];
+    /** What ran, in order. */
+    let order: string[];
+    /** What the worker edits as it runs. */
+    let workerTouches: string[];
+    const generatorRecords = (): RunRecord[] =>
+      writtenRuns()
+        .map((run) => run.record)
+        .filter((record) => record.role === 'generator');
+    const projectCommits = (): unknown[][] =>
+      (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (call) => call[0] === PROJECT_PATH,
+      );
+
+    beforeEach(() => {
+      dirty = [];
+      order = [];
+      workerTouches = [];
+      (gitGateway.listFiles as ReturnType<typeof vi.fn>).mockReturnValue(['api.yaml', 'src/a.ts']);
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockImplementation((dir: string) =>
+        dir === PROJECT_PATH ? [...dirty] : [],
+      );
+      (gitGateway.commitFiles as ReturnType<typeof vi.fn>).mockImplementation((dir: string) => {
+        if (dir === PROJECT_PATH) dirty = [];
+      });
+      fileHasher.sha256.mockImplementation((_dir: string, files: string[]) =>
+        Object.fromEntries(files.map((file) => [file, `hash of ${file}`])),
+      );
+      checksRunner.run.mockImplementation(async () => {
+        order.push('generator');
+        dirty.push('gen/client.ts');
+        return { exitCode: 0, durationMs: 5, timedOut: false, outputTail: 'generated' };
+      });
+      (executor.run as ReturnType<typeof vi.fn>).mockImplementation(
+        async (invocation: ExecutorInvocation) => {
+          const isReview = invocation.outputPath.endsWith('-review.md');
+          order.push(isReview ? 'reviewer' : 'worker');
+          if (!isReview) dirty.push(...workerTouches);
+          return {
+            ok: true,
+            artifactPath: invocation.outputPath,
+            content: `${'A '.repeat(60)}\n\n${reviewWith('APPROVED')}`,
+          };
+        },
+      );
+    });
+
+    it('runs a generator whose inputs changed before the worker, and commits what it wrote', async () => {
+      generators = [GENERATOR];
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(order).toEqual(['generator', 'worker', 'reviewer']);
+      expect(checksRunner.run).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'npm run generate:api' }),
+        PROJECT_PATH,
+      );
+      expect(projectCommits()).toEqual([
+        [PROJECT_PATH, [path.join(PROJECT_PATH, 'gen/client.ts')], '[AEOS-1][GENERATED] api'],
+      ]);
+      expect(generatorRecords()).toHaveLength(1);
+      expect(generatorRecords()[0]).toMatchObject({
+        role: 'generator',
+        executor: 'shell',
+        agent: null,
+        brief: null,
+        cost_basis: 'none',
+        exit: 'ok',
+      });
+      expect(generatorStamps).toHaveProperty('api');
+    });
+
+    it('does not run a generator whose inputs are unchanged', async () => {
+      generators = [GENERATOR];
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(checksRunner.run).toHaveBeenCalledTimes(1);
+      expect(generatorRecords()).toHaveLength(1);
+
+      // ...and runs it again once an input's content changes.
+      fileHasher.sha256.mockReturnValue({ 'api.yaml': 'another hash' });
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(checksRunner.run).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not run generators on a column whose worker is not agentic', async () => {
+      generators = [GENERATOR];
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ executorMode: 'artifact' }),
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(checksRunner.run).not.toHaveBeenCalled();
+    });
+
+    it('fails the attempt with the output of a generator that fails, and never runs the worker', async () => {
+      generators = [GENERATOR];
+      checksRunner.run.mockResolvedValue({
+        exitCode: 1,
+        durationMs: 5,
+        timedOut: false,
+        outputTail: 'api.yaml: unknown key "paths2"',
+      });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect((result as { error: string }).error).toContain("Generator 'api' failed");
+      expect((result as { error: string }).error).toContain('api.yaml: unknown key "paths2"');
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(generatorRecords()[0]).toMatchObject({ role: 'generator', exit: 'failed' });
+      // Not stamped: the next run tries again.
+      expect(generatorStamps).toEqual({});
+    });
+
+    it('treats a generator output the worker edits as a protected-path violation', async () => {
+      generators = [GENERATOR];
+      workerTouches = ['gen/client.ts'];
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toMatchObject({ status: 'failed' });
+      expect((result as { error: string }).error).toContain('protected paths');
+      expect((result as { error: string }).error).toContain('gen/client.ts');
+      expect(gitGateway.restoreFiles).toHaveBeenCalledWith(PROJECT_PATH, ['gen/client.ts']);
+    });
+
+    it('marks the ticket with the contract paths the worker changed', async () => {
+      contracts = ['db/schema.sql', 'api/**'];
+      workerTouches = ['src/index.ts', 'db/schema.sql', 'api/v1/openapi.yaml'];
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // The diff is the proposal: the attempt goes on to review.
+      expect(result.status).toBe('success');
+      expect(order).toEqual(['worker', 'reviewer']);
+      expect(ticketRepo.setContractChange).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, {
+        paths: ['api/v1/openapi.yaml', 'db/schema.sql'],
+        approvedBy: null,
+      });
+    });
+
+    it('counts the inputs of a generator as contracts, and adds to what the ticket already carries', async () => {
+      generators = [GENERATOR];
+      workerTouches = ['api.yaml'];
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        runnableTicket({ contractChange: { paths: ['db/schema.sql'], approvedBy: 'GATE-2' } }),
+      );
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      // A new change is not covered by the earlier approval.
+      expect(ticketRepo.setContractChange).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, {
+        paths: ['api.yaml', 'db/schema.sql'],
+        approvedBy: null,
+      });
+    });
+
+    it('leaves a ticket unmarked when its worker touched no contract path', async () => {
+      contracts = ['db/schema.sql'];
+      workerTouches = ['src/index.ts'];
+
+      await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(ticketRepo.setContractChange).not.toHaveBeenCalled();
     });
   });
 });

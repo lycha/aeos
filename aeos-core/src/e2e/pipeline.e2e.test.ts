@@ -7,6 +7,8 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import yaml from 'js-yaml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { outputProblems } from '../cli/contract/contract-output.fixture.js';
+import { loadContract } from '../cli/contract/load-contract.js';
 import type { ConformanceReport } from '../domain/model/conformance-report.js';
 import type { GateRecord } from '../domain/model/gate-record.js';
 import type { RunRecord } from '../domain/model/run-record.js';
@@ -1047,4 +1049,115 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(fs.existsSync(path.join(project.projectPath, generated))).toBe(false);
     expect(failedRun(task).error).toContain(generated);
   });
+  it('runs a generator before an agentic worker, and holds a contract change for a person', async () => {
+    await runCli('install');
+    // Columns advance on their own here, so it is the orchestrator that meets the contract gate.
+    const configFile = path.join(project.aeosHome, 'config.json');
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({ ...JSON.parse(fs.readFileSync(configFile, 'utf-8')), advanceMode: 'auto' }),
+    );
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const git = (cwd: string, ...args: string[]): string =>
+      execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const runsOf = (ticketId: string): RunRecord[] => {
+      const dir = path.join(aeosDir, 'tickets', ticketId, 'runs');
+      return fs
+        .readdirSync(dir)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8')) as RunRecord);
+    };
+
+    // A person declares the project's generator and its contracts.
+    const projectJson = path.join(aeosDir, 'project.json');
+    fs.writeFileSync(
+      projectJson,
+      JSON.stringify({
+        ...JSON.parse(fs.readFileSync(projectJson, 'utf-8')),
+        generators: [
+          {
+            name: 'api',
+            command: 'node generate.cjs',
+            inputs: ['api.yaml'],
+            outputs: ['generated/**'],
+          },
+        ],
+        contracts: ['db/schema.sql'],
+      }),
+    );
+    const specsDir = path.join(aeosDir, 'column-specs');
+    for (const file of fs.readdirSync(specsDir)) {
+      const spec = path.join(specsDir, file);
+      fs.writeFileSync(
+        spec,
+        fs.readFileSync(spec, 'utf-8').replace('advanceMode: manual', 'advanceMode: auto'),
+      );
+    }
+    git(aeosDir, 'add', '-A');
+    git(aeosDir, 'commit', '-m', 'declare the generator and the contracts; advance on sign-off');
+    const inProject = (file: string): string => path.join(project.projectPath, file);
+    fs.writeFileSync(inProject('api.yaml'), 'version: 1\n');
+    fs.writeFileSync(
+      inProject('generate.cjs'),
+      "const fs = require('node:fs');\nfs.mkdirSync('generated', { recursive: true });\nfs.writeFileSync('generated/api.txt', fs.readFileSync('api.yaml', 'utf-8'));\n",
+    );
+    fs.mkdirSync(inProject('db'));
+    fs.writeFileSync(inProject('db/schema.sql'), 'CREATE TABLE t (id);\n');
+    git(project.projectPath, 'add', '-A');
+    git(project.projectPath, 'commit', '-m', 'aeos project init');
+
+    // The epic's decomposition column is the first agentic one: the generator runs there.
+    const epic = await createEpic('An epic');
+    await runCli('ticket', 'approve', epic);
+    const first = await runCli('orchestrator', 'run', epic);
+    expect(first.output).toContain('AWAITING_DECOMPOSITION');
+    expect(fs.readFileSync(inProject('generated/api.txt'), 'utf-8')).toBe('version: 1\n');
+    expect(git(project.projectPath, 'log', '--format=%s')).toContain(`[${epic}][GENERATED] api`);
+    const generatorRuns = runsOf(epic).filter((record) => record.role === 'generator');
+    expect(generatorRuns).toHaveLength(1);
+    expect(generatorRuns[0]).toMatchObject({ executor: 'shell', cost_basis: 'none', exit: 'ok' });
+    expect(validateRunRecord(generatorRuns[0]), JSON.stringify(validateRunRecord.errors)).toBe(
+      true,
+    );
+
+    // A task whose worker edits a declared contract. Its run passes review;
+    // the engine's own advance is what is refused.
+    const task = await createTicket('Migrate the schema', '--parent', epic, '--key', 'T-001');
+    stubWorkerTouches('db/schema.sql');
+    const second = await runCli('orchestrator', 'run', epic);
+    stubWorkerTouches(null);
+    expect(second.output).toContain('NEEDS_HUMAN');
+    expect(second.output).toContain('carries a contract change: db/schema.sql');
+    expect(second.exitCode).toBe(3);
+    expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
+    // The generator's inputs have not changed since: it did not run again.
+    expect(runsOf(task).filter((record) => record.role === 'generator')).toEqual([]);
+    expect((await runCli('ticket', 'show', task)).output).toContain(
+      'Contract change: db/schema.sql (needs approval',
+    );
+
+    // A person without --contract is refused too, and shown the diff.
+    const refused = await runCli('ticket', 'approve', task);
+    expect(refused.exitCode).toBe(3);
+    expect(refused.output).toContain('db/schema.sql');
+    expect(refused.output).toContain('+edited by the stub');
+    const refusedJson = await runCli('ticket', 'approve', task, '--json');
+    expect(
+      outputProblems(loadContract(), 'ticket approve', refusedJson.stdout, refusedJson.exitCode),
+    ).toEqual([]);
+    expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
+
+    // With it, the decision is on record before the ticket moves.
+    expect((await runCli('ticket', 'approve', task, '--contract')).exitCode).toBe(0);
+    expect(ticketState(task).column).toBe('CODE_REVIEW');
+    const gates = gatesIn(project, 'features/feature-sample/gates.yaml').filter(
+      (record) => record.ticket === task,
+    );
+    expect(gates.map((record) => record.gate)).toEqual(['contract', 'column-approval']);
+    expect(gates[0]!.reason).toContain('db/schema.sql');
+    expect((await runCli('ticket', 'show', task)).output).toMatch(
+      /Contract change: db\/schema\.sql \(approved in GATE-\d+\)/,
+    );
+  }, 60_000);
 });

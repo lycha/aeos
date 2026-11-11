@@ -7,6 +7,7 @@ import type { SpecPin } from './spec-pin.js';
 /** The gates this engine records. The schema lists more; their tasks add them. */
 export type GateKind =
   | 'spec'
+  | 'contract'
   | 'column-approval'
   | 'definition-of-done'
   | 'sign-off-override'

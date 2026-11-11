@@ -27,6 +27,7 @@ import { FsProjectRepository } from '../infrastructure/filesystem/fs-project.rep
 import { FsArtefactTree } from '../infrastructure/filesystem/fs-artefact-tree.adapter.js';
 import { PythonDecisionsLint } from '../infrastructure/spec/decisions-lint.adapter.js';
 import { FsFileHasher } from '../infrastructure/filesystem/fs-file-hasher.adapter.js';
+import { FsGeneratorStampStore } from '../infrastructure/filesystem/fs-generator-stamp-store.adapter.js';
 import { FsArtifactStore } from '../infrastructure/filesystem/fs-artifact-store.adapter.js';
 import { FsRunRecordStore } from '../infrastructure/filesystem/fs-run-record-store.adapter.js';
 import { FsGateRecordStore } from '../infrastructure/filesystem/fs-gate-record-store.adapter.js';
@@ -316,6 +317,7 @@ export function createContainer(): Container {
         criteriaCollector,
         newConformanceService(),
         new FsFileHasher(),
+        new FsGeneratorStampStore(),
       );
     },
     get ticketApprove() {

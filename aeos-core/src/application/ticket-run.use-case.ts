@@ -79,6 +79,8 @@ import type { ConformanceService } from './services/conformance.service.js';
 import { parseConformanceVerdicts } from '../domain/services/conformance-verdict-parser.js';
 import { parseRepro } from '../domain/services/repro-parser.js';
 import type { FileHasher } from '../domain/ports/driven/file-hasher.port.js';
+import type { GeneratorStampStore } from '../domain/ports/driven/generator-stamp-store.port.js';
+import type { GeneratorConfig } from '../domain/model/project-executor-config.js';
 import {
   renderReproEvidence,
   reproductionBrief,
@@ -113,6 +115,10 @@ interface RunContext {
   readonly reviewAbsPath: string;
   /** Globs no executor invocation of this run may touch. */
   readonly protectedGlobs: readonly string[];
+  /** Run before an agentic worker, each when its inputs changed. */
+  readonly generators: readonly GeneratorConfig[];
+  /** Globs of the project's contracts: a worker that changes one marks the ticket. */
+  readonly contractGlobs: readonly string[];
   /** The ticket's spec pin (its own or its epic's), written into every run record. */
   readonly specPin: SpecPin | null;
   /**
@@ -190,6 +196,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly criteriaCollector: CriteriaCollector,
     private readonly conformanceService: ConformanceService,
     private readonly fileHasher: FileHasher,
+    private readonly generatorStampStore: GeneratorStampStore,
   ) {}
 
   async execute(
@@ -337,6 +344,8 @@ export class TicketRunUseCase implements TicketRunPort {
       this.emitStageEvent(emitter, 'stage.completed', 'context', 'Context assembled');
 
       const workerExecutor = this.createExecutor(resolvedWorkerAgentSpec);
+      const projectConfig = this.projectRepo.readExecutorConfig(projectPath);
+      const generators = projectConfig?.generators ?? [];
       const artifactFilename = `${ticketId}-${columnSpec.outputArtifact}`;
       const reviewFilename = `${ticketId}-${columnSpec.outputArtifact.replace('.md', '-review.md')}`;
 
@@ -362,9 +371,16 @@ export class TicketRunUseCase implements TicketRunPort {
         artifactAbsPath: path.join(aeosDir, 'tickets', ticketId, artifactFilename),
         reviewFilename,
         reviewAbsPath: path.join(aeosDir, 'tickets', ticketId, reviewFilename),
-        protectedGlobs: protectedGlobs(
-          this.projectRepo.readExecutorConfig(projectPath)?.protectedPaths,
-        ),
+        // An agent builds on generated code and may not edit it.
+        protectedGlobs: protectedGlobs([
+          ...(projectConfig?.protectedPaths ?? []),
+          ...generators.flatMap((generator) => generator.outputs),
+        ]),
+        generators,
+        contractGlobs: [
+          ...(projectConfig?.contracts ?? []),
+          ...generators.flatMap((generator) => generator.inputs),
+        ],
         specPin,
         judging,
         bugTrack: (isBugFix && workerAgentSpec.bugTrack) || null,
@@ -675,6 +691,14 @@ export class TicketRunUseCase implements TicketRunPort {
       );
     }
 
+    // ── Generators ───────────────────────────────────────────────
+    // On the first attempt only: later ones carry the worker's uncommitted
+    // work, which a commit of generated files must not sweep up.
+    if (workerMode === 'agentic' && attempt === 1) {
+      const failure = await this.runGenerators(ctx);
+      if (failure) return failure;
+    }
+
     // ── Bug track: the reproducing test comes first ──────────────
     // Once it has been seen to fail and is committed, every later attempt and
     // run is the fix alone.
@@ -701,7 +725,7 @@ export class TicketRunUseCase implements TicketRunPort {
 
     const worker = await this.invokeWorker(ctx, attempt, workerContext, repro ? 'fix' : undefined);
     if ('kind' in worker) return worker;
-    const { run, content } = worker;
+    const { run, content, contractPaths } = worker;
 
     // The fix may not weaken the test it has to pass.
     if (repro) {
@@ -804,6 +828,23 @@ export class TicketRunUseCase implements TicketRunPort {
       },
     });
 
+    // ── Bug track: a fix does not change a contract ──────────────
+    // The work is committed and the ticket marked; whether this is a bug fix
+    // at all is a person's call, so the reviewer is not asked.
+    if (repro && contractPaths.length > 0) {
+      const message = `${ticketId}: this fix changes a contract; it is a behaviour change, not a bug fix (${contractPaths.join(', ')}). To accept it as one, \`aeos ticket sign-off ${ticketId} --reason "<why>"\` and then \`aeos ticket approve ${ticketId} --contract\`; otherwise re-file it as a feature.`;
+      this.emitStageEvent(emitter, 'stage.failed', 'validation', message);
+      return {
+        kind: 'escalated',
+        escalation: {
+          reason: EscalationReason.CONTRACT_CHANGE,
+          message,
+          attempt,
+          artifactPath: ctx.artifactAbsPath,
+        },
+      };
+    }
+
     // ── Final gate: one verdict for each criterion asked about ───
     // Never coerced: a judgement that cannot be read is a person's to sort out.
     if (ctx.judging) {
@@ -858,6 +899,63 @@ export class TicketRunUseCase implements TicketRunPort {
   }
 
   /**
+   * Runs each generator whose inputs differ from those of its last run here,
+   * records the run, and commits what it wrote to the project as
+   * `[<ticket>][GENERATED] <name>`. Returns the failure of the first that fails.
+   */
+  private async runGenerators(ctx: RunContext): Promise<AttemptOutcome | null> {
+    const { ticketId, projectPath } = ctx;
+    for (const generator of ctx.generators) {
+      const files = new Set([
+        ...this.gitGateway.listFiles(projectPath, 'HEAD', '.'),
+        ...this.gitGateway.changedFiles(projectPath),
+      ]);
+      const inputs = findViolations([...files].sort(), generator.inputs);
+      const hash = createHash('sha256')
+        .update(JSON.stringify(this.fileHasher.sha256(projectPath, inputs)))
+        .digest('hex');
+      const stamps = this.generatorStampStore.read(projectPath);
+      if (stamps[generator.name] === hash) continue;
+
+      const stage = await this.performChecks(
+        ctx,
+        1,
+        [this.checkRegistry.generatorCheck(generator)],
+        'shell',
+        () => null,
+        'generator',
+      );
+      this.gitGateway.commitFiles(
+        ctx.aeosDir,
+        stage.files,
+        `[${ticketId}][RUN][${stage.runId}][generator][${stage.record.exit}]`,
+      );
+      if (stage.failed) {
+        const error = `${stage.record.error}:\n${stage.failed.outputTail}`;
+        this.emitStageEvent(ctx.emitter, 'stage.failed', 'checks', error);
+        return { kind: 'failed', error };
+      }
+
+      // shortcut: an output the generator deleted is not committed here
+      // (commitFiles takes files that exist); the worker's diff carries it.
+      const written = this.fileHasher.sha256(
+        projectPath,
+        findViolations(this.gitGateway.changedFiles(projectPath), generator.outputs),
+      );
+      this.gitGateway.commitFiles(
+        projectPath,
+        Object.keys(written)
+          .filter((file) => written[file] !== null)
+          .map((file) => path.join(projectPath, file)),
+        `[${ticketId}][GENERATED] ${generator.name}`,
+      );
+      this.generatorStampStore.write(projectPath, { ...stamps, [generator.name]: hash });
+      this.emitStageEvent(ctx.emitter, 'stage.completed', 'checks', `Generated ${generator.name}`);
+    }
+    return null;
+  }
+
+  /**
    * One invocation of the column's worker: brief, run, protected paths, cost.
    * Returns the run and what it wrote, or how the attempt ends. A bug's
    * implementation calls it twice, once per phase, each with its instruction.
@@ -867,7 +965,7 @@ export class TicketRunUseCase implements TicketRunPort {
     attempt: number,
     context: AssembledContext,
     bugPhase?: 'reproduce' | 'fix',
-  ): Promise<{ run: InvokedRun; content: string } | AttemptOutcome> {
+  ): Promise<{ run: InvokedRun; content: string; contractPaths: string[] } | AttemptOutcome> {
     const { emitter, ticketId, projectPath, projectId, workerMode, column } = ctx;
     const prompt = this.buildPromptFn(
       context,
@@ -997,7 +1095,25 @@ export class TicketRunUseCase implements TicketRunPort {
       mode: workerMode,
     });
 
-    return { run, content: executorResult.content ?? '' };
+    // A contract path is not protected: the diff is the proposal. The ticket
+    // carries it to the approval, where a person decides.
+    const contractPaths =
+      ctx.contractGlobs.length > 0
+        ? findViolations(
+            [...this.changedPaths(ctx)].filter((file) => !beforeWorker.has(file)),
+            ctx.contractGlobs,
+          )
+        : [];
+    if (contractPaths.length > 0) {
+      const carried = this.ticketRepo.findById(projectId, ticketId)?.contractChange?.paths ?? [];
+      this.ticketRepo.setContractChange(projectId, ticketId, {
+        paths: [...new Set([...carried, ...contractPaths])].sort(),
+        // What was approved before does not cover what changed since.
+        approvedBy: null,
+      });
+    }
+
+    return { run, content: executorResult.content ?? '', contractPaths };
   }
 
   /** The record of a reproduction this ticket already has, if any. */
@@ -1238,6 +1354,7 @@ export class TicketRunUseCase implements TicketRunPort {
     checks: readonly Check[],
     executor: 'shell' | 'in-process',
     outputOf: (failed: CheckResult | undefined, last: CheckResult) => string | null,
+    role: 'checks' | 'generator' = 'checks',
   ): Promise<{
     results: CheckResult[];
     failed: CheckResult | undefined;
@@ -1247,7 +1364,13 @@ export class TicketRunUseCase implements TicketRunPort {
     files: string[];
   }> {
     const { emitter, ticketId, projectPath } = ctx;
-    this.emitStageEvent(emitter, 'stage.started', 'checks', `Running ${checks.length} check(s)`);
+    const isGenerator = role === 'generator';
+    this.emitStageEvent(
+      emitter,
+      'stage.started',
+      'checks',
+      isGenerator ? `Running generator ${checks[0]!.name}` : `Running ${checks.length} check(s)`,
+    );
 
     const startedAt = new Date();
     const results: CheckResult[] = [];
@@ -1282,7 +1405,7 @@ export class TicketRunUseCase implements TicketRunPort {
       project: ctx.projectId,
       ticket: ticketId,
       column: ctx.column,
-      role: 'checks',
+      role,
       agent: null,
       attempt,
       executor,
@@ -1291,7 +1414,7 @@ export class TicketRunUseCase implements TicketRunPort {
       brief: null,
       output,
       transcript: runRecordPaths(ticketId, runId).transcript,
-      verdict: failed ? 'CHECKS_FAILED' : 'CHECKS_PASSED',
+      verdict: isGenerator ? null : failed ? 'CHECKS_FAILED' : 'CHECKS_PASSED',
       started_at: startedAt.toISOString(),
       ended_at: endedAt.toISOString(),
       duration_ms: endedAt.getTime() - startedAt.getTime(),
@@ -1300,7 +1423,9 @@ export class TicketRunUseCase implements TicketRunPort {
       cost_usd: 0,
       cost_basis: 'none',
       spec_pin: ctx.specPin,
-      error: failed ? `Check '${failed.name}' ${describe(failed)}` : null,
+      error: failed
+        ? `${isGenerator ? 'Generator' : 'Check'} '${failed.name}' ${describe(failed)}`
+        : null,
     };
     const files = this.runRecordStore.write(projectPath, record, {
       transcript: results

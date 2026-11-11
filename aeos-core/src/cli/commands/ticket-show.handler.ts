@@ -62,6 +62,17 @@ export const ticketShow: Handlers['ticketShow'] = async ({ id }, _options, conte
     out.push(`PR:     ${result.ticket.prUrl}`);
   }
 
+  const contractChange = result.ticket.contractChange;
+  if (contractChange) {
+    out.push(
+      `Contract change: ${contractChange.paths.join(', ')} (${
+        contractChange.approvedBy
+          ? `approved in ${contractChange.approvedBy}`
+          : `needs approval: aeos ticket approve ${result.ticket.id} --contract`
+      })`,
+    );
+  }
+
   // The whole point of ESCALATED/BLOCKED is "a human must look" — so tell the
   // human why, right here, instead of making them open the review artifact.
   const escalation = result.ticket.escalation;

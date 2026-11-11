@@ -32,6 +32,8 @@ export const EscalationReason = {
   PRE_WORKER_CHECK_FAILED: 'PRE_WORKER_CHECK_FAILED',
   /** A bug's reproduce phase named no command to run its test with. */
   UNPARSEABLE_REPRO: 'UNPARSEABLE_REPRO',
+  /** A bug's fix changed a contract path: a behaviour change, which a person decides on. */
+  CONTRACT_CHANGE: 'CONTRACT_CHANGE',
   /** An epic from before spec pins: it has no spec to be reviewed against. */
   SPEC_REQUIRED: 'SPEC_REQUIRED',
 } as const;

@@ -90,6 +90,8 @@ class StubTicketRepository implements TicketRepository {
 
   setSpecCommit(): void {}
 
+  setContractChange(): void {}
+
   setEscalation(projectId: string, ticketId: string, escalation: Ticket['escalation']): void {
     const ticket = this.findById(projectId, ticketId);
     if (ticket) {

@@ -6,7 +6,7 @@ import { withColumnLabels } from '../../domain/services/column-labels.js';
 
 export const ticketApprove: Handlers['ticketApprove'] = async (
   { id: ticketId },
-  _options,
+  options,
   context,
 ) => {
   const { projectPath } = context;
@@ -14,7 +14,9 @@ export const ticketApprove: Handlers['ticketApprove'] = async (
   const project = context.container.projectRepo.read(projectPath);
   const labels = context.container.columnLabels(projectPath);
 
-  const result = context.container.ticketApprove.execute(project.id, projectPath, ticketId);
+  const result = context.container.ticketApprove.execute(project.id, projectPath, ticketId, {
+    contract: options.contract === true,
+  });
 
   switch (result.status) {
     case 'advanced':

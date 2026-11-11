@@ -32,6 +32,7 @@ function createMockTicketRepo(): TicketRepository {
     setEscalation: vi.fn(),
     setPrUrl: vi.fn(),
     setSpecCommit: vi.fn(),
+    setContractChange: vi.fn(),
   };
 }
 
@@ -835,5 +836,102 @@ describe('TicketApproveUseCase — pull requests', () => {
 
     expect(pr.prGateway.create).not.toHaveBeenCalled();
     expect(gitGateway.push).not.toHaveBeenCalled();
+  });
+  describe('the contract gate', () => {
+    const PATHS = ['cli-contract.yaml', 'db/schema.sql'];
+    const carrying = (approvedBy: string | null = null): Ticket => ({
+      ...signedOffTicket('IMPLEMENTATION'),
+      kind: 'TASK',
+      parentId: 'AEOS-9',
+      contractChange: { paths: PATHS, approvedBy },
+    });
+
+    it('refuses a ticket that carries a contract change, and prints the paths and their diff', () => {
+      approving(carrying());
+      (gitGateway.diff as ReturnType<typeof vi.fn>).mockReturnValue('+ALTER TABLE tickets');
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('error');
+      const { error } = result as { error: string };
+      expect(error).toContain('carries a contract change: cli-contract.yaml, db/schema.sql');
+      expect(error).toContain(`aeos ticket approve ${TICKET_ID} --contract`);
+      expect(error).toContain('+ALTER TABLE tickets');
+      expect(gitGateway.diff).toHaveBeenCalledWith(PROJECT_PATH, PATHS);
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it('with --contract, records a contract gate naming the paths before the ticket advances', () => {
+      approving(carrying());
+      gateRecorder.record
+        .mockReturnValueOnce({ id: 'GATE-4' })
+        .mockReturnValueOnce({ id: 'GATE-5' });
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { contract: true });
+
+      expect(result).toMatchObject({ status: 'advanced', gateRecordId: 'GATE-5' });
+      expect(gateRecorder.record.mock.calls.map((call) => call[2])).toEqual([
+        {
+          gate: 'contract',
+          verdict: 'approved',
+          reason: 'Contract change: cli-contract.yaml, db/schema.sql',
+        },
+        expect.objectContaining({ gate: 'column-approval' }),
+      ]);
+      expect(ticketRepo.setContractChange).toHaveBeenCalledWith(PROJECT_ID, TICKET_ID, {
+        paths: PATHS,
+        approvedBy: 'GATE-4',
+      });
+      expect(order(gateRecorder.record)).toBeLessThan(order(stateMachine.transition));
+    });
+
+    it('asks once: a change already approved at the contract gate advances without the flag', () => {
+      approving(carrying('GATE-4'));
+
+      expect(useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID).status).toBe('advanced');
+      expect(gateRecorder.record).toHaveBeenCalledTimes(1);
+      expect(ticketRepo.setContractChange).not.toHaveBeenCalled();
+    });
+
+    it('never lets the engine through: an auto advance is refused, whatever it passes', () => {
+      approving(carrying());
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, {
+        byEngine: true,
+        contract: true,
+      });
+
+      expect(result.status).toBe('error');
+      expect((result as { error: string }).error).toContain('carries a contract change');
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+    });
+
+    it('lists the contract changes of a ticket and of its tasks in the pull request body', () => {
+      approving({
+        ...epicAtIntegrationReview(),
+        contractChange: null,
+      });
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue([
+        { ...carrying('GATE-4'), id: 'AEOS-2' },
+        { ...signedOffTicket('DONE'), id: 'AEOS-3', kind: 'TASK' },
+      ]);
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const { body } = pr.prGateway.create.mock.calls[0]![0] as { body: string };
+      expect(body).toContain('## Contract changes');
+      expect(body).toContain('- `cli-contract.yaml` (AEOS-2, approved in GATE-4)');
+      expect(body).toContain('- `db/schema.sql` (AEOS-2, approved in GATE-4)');
+    });
+
+    it('has no contract section in the body of a pull request that changes none', () => {
+      approving(epicAtIntegrationReview());
+
+      useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      const { body } = pr.prGateway.create.mock.calls[0]![0] as { body: string };
+      expect(body).not.toContain('Contract changes');
+    });
   });
 });

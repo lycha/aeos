@@ -322,6 +322,31 @@ describe('exit codes', () => {
     expect(text.out.join('\n')).toContain('ready to leave Tech spec, but');
   });
 
+  it('ticket approve: a contract change without --contract is needs_human; --contract reaches the use case', async () => {
+    const execute = vi.fn().mockReturnValue({
+      status: 'error',
+      ticketId: 'AEOS-1',
+      error: 'Ticket AEOS-1 carries a contract change: cli-contract.yaml. A person approves it.',
+    });
+
+    const refused = await cli({ ticketApprove: { execute } }, [
+      'ticket',
+      'approve',
+      'AEOS-1',
+      '--json',
+    ]);
+
+    expect(refused.exit).toBe(3);
+    expect(refused.envelope()).toMatchObject({
+      ok: false,
+      error: { code: 'CONTRACT_APPROVAL_REQUIRED' },
+    });
+    expect(execute).toHaveBeenLastCalledWith('proj-1', '/test', 'AEOS-1', { contract: false });
+
+    await cli({ ticketApprove: { execute } }, ['ticket', 'approve', 'AEOS-1', '--contract']);
+    expect(execute).toHaveBeenLastCalledWith('proj-1', '/test', 'AEOS-1', { contract: true });
+  });
+
   it('a missing required argument is usage', async () => {
     const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const out: string[] = [];

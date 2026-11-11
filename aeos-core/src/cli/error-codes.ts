@@ -22,6 +22,7 @@ export const ErrorCode = {
   ALREADY_DONE: 'ALREADY_DONE',
   REASON_REQUIRED: 'REASON_REQUIRED',
   PIPELINE_CHANGE_IN_FLIGHT: 'PIPELINE_CHANGE_IN_FLIGHT',
+  CONTRACT_APPROVAL_REQUIRED: 'CONTRACT_APPROVAL_REQUIRED',
   PULL_REQUEST_FAILED: 'PULL_REQUEST_FAILED',
   COST_UNKNOWN: 'COST_UNKNOWN',
   // Why a ticket ended FAILED (the list docs/tasks/archive/M7-005 planned).
@@ -42,6 +43,7 @@ interface Classified {
 // the wording, first match wins. Upgrade when the use cases return codes.
 const BY_WORDING: readonly (readonly [RegExp, ErrorCode, Situation?, T.Error['resource']?])[] = [
   [/changed while tickets are in flight/, 'PIPELINE_CHANGE_IN_FLIGHT', 'gate-refused'],
+  [/carries a contract change/, 'CONTRACT_APPROVAL_REQUIRED', 'gate-refused'],
   [/needs --reason/, 'REASON_REQUIRED', 'gate-refused'],
   [/needs a written reason/, 'REASON_REQUIRED', 'usage'],
   [/python3 is not on PATH|python3 modules/, 'RESOURCE_MISSING', 'missing-resource', 'python'],

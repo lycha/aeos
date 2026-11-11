@@ -266,6 +266,7 @@ export function registerGenerated(
     .command('approve')
     .description('Advance a SIGNED_OFF ticket to the next pipeline column')
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
+    .option('--contract', 'Also approve the contract or schema change this ticket carries')
     .option('--json', 'Write one JSON envelope to stdout instead of text')
     .action((id: string, options: T.TicketApproveOptions) =>
       run(resources, setExit, 'ticketApprove', 'ticket approve', options, [

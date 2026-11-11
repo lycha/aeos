@@ -114,6 +114,32 @@ describe('the ticket show handler', () => {
     expect(consoleSpy).toHaveBeenCalledWith('  • AEOS-1-prd.md');
   });
 
+  it('shows a contract change and whether a person has approved it', async () => {
+    const shown = createMockTicketShowUseCase().execute({
+      projectId: 'proj-1',
+      ticketId: 'AEOS-1',
+      projectPath: '/test',
+    }) as unknown as { ticket: Record<string, unknown> };
+    const carrying = (approvedBy: string | null): void => {
+      (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...shown,
+        ticket: { ...shown.ticket, contractChange: { paths: ['db/schema.sql'], approvedBy } },
+      });
+    };
+
+    carrying(null);
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+    expect(consoleSpy.mock.calls.flat().join('\n')).toContain(
+      'Contract change: db/schema.sql (needs approval: aeos ticket approve AEOS-1 --contract)',
+    );
+
+    carrying('GATE-3');
+    await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
+    expect(consoleSpy.mock.calls.flat().join('\n')).toContain(
+      'Contract change: db/schema.sql (approved in GATE-3)',
+    );
+  });
+
   it('shows the pull request URL once one is recorded, and no line before that', async () => {
     await program.parseAsync(['node', 'aeos', 'ticket', 'show', 'AEOS-1']);
     expect(consoleSpy.mock.calls.flat().join('\n')).not.toContain('PR:');

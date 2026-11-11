@@ -316,6 +316,7 @@ Advance a SIGNED_OFF ticket to the next pipeline column
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--contract` | Also approve the contract or schema change this ticket carries |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `git_repo`.

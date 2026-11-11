@@ -34,6 +34,7 @@ const LANDED = [
   'ticket create --spec',
   'ticket create --bug',
   'ticket create --implements',
+  'ticket approve --contract',
   'ticket sign-off --reason',
   'ticket move --reason',
   'ticket dod-approve --reason',

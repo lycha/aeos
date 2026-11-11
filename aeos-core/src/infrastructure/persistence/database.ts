@@ -252,6 +252,15 @@ CREATE TABLE IF NOT EXISTS pipeline_state (
 );`);
     },
   },
+  {
+    version: 14,
+    description: 'The contract paths a ticket changed, and the gate that approved them',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'contract_change')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN contract_change TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

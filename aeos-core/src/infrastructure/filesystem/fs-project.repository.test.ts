@@ -243,6 +243,40 @@ describe('FsProjectRepository.readExecutorConfig()', () => {
     );
   });
 
+  it('returns generators and contracts, and throws when either is malformed', () => {
+    const write = (config: object): void => {
+      fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.aeos', 'project.json'),
+        JSON.stringify({ id: 'my-project', ...config }),
+        'utf-8',
+      );
+    };
+    const generators = [
+      {
+        name: 'cli',
+        command: 'npm run generate:cli',
+        inputs: ['cli-contract.yaml'],
+        outputs: ['src/cli/generated/**'],
+      },
+    ];
+
+    write({ generators, contracts: ['db/schema.sql'] });
+    expect(repo.readExecutorConfig(tmpDir)).toMatchObject({
+      generators,
+      contracts: ['db/schema.sql'],
+    });
+
+    write({ generators: [{ name: 'cli', command: 'npm run generate:cli' }] });
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "generators" in .aeos\/project.json/,
+    );
+    write({ contracts: 'db/**' });
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "contracts" in .aeos\/project.json/,
+    );
+  });
+
   it('throws on a pullRequests setting that is not { enabled: boolean }', () => {
     fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
     const write = (pullRequests: unknown): void =>

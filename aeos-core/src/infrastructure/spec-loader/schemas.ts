@@ -60,6 +60,19 @@ export const ProjectChecksSchema = z.array(
 /** The `protectedPaths` list of `.aeos/project.json`. */
 export const ProjectProtectedPathsSchema = z.array(z.string().min(1));
 
+/** The `generators` list of `.aeos/project.json`. */
+export const ProjectGeneratorsSchema = z.array(
+  z.object({
+    name: z.string().min(1),
+    command: z.string().min(1),
+    inputs: z.array(z.string().min(1)).min(1),
+    outputs: z.array(z.string().min(1)).min(1),
+  }),
+);
+
+/** The `contracts` list of `.aeos/project.json`. */
+export const ProjectContractsSchema = z.array(z.string().min(1));
+
 /** The `criteria` object of `.aeos/project.json`. */
 export const ProjectCriteriaSchema = z.looseObject({
   testGlobs: z.array(z.string().min(1)).optional(),

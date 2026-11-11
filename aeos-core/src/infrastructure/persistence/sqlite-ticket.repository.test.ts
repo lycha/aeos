@@ -156,4 +156,15 @@ describe('SqliteTicketRepository — spec pin', () => {
       path: 'features/checkout',
     });
   });
+  it('round-trips a contract change; a ticket with none reads back null', () => {
+    repo.save(ticket({ kind: 'TASK' }));
+    expect(repo.findById('p', 'AEOS-1')?.contractChange).toBeNull();
+
+    const change = { paths: ['cli-contract.yaml', 'db/schema.sql'], approvedBy: null };
+    repo.setContractChange('p', 'AEOS-1', change);
+    expect(repo.findById('p', 'AEOS-1')?.contractChange).toEqual(change);
+
+    repo.setContractChange('p', 'AEOS-1', { ...change, approvedBy: 'GATE-2' });
+    expect(repo.findByProject('p')[0]?.contractChange?.approvedBy).toBe('GATE-2');
+  });
 });

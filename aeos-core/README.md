@@ -465,6 +465,30 @@ Add project paths with `protectedPaths` in `.aeos/project.json`; the list can on
 
 Globs are relative to the project root: `*` matches within one path segment, `**` any number of segments. Detection is a diff after the run, so it works for every executor; it does not stop the write or any read. Two limits: a protected file that already had uncommitted changes before the run is not checked (commit `.aeos/` edits before running), and two runs in the same project at the same time can be blamed for each other's writes.
 
+### Generators and the contract gate
+
+Two more lists in `.aeos/project.json`, both the operator's to write:
+
+```json
+{
+  "generators": [
+    { "name": "cli", "command": "npm run generate:cli",
+      "inputs": ["cli-contract.yaml"], "outputs": ["src/cli/generated/**"] }
+  ],
+  "contracts": ["src/infrastructure/persistence/database.ts"]
+}
+```
+
+**Generators.** Before the worker of a column with `executorMode: agentic`, AEOS hashes the files each generator's `inputs` match. When the hash differs from the one of its last run in this working copy (`.aeos/tmp/generators.json`), the command runs in the project root (ten-minute limit), what it wrote under `outputs` is committed as `[<ticket>][GENERATED] <name>`, and the worker starts on a scaffold that already matches the contract. A generator that fails fails the attempt with its output, and the worker never runs. Every invocation leaves a run record (`role: generator`, `executor: shell`, `cost_basis: none`). Every generator's `outputs` are protected paths for the run. Files a generator writes outside its `outputs` are not committed by the engine.
+
+**Contracts.** `contracts` are the paths a person must approve a change to; generator `inputs` are contracts without being listed. A contract path is not a protected path: a ticket may change one, and its diff is the proposal. When a worker's run changes one (the same before/after comparison as protected paths, which still win: a path on both lists is restored and the attempt fails), the run continues to review and the ticket is marked with the paths, which `aeos ticket show` prints. Then:
+
+- `aeos ticket approve <id>` is refused (exit `3`, `CONTRACT_APPROVAL_REQUIRED`) and prints the paths and their diff.
+- `aeos ticket approve <id> --contract` writes a `contract` gate record naming the paths, then approves as usual. One approval covers the ticket's later columns; a later run that changes another contract path asks again.
+- The orchestrator never passes `--contract`: an auto-advancing column halts `NEEDS_HUMAN` on such a ticket.
+- A bug (`ticket create --bug`) whose fix touches a contract path ends `ESCALATED` (`CONTRACT_CHANGE`): "this fix changes a contract; it is a behaviour change, not a bug fix". Sign it off and approve it with `--contract`, or re-file it.
+- The pull request body lists the contract paths the ticket and its tasks changed.
+
 ### Project-level executor defaults
 
 You can set a project-level default executor and model in `.aeos/project.json`:
@@ -722,6 +746,7 @@ Advance a SIGNED_OFF ticket to the next pipeline column
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
+| `--contract` | Also approve the contract or schema change this ticket carries |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `git_repo`.

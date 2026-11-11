@@ -9,7 +9,25 @@ export interface CheckConfig {
   readonly timeoutSeconds: number;
 }
 
+/** One entry of the `generators` list in `.aeos/project.json`. */
+export interface GeneratorConfig {
+  readonly name: string;
+  readonly command: string;
+  /** Globs. The generator runs when the content of what they match has changed. */
+  readonly inputs: readonly string[];
+  /** Globs of what the command writes: committed by the engine, protected from agents. */
+  readonly outputs: readonly string[];
+}
+
 export interface ProjectExecutorConfig extends Project {
+  /** Run before the worker of an agentic column, each when its inputs changed. */
+  readonly generators?: readonly GeneratorConfig[];
+  /**
+   * Globs of the project's hard contracts. Not protected: a ticket may change
+   * one, and then needs a person's `ticket approve --contract`. Generator
+   * `inputs` are contracts without being listed.
+   */
+  readonly contracts?: readonly string[];
   /** Run in this order before the reviewer, on columns with `runChecks`. */
   readonly checks?: readonly CheckConfig[];
   /** Globs no agent may touch, added to the built-in protected paths. */

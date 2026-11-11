@@ -40,6 +40,12 @@ export interface PullRequestBodyInput {
   readonly specPin?: SpecPin | null;
   /** The content of a bug's `<ticket>-repro.md`: the test red, then green. */
   readonly repro?: string | null;
+  /** Every contract path the ticket or one of its tasks changed. */
+  readonly contractChanges?: readonly {
+    readonly path: string;
+    readonly ticketId: string;
+    readonly approvedBy: string | null;
+  }[];
 }
 
 export function buildPullRequestBody(input: PullRequestBodyInput): string {
@@ -82,6 +88,19 @@ export function buildPullRequestBody(input: PullRequestBodyInput): string {
           '',
           // Under its own heading here; the link to its run means nothing on the code host.
           input.repro.replace(/^# .*\n+/, '').replace(/\n*<!-- AEOS-RUN: \S+ -->\s*$/, ''),
+          '',
+        ]
+      : []),
+    ...(input.contractChanges?.length
+      ? [
+          '## Contract changes',
+          '',
+          'This pull request changes declared contracts. Each was approved by a person at the contract gate.',
+          '',
+          ...input.contractChanges.map(
+            (change) =>
+              `- \`${change.path}\` (${change.ticketId}, approved ${change.approvedBy ? `in ${change.approvedBy}` : 'with this approval'})`,
+          ),
           '',
         ]
       : []),

@@ -28,9 +28,9 @@ let workerTouch: string | null = null;
 /**
  * From now until the project is cleaned up, every stub worker run also edits
  * this file, as an agent straying outside its task would. A relative path
- * resolves against the run's working directory.
+ * resolves against the run's working directory. `null` stops it.
  */
-export function stubWorkerTouches(file: string): void {
+export function stubWorkerTouches(file: string | null): void {
   workerTouch = file;
 }
 

@@ -20,11 +20,13 @@ export interface TicketApprovePort {
   /**
    * `byEngine`: the orchestrator advancing an `advanceMode: auto` column. That
    * is not a human decision, so no gate record is written for it.
+   * `contract`: the person also approves the contract change the ticket
+   * carries (`--contract`). The engine cannot.
    */
   execute(
     projectId: string,
     projectPath: string,
     ticketId: string,
-    options?: { byEngine?: boolean },
+    options?: { byEngine?: boolean; contract?: boolean },
   ): TicketApproveResult;
 }

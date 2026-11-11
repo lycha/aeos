@@ -3,6 +3,7 @@
 // Checks that run before the worker are built in, not configured.
 
 import type { Check } from '../../domain/model/check.js';
+import type { GeneratorConfig } from '../../domain/model/project-executor-config.js';
 import type { ChecksRunner } from '../../domain/ports/driven/checks-runner.port.js';
 import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
 import type { ColumnRole } from '../../domain/model/column-spec.js';
@@ -14,6 +15,9 @@ import type { CriteriaCollector } from '../services/criteria-collector.js';
 import { CriteriaTraceCheck } from './criteria-trace.check.js';
 import { ReproCheck } from './repro-check.js';
 import { ShellCheck } from './shell-check.js';
+
+// A generator has no timeout of its own in `project.json`; ten minutes bounds a hung one.
+const GENERATOR_TIMEOUT = 600;
 
 export class CheckRegistry {
   private readonly registered: Check[] = [];
@@ -32,6 +36,14 @@ export class CheckRegistry {
   checksFor(projectPath: string): Check[] {
     const configured = this.projectRepo.readExecutorConfig(projectPath)?.checks ?? [];
     return [...configured.map((config) => new ShellCheck(config, this.runner)), ...this.registered];
+  }
+
+  /** A generator's command, run as a check is: it passes when the command exits zero. */
+  generatorCheck(generator: GeneratorConfig): Check {
+    return new ShellCheck(
+      { name: generator.name, command: generator.command, timeoutSeconds: GENERATOR_TIMEOUT },
+      this.runner,
+    );
   }
 
   /** The run of a bug's reproducing test, expected to fail (`red`) or to pass (`green`). */
