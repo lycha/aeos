@@ -3,6 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Ajv2020 } from 'ajv/dist/2020.js';
+import * as yaml from 'js-yaml';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { FsProjectRepository } from './fs-project.repository.js';
@@ -30,6 +32,29 @@ describe('artefact schemas', () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("the harvest skill's worked inventory example validates against the schema", () => {
+    const example = fs.readFileSync(
+      path.join(plugin, 'skills', 'prototype-harvest', 'references', 'inventory-example.md'),
+      'utf-8',
+    );
+    const validate = new Ajv2020({
+      allErrors: true,
+      // shortcut: one format in use, so a pattern instead of the ajv-formats package.
+      formats: { 'date-time': /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/ },
+    }).compile(
+      JSON.parse(
+        fs.readFileSync(path.join(plugin, 'schemas', 'feature-inventory.schema.json'), 'utf-8'),
+      ) as object,
+    );
+
+    // js-yaml reads a bare timestamp as a Date; the schema wants the string.
+    const inventory = yaml.load(/```yaml\n([\s\S]*?)```/.exec(example)![1]!, {
+      schema: yaml.JSON_SCHEMA,
+    });
+
+    expect(validate(inventory), JSON.stringify(validate.errors, null, 2)).toBe(true);
   });
 
   it('ships a copy in templates/schemas that matches the plugin (run `npm run build` to refresh)', () => {
