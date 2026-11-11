@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { templatePipelines } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TicketRunUseCase } from './ticket-run.use-case.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
@@ -396,6 +397,7 @@ describe('TicketRunUseCase', () => {
           generatorStamps = stamps;
         },
       },
+      { load: () => templatePipelines() },
     );
   }
 
@@ -1680,6 +1682,22 @@ describe('TicketRunUseCase', () => {
     const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
     expect(result.status).toBe('failed');
+  });
+
+  it.each([
+    ['EPIC', 'SPEC_REVIEW'],
+    ['TASK', 'IMPLEMENTATION'],
+  ] as const)("names a %s's own first column when it is still in BACKLOG", async (kind, first) => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      runnableTicket({ kind, column: 'BACKLOG' }),
+    );
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: `Ticket ${TICKET_ID} is in BACKLOG. Run 'aeos ticket approve ${TICKET_ID}' to advance to ${first} first.`,
+    });
   });
 
   it('should return failed for DOD_GATE column', async () => {

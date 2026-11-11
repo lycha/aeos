@@ -55,7 +55,7 @@ export const ticketRun: Handlers['ticketRun'] = async ({ id: ticketId }, options
     // No ticket, so nothing ran.
     const message = result.status === 'failed' ? result.error : `Ticket ${ticketId} not found`;
     return stopped('error', classify(message).code, message, {
-      text: `✗ Ticket ${result.ticketId} failed: ${message}`,
+      text: `✗ Ticket ${result.ticketId} failed: ${withColumnLabels(message, labels)}`,
     });
   }
 
@@ -114,7 +114,11 @@ export const ticketRun: Handlers['ticketRun'] = async ({ id: ticketId }, options
         { subState: interrupted ? 'INTERRUPTED' : 'FAILED' },
         interrupted ? 'INTERRUPTED' : classify(result.error).code,
         result.error,
-        { data, text: `✗ Ticket ${result.ticketId} failed: ${result.error}`, warnings },
+        {
+          data,
+          text: `✗ Ticket ${result.ticketId} failed: ${withColumnLabels(result.error, labels)}`,
+          warnings,
+        },
       );
     }
     case 'escalated': {

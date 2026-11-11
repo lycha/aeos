@@ -318,6 +318,7 @@ export function createContainer(): Container {
         newConformanceService(),
         new FsFileHasher(),
         new FsGeneratorStampStore(),
+        newPipelineLoader(),
       );
     },
     get ticketApprove() {

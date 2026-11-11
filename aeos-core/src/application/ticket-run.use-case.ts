@@ -61,7 +61,8 @@ import type { ReviewVerdict } from '../domain/model/review-verdict.js';
 import type { Escalation } from '../domain/model/escalation.js';
 import { EscalationReason } from '../domain/model/escalation.js';
 import { buildEscalationDocument, escalationFilename } from './services/escalation-document.js';
-import { Column } from '../domain/model/column.js';
+import { Column, nextColumnFor } from '../domain/model/column.js';
+import type { PipelineLoader } from '../domain/ports/driven/pipeline-loader.port.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import { validateOutput } from '../domain/services/output-validation.js';
@@ -197,6 +198,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly conformanceService: ConformanceService,
     private readonly fileHasher: FileHasher,
     private readonly generatorStampStore: GeneratorStampStore,
+    private readonly pipelineLoader: PipelineLoader,
   ) {}
 
   async execute(
@@ -211,7 +213,7 @@ export class TicketRunUseCase implements TicketRunPort {
     this.interruptStage = undefined;
 
     try {
-      const eligibility = this.checkEligibility(projectId, ticketId);
+      const eligibility = this.checkEligibility(projectId, projectPath, ticketId);
       if (!eligibility.ok) return eligibility.result;
       let mirroredTicket = eligibility.ticket;
 
@@ -1783,6 +1785,7 @@ export class TicketRunUseCase implements TicketRunPort {
 
   private checkEligibility(
     projectId: string,
+    projectPath: string,
     ticketId: string,
   ): { ok: true; ticket: Ticket } | { ok: false; result: TicketRunResult } {
     const ticket = this.ticketRepo.findById(projectId, ticketId);
@@ -1793,12 +1796,17 @@ export class TicketRunUseCase implements TicketRunPort {
       };
     }
     if (ticket.column === Column.BACKLOG) {
+      const first = nextColumnFor(
+        this.pipelineLoader.load(projectPath),
+        ticket.kind,
+        Column.BACKLOG,
+      );
       return {
         ok: false,
         result: {
           status: 'failed',
           ticketId,
-          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to SPEC_REVIEW first.`,
+          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to ${first} first.`,
         },
       };
     }
