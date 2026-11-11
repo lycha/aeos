@@ -95,6 +95,14 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect((await runCli('install')).exitCode).toBe(0);
     expect((await runCli('project', 'init', '--name', 'E2E', '--key', 'EE')).exitCode).toBe(0);
     expect(fs.existsSync(path.join(project.aeosHome, 'registry.json'))).toBe(true);
+    // The scaffold is committed in .aeos, so a run that edits a protected file of it is seen.
+    const aeosGit = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: path.join(project.projectPath, '.aeos'),
+        encoding: 'utf-8',
+      });
+    expect(aeosGit('status', '--porcelain')).toBe('');
+    expect(aeosGit('log', '--format=%s').trim()).toBe('[EE][INIT] scaffold');
     // Commit what init scaffolded (skill symlinks), as a user would, so the
     // first task's baseline has nothing to pick up.
     const git = (...args: string[]): string =>
@@ -106,6 +114,10 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     git('add', '-A');
     git('commit', '-m', 'aeos project init');
     const defaultBranch = git('branch', '--show-current').trim();
+    // A local bare repository as `origin`: stub mode must push nothing to it.
+    const origin = path.join(project.projectPath, '..', 'origin.git');
+    execFileSync('git', ['init', '--bare', origin], { stdio: 'ignore' });
+    git('remote', 'add', 'origin', origin);
 
     // Epic: BACKLOG → SPEC_REVIEW → TECH_SPEC → TASK_BREAKDOWN
     const epic = await createEpic('An epic');
@@ -122,15 +134,13 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       await createTicket('First task', '--parent', epic, '--key', 'T-001', '--implements', 'AC-1'),
       await createTicket('Second task', '--parent', epic, '--key', 'T-002'),
     ];
-    // A child task is refused on the default branch. `orchestrator run` would
-    // have put the epic on its own branch; the test plays that part too.
+    // A child task run from the default branch moves to its epic's branch,
+    // as `orchestrator run` would have put it.
     await runCli('ticket', 'approve', tasks[0]!);
-    const refused = await runCli('ticket', 'run', tasks[0]!);
-    expect(refused.output).toContain(`on the default branch '${defaultBranch}'`);
-    expect(ticketState(tasks[0]!)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'READY' });
-    git('tag', `aeos-base/${epic}`);
-    git('checkout', '-b', `aeos/${epic}`);
+    expect(git('branch', '--show-current').trim()).toBe(defaultBranch);
     for (let i = 0; i < 3; i++) await driveColumn(tasks[0]!);
+    expect(git('branch', '--show-current').trim()).toBe(`aeos/${epic}`);
+    expect(git('tag', '--list', `aeos-base/${epic}`).trim()).toBe(`aeos-base/${epic}`);
     await driveTaskToDone(tasks[1]!);
 
     // Epic: TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE
@@ -141,7 +151,10 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     // is asked about it, and the reviewer about the agent. Then the person
     // decides, vouching for AC-1 as well.
     const stubCallsBeforeGate = vi.mocked(StubExecutor.prototype.run).mock.calls.length;
-    await runCli('ticket', 'run', epic);
+    // The orchestrator runs the gate's column, then stops for the person.
+    const gateRun = await runCli('orchestrator', 'run', epic);
+    expect(gateRun.output).toContain(`${epic} — HUMAN_GATE`);
+    expect(gateRun.exitCode).toBe(3);
     expect(ticketState(epic)).toMatchObject({ column: 'DOD_GATE', subState: 'SIGNED_OFF' });
     const gateCalls = vi.mocked(StubExecutor.prototype.run).mock.calls.slice(stubCallsBeforeGate);
     expect(gateCalls.map(([invocation]) => path.basename(invocation.outputPath))).toEqual([
@@ -158,8 +171,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       `PR:     https://stub.invalid/pull/aeos/${epic}`,
     );
 
-    // A standalone task started from the default branch moves to its own.
-    git('checkout', defaultBranch);
+    // HEAD is still the epic's branch; the next ticket's branch is cut from the default branch.
     // A bug does not travel an epic.
     const bugUnderEpic = await runCli('ticket', 'create', 'A bug', '--bug', '--parent', epic);
     expect(bugUnderEpic.exitCode).toBe(1);
@@ -168,13 +180,20 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     await driveTaskToDone(standalone);
     expect(git('branch', '--show-current').trim()).toBe(`aeos/${standalone}`);
     expect(git('tag', '--list', `aeos-base/${standalone}`).trim()).toBe(`aeos-base/${standalone}`);
+    expect(git('rev-parse', `aeos-base/${standalone}`)).toBe(git('rev-parse', defaultBranch));
     expect((await runCli('ticket', 'show', standalone)).output).toContain(
       `PR:     https://stub.invalid/pull/aeos/${standalone}`,
     );
 
+    // A finished ticket has no sub-state, whichever command finished it.
     for (const id of [epic, ...tasks, standalone]) {
-      expect(ticketState(id).column, id).toBe('DONE');
+      expect(ticketState(id), id).toEqual({ column: 'DONE', subState: null });
     }
+    const again = await runCli('ticket', 'approve', standalone, '--json');
+    expect(again.exitCode).toBe(1);
+    expect(JSON.parse(again.stdout)).toMatchObject({ error: { code: 'ALREADY_DONE' } });
+    // Both stub pull requests were recorded, and nothing was pushed for them.
+    expect(execFileSync('git', ['for-each-ref'], { cwd: origin, encoding: 'utf-8' })).toBe('');
 
     // Gate records: one per human decision, valid against the approved schema.
     // The epic and its tasks are spec-backed, so theirs are with the feature.
@@ -1019,7 +1038,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     };
 
     // `.aeos` repository: a rubric the reviewer will judge the work against.
-    // Creating the epic commits the scaffold, so the rubric is tracked.
+    // `project init` committed the scaffold, so the rubric is tracked.
     const epic = await createEpic('An epic');
     await runCli('ticket', 'approve', epic);
     const rubric = '.aeos/rubrics/structure/code-structure.md';
@@ -1049,7 +1068,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(fs.existsSync(path.join(project.projectPath, generated))).toBe(false);
     expect(failedRun(task).error).toContain(generated);
   });
-  it('runs a generator before an agentic worker, and holds a contract change for a person', async () => {
+  it('runs a generator before a worker that edits the repository, and holds a contract change for a person', async () => {
     await runCli('install');
     // Columns advance on their own here, so it is the orchestrator that meets the contract gate.
     const configFile = path.join(project.aeosHome, 'config.json');
@@ -1107,19 +1126,15 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     git(project.projectPath, 'add', '-A');
     git(project.projectPath, 'commit', '-m', 'aeos project init');
 
-    // The epic's decomposition column is the first agentic one: the generator runs there.
+    // The epic's decomposition column is agentic but requires no repository
+    // diff, and the epic's branch is all that keeps it off the default one: no
+    // generator runs there.
     const epic = await createEpic('An epic');
     await runCli('ticket', 'approve', epic);
     const first = await runCli('orchestrator', 'run', epic);
     expect(first.output).toContain('AWAITING_DECOMPOSITION');
-    expect(fs.readFileSync(inProject('generated/api.txt'), 'utf-8')).toBe('version: 1\n');
-    expect(git(project.projectPath, 'log', '--format=%s')).toContain(`[${epic}][GENERATED] api`);
-    const generatorRuns = runsOf(epic).filter((record) => record.role === 'generator');
-    expect(generatorRuns).toHaveLength(1);
-    expect(generatorRuns[0]).toMatchObject({ executor: 'shell', cost_basis: 'none', exit: 'ok' });
-    expect(validateRunRecord(generatorRuns[0]), JSON.stringify(validateRunRecord.errors)).toBe(
-      true,
-    );
+    expect(fs.existsSync(inProject('generated/api.txt'))).toBe(false);
+    expect(runsOf(epic).filter((record) => record.role === 'generator')).toEqual([]);
 
     // A task whose worker edits a declared contract. Its run passes review;
     // the engine's own advance is what is refused.
@@ -1131,11 +1146,29 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect(second.output).toContain('carries a contract change: db/schema.sql');
     expect(second.exitCode).toBe(3);
     expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
-    // The generator's inputs have not changed since: it did not run again.
-    expect(runsOf(task).filter((record) => record.role === 'generator')).toEqual([]);
+    // The task's implementation column is where the generator runs.
+    expect(fs.readFileSync(inProject('generated/api.txt'), 'utf-8')).toBe('version: 1\n');
+    expect(git(project.projectPath, 'log', '--format=%s')).toContain(`[${task}][GENERATED] api`);
+    const generatorRuns = runsOf(task).filter((record) => record.role === 'generator');
+    expect(generatorRuns).toHaveLength(1);
+    expect(generatorRuns[0]).toMatchObject({ executor: 'shell', cost_basis: 'none', exit: 'ok' });
+    expect(validateRunRecord(generatorRuns[0]), JSON.stringify(validateRunRecord.errors)).toBe(
+      true,
+    );
     expect((await runCli('ticket', 'show', task)).output).toContain(
       'Contract change: db/schema.sql (needs approval',
     );
+    /** `ticket show --json`, held to the contract: what it says of the ticket's contract change. */
+    const shownChange = async (id: string): Promise<unknown> => {
+      const shown = await runCli('ticket', 'show', id, '--json');
+      expect(outputProblems(loadContract(), 'ticket show', shown.stdout, shown.exitCode)).toEqual(
+        [],
+      );
+      return (JSON.parse(shown.stdout) as { data: { ticket: { contractChange: unknown } } }).data
+        .ticket.contractChange;
+    };
+    expect(await shownChange(epic)).toBeNull();
+    expect(await shownChange(task)).toEqual({ paths: ['db/schema.sql'], approvedBy: null });
 
     // A person without --contract is refused too, and shown the diff.
     const refused = await runCli('ticket', 'approve', task);
@@ -1159,5 +1192,9 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect((await runCli('ticket', 'show', task)).output).toMatch(
       /Contract change: db\/schema\.sql \(approved in GATE-\d+\)/,
     );
+    expect(await shownChange(task)).toEqual({
+      paths: ['db/schema.sql'],
+      approvedBy: gates[0]!.id,
+    });
   }, 60_000);
 });

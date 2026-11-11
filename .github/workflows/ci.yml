@@ -10,6 +10,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The package is in aeos-core/; the schemas it copies are in plugins/.
+defaults:
+  run:
+    working-directory: aeos-core
+
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -23,6 +28,16 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+          cache-dependency-path: aeos-core/package-lock.json
+
+      # Without these the tests that run lint_decisions.py skip themselves.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the linter's Python modules
+        run: python3 -m pip install PyYAML jsonschema
 
       - name: Install dependencies
         run: npm ci
@@ -34,6 +49,10 @@ jobs:
       # src/cli/generated/ and the command reference are generated from cli-contract.yaml; fail when stale.
       - name: Generated CLI is current
         run: npm run verify:generated
+
+      # cli-contract.yaml is well formed and the CLI matches it.
+      - name: CLI matches the contract
+        run: npm run verify:contract
 
       - name: Typecheck
         run: npm run typecheck

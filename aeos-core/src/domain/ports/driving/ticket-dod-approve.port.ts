@@ -26,6 +26,12 @@ export type TicketDodApproveResult =
 
 export interface TicketDodApprovePort {
   /**
+   * Why this ticket cannot be decided here (it does not exist, or is not at
+   * the final gate), or null. Reviews and records nothing.
+   */
+  refusal(projectId: string, projectPath: string, ticketId: string): string | null;
+
+  /**
    * Rebuilds the conformance report of a spec-backed ticket at the gate, so it
    * describes the code being approved. `verified` are criteria the person
    * vouches for; each gains a human instrument.

@@ -39,10 +39,11 @@ export interface GitGateway {
   isRepo(dir: string): boolean;
 
   /**
-   * Ensures the working tree is on branch `name`, creating it from the current
-   * HEAD if it does not exist. Preserves uncommitted changes. No-op if already
-   * on it. Used to give an epic its own `aeos/<epicId>` feature branch so task
-   * commits accumulate in isolation.
+   * Ensures the working tree is on branch `name`. An existing branch is checked
+   * out; a new one is created from the default branch's local tip, wherever
+   * HEAD is. No-op if already on it. Throws, changing nothing, when uncommitted
+   * changes prevent the switch. Used to give an epic its own `aeos/<epicId>`
+   * feature branch so task commits accumulate in isolation.
    */
   ensureOnBranch(dir: string, name: string): void;
 
@@ -89,6 +90,9 @@ export interface GitGateway {
 
   /** The full hash of `HEAD` in the repository at `dir`. */
   headCommit(dir: string): string;
+
+  /** The full hash of the commit `ref` (a tag, a branch) points at, or null when it does not resolve. */
+  commitOf(dir: string, ref: string): string | null;
 
   /**
    * The content of `path` (relative to `dir`) as it was at `commit`. Throws

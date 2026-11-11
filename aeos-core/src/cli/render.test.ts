@@ -47,7 +47,7 @@ describe('render', () => {
       ok: true,
       command: 'ticket ready',
       exit: 0,
-      contractVersion: 0,
+      contractVersion: 1,
       data: { ticketId: 'AEOS-1' },
       error: null,
       warnings: [],
@@ -104,6 +104,20 @@ describe('failed', () => {
       'RESOURCE_MISSING',
       4,
       'python',
+    ],
+    // `gh` found by the guard, but not logged in.
+    [
+      'Cannot open a pull request for AEOS-1: `gh` is not authenticated. Run `gh auth login`.',
+      'RESOURCE_MISSING',
+      4,
+      'gh',
+    ],
+    // Not reachable from a person's approve any more: the guard answers first.
+    [
+      'Cannot open a pull request for AEOS-1: the `gh` command is not on PATH.',
+      'PULL_REQUEST_FAILED',
+      1,
+      null,
     ],
     ['Something nobody planned for', 'COMMAND_FAILED', 1, null],
   ])('classifies "%s" as %s', (message, code, exit, resource) => {

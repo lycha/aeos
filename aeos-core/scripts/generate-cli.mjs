@@ -8,7 +8,6 @@
 //   node scripts/generate-cli.mjs --check      fail if a committed file differs
 //   node scripts/generate-cli.mjs --resolved   print the contract, $refs resolved and globals applied
 //   --contract <file>   another contract      --out <dir>   write (or check) under another root
-//   --landed <a,b>      the landed list below, for a test
 //
 // Plain Node: it runs before the build. The same contract always gives the same bytes.
 
@@ -21,28 +20,6 @@ const HEADER = '// GENERATED from cli-contract.yaml — do not edit';
 const BEGIN = '<!-- BEGIN GENERATED CLI REFERENCE -->';
 const END = '<!-- END GENERATED CLI REFERENCE -->';
 const DOCS = ['README.md', 'skills/aeos/SKILL.md'];
-
-// A proposed item is generated once the contract says `existing`. These are
-// built and the contract still marks them proposed (`npm run verify:contract`
-// lists each as landed); the contract is its owner's to update, so until then
-// they are named here. An entry the contract no longer marks proposed stops the
-// generator: delete it. A bare `--name` is that parameter on every command
-// that declares it.
-const LANDED = [
-  '--json',
-  '--yes',
-  'ticket create --spec',
-  'ticket create --bug',
-  'ticket create --implements',
-  'ticket approve --contract',
-  'ticket sign-off --reason',
-  'ticket move --reason',
-  'ticket dod-approve --reason',
-  'ticket dod-approve --verified',
-  'ticket repin',
-  'orchestrator clear-budget',
-  'costs',
-];
 
 const flags = {};
 for (let at = 2; at < process.argv.length; at++) {
@@ -84,27 +61,17 @@ if (flags.resolved) {
   process.exit(0);
 }
 
-// ── What is generated: everything existing, and the proposed items that landed ─
-const landedIds = flags.landed?.split(',') ?? (flags.contract ? [] : LANDED);
-const proposed = new Set();
-const built = (item, ...ids) => {
-  if (item.status !== 'proposed') return true;
-  for (const id of ids) proposed.add(id);
-  return ids.some((id) => landedIds.includes(id));
-};
-const resources = Object.entries(contract.resources).filter(
-  ([, resource]) => resource.status !== 'proposed',
-);
+// ── What is generated: everything existing; a proposed item waits for its task ─
+const built = (item) => item.status !== 'proposed';
+const resources = Object.entries(contract.resources).filter(([, resource]) => built(resource));
 const hasGuard = (name) => resources.some(([resource]) => resource === name);
 
 const commands = Object.entries(contract.commands)
-  .filter(([commandPath, command]) => built(command, commandPath))
+  .filter(([, command]) => built(command))
   .map(([commandPath, command]) => {
     const words = commandPath.split(' ');
     if (words.length > 2) throw new Error(`"${commandPath}": commands nest one level at most.`);
-    const parameters = command.parameters.filter((parameter) =>
-      built(parameter, `${commandPath} --${parameter.name}`, `--${parameter.name}`),
-    );
+    const parameters = command.parameters.filter(built);
     return {
       path: commandPath,
       group: words.length === 2 ? words[0] : null,
@@ -117,28 +84,11 @@ const commands = Object.entries(contract.commands)
       named: parameters.filter((parameter) => parameter.in !== 'argument'),
       requires: command.requires.filter(hasGuard),
       conditional: (command.conditionalRequires ?? []).filter(
-        (entry) => entry.status !== 'proposed' && hasGuard(entry.resource),
+        (entry) => built(entry) && hasGuard(entry.resource),
       ),
       responses: command.responses,
     };
   });
-
-for (const id of landedIds) {
-  const [commandPath, parameterName] = id.split(/ ?--/);
-  const named =
-    parameterName === undefined
-      ? id in contract.commands
-      : Object.entries(contract.commands).some(
-          ([candidate, command]) =>
-            (commandPath === '' || candidate === commandPath) &&
-            command.parameters.some((parameter) => parameter.name === parameterName),
-        );
-  if (named && !proposed.has(id)) {
-    throw new Error(
-      `"${id}" is no longer marked proposed in the contract: delete it from LANDED in scripts/generate-cli.mjs.`,
-    );
-  }
-}
 
 // ── TypeScript ────────────────────────────────────────────────────────────────
 const quote = (text) => `'${String(text).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;

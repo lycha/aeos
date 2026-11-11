@@ -90,7 +90,8 @@ describe('every command under --json', () => {
       'ticket dod-approve',
       'ticket resolve',
     ]);
-    expect(ran.get('ticket dod-approve')).toEqual([3]);
+    // Not at the final gate, which is said before anything about a terminal.
+    expect(ran.get('ticket dod-approve')).toEqual([1]);
     expect(ran.get('orchestrator run')).toEqual([3]);
   }, 60_000);
 });

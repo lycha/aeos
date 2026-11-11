@@ -61,7 +61,8 @@ import type { ReviewVerdict } from '../domain/model/review-verdict.js';
 import type { Escalation } from '../domain/model/escalation.js';
 import { EscalationReason } from '../domain/model/escalation.js';
 import { buildEscalationDocument, escalationFilename } from './services/escalation-document.js';
-import { Column } from '../domain/model/column.js';
+import { Column, nextColumnFor } from '../domain/model/column.js';
+import type { PipelineLoader } from '../domain/ports/driven/pipeline-loader.port.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
 import { validateOutput } from '../domain/services/output-validation.js';
@@ -197,6 +198,7 @@ export class TicketRunUseCase implements TicketRunPort {
     private readonly conformanceService: ConformanceService,
     private readonly fileHasher: FileHasher,
     private readonly generatorStampStore: GeneratorStampStore,
+    private readonly pipelineLoader: PipelineLoader,
   ) {}
 
   async execute(
@@ -211,7 +213,7 @@ export class TicketRunUseCase implements TicketRunPort {
     this.interruptStage = undefined;
 
     try {
-      const eligibility = this.checkEligibility(projectId, ticketId);
+      const eligibility = this.checkEligibility(projectId, projectPath, ticketId);
       if (!eligibility.ok) return eligibility.result;
       let mirroredTicket = eligibility.ticket;
 
@@ -227,8 +229,11 @@ export class TicketRunUseCase implements TicketRunPort {
         };
       }
 
-      const branchError = this.isolateTask(projectPath, mirroredTicket);
-      if (branchError) return { status: 'failed', ticketId, error: branchError };
+      try {
+        this.isolateTask(projectPath, mirroredTicket);
+      } catch (err) {
+        return { status: 'failed', ticketId, error: (err as Error).message };
+      }
 
       const columnSpec = this.columnSpecLoader.load(mirroredTicket.column, projectPath);
       const workerAgentSpec = this.agentSpecLoader.load(columnSpec.workerAgentFile, projectPath);
@@ -693,8 +698,9 @@ export class TicketRunUseCase implements TicketRunPort {
 
     // ── Generators ───────────────────────────────────────────────
     // On the first attempt only: later ones carry the worker's uncommitted
-    // work, which a commit of generated files must not sweep up.
-    if (workerMode === 'agentic' && attempt === 1) {
+    // work, which a commit of generated files must not sweep up. Only where the
+    // worker edits the repository: any other column may be on the default branch.
+    if (workerMode === 'agentic' && columnSpec.requiresRepoDiff !== false && attempt === 1) {
       const failure = await this.runGenerators(ctx);
       if (failure) return failure;
     }
@@ -1779,6 +1785,7 @@ export class TicketRunUseCase implements TicketRunPort {
 
   private checkEligibility(
     projectId: string,
+    projectPath: string,
     ticketId: string,
   ): { ok: true; ticket: Ticket } | { ok: false; result: TicketRunResult } {
     const ticket = this.ticketRepo.findById(projectId, ticketId);
@@ -1789,12 +1796,17 @@ export class TicketRunUseCase implements TicketRunPort {
       };
     }
     if (ticket.column === Column.BACKLOG) {
+      const first = nextColumnFor(
+        this.pipelineLoader.load(projectPath),
+        ticket.kind,
+        Column.BACKLOG,
+      );
       return {
         ok: false,
         result: {
           status: 'failed',
           ticketId,
-          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to SPEC_REVIEW first.`,
+          error: `Ticket ${ticketId} is in BACKLOG. Run 'aeos ticket approve ${ticketId}' to advance to ${first} first.`,
         },
       };
     }
@@ -1824,27 +1836,21 @@ export class TicketRunUseCase implements TicketRunPort {
   }
 
   /**
-   * Keeps a task's commits off the default branch. A standalone task gets its
-   * own `aeos/<taskId>` branch and base tag, as the orchestrator gives an
-   * epic; a child task belongs on its epic's branch, which the orchestrator
-   * set up, so one found on the default branch is refused. Returns the refusal.
+   * Keeps a task's commits off the default branch: a child task goes onto its
+   * epic's `aeos/<epicId>` branch, a standalone task onto its own, each with
+   * its base tag, as the orchestrator gives an epic.
    */
-  private isolateTask(projectPath: string, ticket: Ticket): string | null {
+  private isolateTask(projectPath: string, ticket: Ticket): void {
     if (
       ticket.kind !== TicketKind.TASK ||
       process.env.AEOS_GIT_ISOLATION === 'none' ||
       !this.gitGateway.isRepo(projectPath)
     ) {
-      return null;
+      return;
     }
-    if (ticket.parentId === null) {
-      this.gitGateway.ensureOnBranch(projectPath, `aeos/${ticket.id}`);
-      this.gitGateway.tagHere(projectPath, `aeos-base/${ticket.id}`);
-      return null;
-    }
-    const defaultBranch = this.gitGateway.defaultBranch(projectPath);
-    if (this.gitGateway.currentBranch(projectPath) !== defaultBranch) return null;
-    return `Refusing to run task ${ticket.id} on the default branch '${defaultBranch}'. Drive it with \`aeos orchestrator run ${ticket.parentId}\`, or check out \`aeos/${ticket.parentId}\` first.`;
+    const owner = ticket.parentId ?? ticket.id;
+    this.gitGateway.ensureOnBranch(projectPath, `aeos/${owner}`);
+    this.gitGateway.tagHere(projectPath, `aeos-base/${owner}`);
   }
 
   /**
@@ -1998,8 +2004,9 @@ export class TicketRunUseCase implements TicketRunPort {
    * returns, so the engine's own later writes under `.aeos/` never count.
    *
    * shortcut: a set difference, so a further edit to a protected file that
-   * was already uncommitted before the run goes unseen; compare content
-   * hashes if operators keep such files dirty.
+   * was already uncommitted before the run goes unseen. `project init` commits
+   * its scaffold, so that is an operator's own uncommitted edit; compare
+   * content hashes if operators keep such files dirty.
    */
   private restoreProtected(ctx: RunContext, before: ReadonlySet<string>): string | undefined {
     const touched = [...this.changedPaths(ctx)].filter((file) => !before.has(file));

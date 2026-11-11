@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 
-import { runCli, shouldLaunchInkShell } from './index.js';
+import { buildProgram, runCli, shouldLaunchInkShell } from './index.js';
 import type { Container } from './container.js';
 
 describe('CLI entrypoint runtime', () => {
@@ -58,5 +58,19 @@ describe('shouldLaunchInkShell', () => {
 
   it('returns false when arguments are present', () => {
     expect(shouldLaunchInkShell(['ticket', 'run'], { isTTY: true })).toBe(false);
+  });
+});
+
+describe('aeos --help', () => {
+  it('shows only forms of ticket create that the command accepts', () => {
+    const creates = buildProgram()
+      .description()
+      .split('\n')
+      .filter((line) => line.includes('aeos ticket create'));
+
+    // A bare title is refused: an epic needs --spec, and a bug says so.
+    expect(creates).toHaveLength(2);
+    expect(creates[0]).toContain('--spec <feature>');
+    expect(creates[1]).toContain('--bug');
   });
 });

@@ -92,11 +92,26 @@ export class SimpleGitGateway implements GitGateway {
     }).trim();
     if (current === name) return;
 
-    if (this.refExists(dir, `refs/heads/${name}`)) {
-      execFileSync('git', ['checkout', name], { cwd: dir, stdio: 'ignore' });
-    } else {
-      // Create from current HEAD, carrying any uncommitted work with us.
-      execFileSync('git', ['checkout', '-b', name], { cwd: dir, stdio: 'ignore' });
+    const args = ['checkout', name];
+    if (!this.refExists(dir, `refs/heads/${name}`)) {
+      // A new branch starts at the default branch's local tip, wherever HEAD is;
+      // a repository with no such local branch starts it at HEAD.
+      const base = `refs/heads/${this.defaultBranch(dir)}`;
+      args.splice(1, 0, '-b');
+      if (this.refExists(dir, base)) args.push(base);
+    }
+    try {
+      execFileSync('git', args, {
+        cwd: dir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+    } catch (err) {
+      const why = String((err as { stderr?: unknown }).stderr ?? '').trim();
+      throw new Error(
+        `Cannot switch to branch '${name}' from '${current}': ${why}\nCommit or stash your changes, then run again.`,
+        { cause: err },
+      );
     }
   }
 
@@ -116,6 +131,10 @@ export class SimpleGitGateway implements GitGateway {
     } catch {
       return false;
     }
+  }
+
+  commitOf(dir: string, ref: string): string | null {
+    return this.read(dir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]) || null;
   }
 
   headCommit(dir: string): string {

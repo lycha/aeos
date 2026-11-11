@@ -59,7 +59,7 @@ describe('loadContract', () => {
   it('loads the approved contract', () => {
     const contract = loadContract();
 
-    expect(contract.contractVersion).toBe(0);
+    expect(contract.contractVersion).toBe(1);
     expect(Object.keys(contract.commands)).toContain('orchestrator clear-budget');
     // The global --json reaches every command.
     for (const command of Object.values(contract.commands)) {

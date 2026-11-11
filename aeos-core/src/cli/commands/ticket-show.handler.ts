@@ -135,6 +135,7 @@ export const ticketShow: Handlers['ticketShow'] = async ({ id }, _options, conte
         escalation: escalationOf(escalation),
         specPin: result.specPin,
         pullRequestUrl: result.ticket.prUrl ?? null,
+        contractChange: contractChange ?? null,
       },
       artifacts: result.artifacts,
       costUsd: knownTotal(result.executions.map((execution) => execution.costUsd)),

@@ -1,7 +1,7 @@
 // Test fixture — a contract small enough to read, in the file's own format.
 
 export const FIXTURE_CONTRACT = `
-contractVersion: 0
+contractVersion: 1
 info: { title: T, binary: aeos, summary: S, license: Apache-2.0, runtime: node }
 platforms: [darwin]
 environment:

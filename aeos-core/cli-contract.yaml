@@ -39,13 +39,13 @@
 # Help text Every `existing` summary and description is the exact text on
 #           main. Once I1-M4-004b lands, help is generated from this file.
 
-contractVersion: 0
+contractVersion: 1
 
 info:
   title: AEOS command line
   binary: aeos
   summary: Drives tickets through LLM-agent pipelines with a human gate on every column.
-  license: Apache-2.0           # the repository LICENSE; package.json still says ISC (I1-M0-002)
+  license: Apache-2.0           # the repository LICENSE
   runtime: node >=22
 
 platforms: [darwin, linux]      # what CI and the maintainer run. Windows is undeclared, not refused.
@@ -86,13 +86,9 @@ resources:
   python:
     description: python3 is on PATH (needed by lint_decisions.py).
     fix: Install Python 3.
-    status: proposed
-    task: I1-M3-002a
   gh:
     description: The `gh` command is on PATH and authenticated for this repository.
     fix: Install GitHub CLI and run `gh auth login`.
-    status: proposed
-    task: I1-M2-003
 
 # ── Exit codes ────────────────────────────────────────────────────────────
 # Today: 0, 1 everywhere, and 130 on interrupt. Failure and escalation both
@@ -129,6 +125,7 @@ globals:
     - $ref: "#/components/parameters/json"
   responses:
     "2": { $ref: "#/components/responses/usage" }
+    "3": { $ref: "#/components/responses/needsHuman" }
 
 # ── Reusable parts ────────────────────────────────────────────────────────
 components:
@@ -151,14 +148,10 @@ components:
     json:
       name: json
       in: flag
-      status: proposed
-      task: I1-M4-004c
       description: Write one JSON envelope to stdout instead of text
     "yes":
       name: "yes"
       in: flag
-      status: proposed
-      task: I1-M4-004c
       description: Answer yes to this command's confirmation
 
   responses:
@@ -172,6 +165,8 @@ components:
       description: Invalid arguments or options. Nothing was attempted.
     missingResource:
       description: A resource in `requires` is not in place. envelope.error.resource names it.
+    needsHuman:
+      description: Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
     interrupted:
       description: The operator interrupted the run.
     confirmationRequired:
@@ -269,7 +264,7 @@ components:
     TicketDetail:
       type: object
       additionalProperties: false
-      required: [id, title, kind, parentId, column, columnLabel, subState, escalation, specPin, pullRequestUrl]
+      required: [id, title, kind, parentId, column, columnLabel, subState, escalation, specPin, pullRequestUrl, contractChange]
       properties:
         id: { $ref: "#/components/schemas/TicketId" }
         title: { type: string }
@@ -281,6 +276,17 @@ components:
         escalation: { anyOf: [{ $ref: "#/components/schemas/Escalation" }, { type: "null" }] }
         specPin: { $ref: "#/components/schemas/NullableSpecPin" }
         pullRequestUrl: { $ref: "#/components/schemas/NullableString" }
+        contractChange: { anyOf: [{ $ref: "#/components/schemas/ContractChange" }, { type: "null" }] }
+    ContractChange:
+      description: The contract paths this ticket's work changed. Null on the ticket when it changed none.
+      type: object
+      additionalProperties: false
+      required: [paths, approvedBy]
+      properties:
+        paths: { $ref: "#/components/schemas/StringList" }
+        approvedBy:
+          description: The gate record of the approval (`ticket approve --contract`). Null until a person approves.
+          anyOf: [{ $ref: "#/components/schemas/GateRecordId" }, { type: "null" }]
     SubStateChange:
       type: object
       additionalProperties: false
@@ -288,6 +294,14 @@ components:
       properties:
         ticketId: { $ref: "#/components/schemas/TicketId" }
         subState: { $ref: "#/components/schemas/SubState" }
+    ConfirmationDeclined:
+      description: The person answered no to the command's confirmation. Nothing changed.
+      type: object
+      additionalProperties: false
+      required: [ticketId, declined]
+      properties:
+        ticketId: { $ref: "#/components/schemas/TicketId" }
+        declined: { const: true }
     TicketRunResult:
       type: object
       additionalProperties: false
@@ -363,7 +377,7 @@ components:
 #   conditionalRequires   a resource needed only in the stated case; the
 #                handler asks the guard for it at that point
 #   parameters   in: argument (positional) | option (takes a value) | flag
-#   responses    by exit code; "2" comes from globals
+#   responses    by exit code; "2" and "3" come from globals
 commands:
 
   install:
@@ -449,8 +463,6 @@ commands:
     conditionalRequires:
       - resource: python
         when: --spec is given. The decisions lint runs before the epic is created.
-        status: proposed
-        task: I1-M3-002a
     parameters:
       - name: title
         in: argument
@@ -486,21 +498,15 @@ commands:
         in: option
         valueName: feature
         required: false
-        status: proposed
-        task: I1-M3-002a
         description: Back this epic with the spec at .aeos/features/<feature>. Refused unless the decisions lint is clean
         schema: { type: string }
       - name: bug
         in: flag
-        status: proposed
-        task: I1-M4-003
         description: Create a standalone bug task that must show a reproducing test red, then green
       - name: implements
         in: option
         valueName: ids
         required: false
-        status: proposed
-        task: I1-M4-001
         description: Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2)
         separator: ","
         schema: { type: array, items: { type: string, pattern: "^AC-[0-9]+[a-z]?$" } }
@@ -528,8 +534,7 @@ commands:
         in: option
         valueName: column
         required: false
-        description: Filter by pipeline column
-        pending: { task: I1-M3-006, description: Filter by pipeline column (identifier or label) }
+        description: Filter by pipeline column (identifier or label)
         schema: { type: string }
     responses:
       "0":
@@ -575,16 +580,18 @@ commands:
       - $ref: "#/components/parameters/yes"
     responses:
       "0":
-        description: The ticket is unblocked and its answers are promoted to decisions.
+        description: The ticket is unblocked and its answers are promoted to decisions. Or the person declined the confirmation, and nothing changed.
         data:
-          type: object
-          additionalProperties: false
-          required: [ticketId, promoted, amendedDecisions, specPin]
-          properties:
-            ticketId: { $ref: "#/components/schemas/TicketId" }
-            promoted: { $ref: "#/components/schemas/StringList" }
-            amendedDecisions: { $ref: "#/components/schemas/StringList" }
-            specPin: { $ref: "#/components/schemas/NullableSpecPin" }
+          anyOf:
+            - type: object
+              additionalProperties: false
+              required: [ticketId, promoted, amendedDecisions, specPin]
+              properties:
+                ticketId: { $ref: "#/components/schemas/TicketId" }
+                promoted: { $ref: "#/components/schemas/StringList" }
+                amendedDecisions: { $ref: "#/components/schemas/StringList" }
+                specPin: { $ref: "#/components/schemas/NullableSpecPin" }
+            - $ref: "#/components/schemas/ConfirmationDeclined"
       "1": { $ref: "#/components/responses/failure" }
       "4": { $ref: "#/components/responses/missingResource" }
 
@@ -600,15 +607,17 @@ commands:
       - $ref: "#/components/parameters/yes"
     responses:
       "0":
-        description: The ticket can be run again.
-        data: { $ref: "#/components/schemas/SubStateChange" }
+        description: The ticket can be run again. Or the person declined the confirmation, and nothing changed.
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/SubStateChange"
+            - $ref: "#/components/schemas/ConfirmationDeclined"
       "1": { $ref: "#/components/responses/failure" }
       "4": { $ref: "#/components/responses/missingResource" }
 
   ticket run:
     operationId: ticketRun
-    summary: Run the full column cycle for a ticket (preflight → executor → review → sign-off)
-    pending: { task: I1-M2-001, summary: Run the full column cycle for a ticket (preflight → executor → checks → review → sign-off) }
+    summary: Run the full column cycle for a ticket (preflight → executor → checks → review → sign-off)
     requires: [project, state_db, executor]
     parameters:
       - $ref: "#/components/parameters/ticketId"
@@ -646,14 +655,10 @@ commands:
     conditionalRequires:
       - resource: gh
         when: This approval opens a pull request and pullRequests.enabled is true.
-        status: proposed
-        task: I1-M2-003
     parameters:
       - $ref: "#/components/parameters/ticketId"
       - name: contract
         in: flag
-        status: proposed
-        task: I1-M4-004d
         description: Also approve the contract or schema change this ticket carries
     responses:
       "0":
@@ -683,8 +688,6 @@ commands:
         in: option
         valueName: text
         required: true
-        status: proposed
-        task: I1-M3-004
         description: Why the review is being overridden. Recorded as a gate
         schema: { type: string }
     responses:
@@ -711,15 +714,12 @@ commands:
         in: argument
         position: 2
         required: true
-        description: Target workflow status / column
-        pending: { task: I1-M3-006, description: Target column (identifier or label) }
+        description: Target column (identifier or label)
         schema: { type: string }
       - name: reason
         in: option
         valueName: text
         required: true
-        status: proposed
-        task: I1-M3-004
         description: Why the normal path is being bypassed. Recorded as a gate
         schema: { type: string }
     responses:
@@ -752,8 +752,7 @@ commands:
 
   ticket dod-approve:
     operationId: ticketDodApprove
-    summary: Review DoD checklist and approve a DOD_GATE ticket as DONE
-    pending: { task: I1-M4-002b, summary: Review the conformance report and approve a final-gate ticket as DONE }
+    summary: Review the conformance report and approve a final-gate ticket as DONE
     requires: [project, state_db, git_repo]
     prompt:
       when: Always. This is the release decision, and a person makes it.
@@ -764,16 +763,12 @@ commands:
         in: option
         valueName: text
         required: false
-        status: proposed
-        task: I1-M4-002b
         description: Required when any criterion is failed or unverified
         schema: { type: string }
       - name: verified
         in: option
         valueName: ids
         required: false
-        status: proposed
-        task: I1-M4-002b
         description: Criteria a person vouches for, comma-separated (e.g. AC-3,AC-7). Each gains a human instrument citing the gate record
         separator: ","
         schema: { type: array, items: { type: string, pattern: "^AC-[0-9]+[a-z]?$" } }
@@ -804,8 +799,6 @@ commands:
 
   ticket repin:
     operationId: ticketRepin
-    status: proposed
-    task: I1-M3-005
     summary: Move a spec-backed ticket's pin to the current spec after an amendment
     requires: [project, state_db, python]
     parameters:
@@ -835,8 +828,7 @@ commands:
         in: option
         valueName: usd
         required: false
-        description: USD ceiling for this epic (persisted for later runs)
-        pending: { task: I1-M1-002, description: USD ceiling for this epic (persisted for later runs). Refused on an executor that cannot report cost }
+        description: USD ceiling for this epic (persisted for later runs). Refused on an executor that cannot report cost
         schema: { type: number, exclusiveMinimum: 0 }
       - name: max-steps
         in: option
@@ -887,8 +879,6 @@ commands:
 
   orchestrator clear-budget:
     operationId: orchestratorClearBudget
-    status: proposed
-    task: owner request, 10 Nov 2026
     summary: Remove the budget ceiling from an epic
     requires: [project, state_db]
     parameters:
@@ -931,8 +921,6 @@ commands:
 
   costs:
     operationId: costs
-    status: proposed            # the file exists as a stub and is not registered
-    task: I1-M1-004
     summary: Report model spend
     requires: [state_db]
     parameters:

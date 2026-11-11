@@ -51,6 +51,11 @@ export class PythonDecisionsLint implements DecisionsLint {
     return REQUIRED_FILES.filter((file) => !fs.existsSync(path.join(featureDir, file)));
   }
 
+  /** Whether python3 starts and imports the modules the linter needs. Nothing is linted. */
+  ready(cwd: string = process.cwd()): boolean {
+    return this.run(['-c', 'import yaml, jsonschema'], cwd).status === 0;
+  }
+
   lint(treeRoot: string, feature: string): DecisionsLintResult {
     if (!fs.existsSync(path.join(treeRoot, LINTER))) {
       throw new Error(

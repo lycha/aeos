@@ -79,7 +79,7 @@ export interface TicketAnswerOptions {
   json?: boolean;
 }
 
-export type TicketAnswerData = { ticketId: TicketId; promoted: StringList; amendedDecisions: StringList; specPin: NullableSpecPin };
+export type TicketAnswerData = { ticketId: TicketId; promoted: StringList; amendedDecisions: StringList; specPin: NullableSpecPin } | ConfirmationDeclined;
 
 export interface TicketResolveArgs {
   id: string;
@@ -90,7 +90,7 @@ export interface TicketResolveOptions {
   json?: boolean;
 }
 
-export type TicketResolveData = SubStateChange;
+export type TicketResolveData = SubStateChange | ConfirmationDeclined;
 
 export interface TicketRunArgs {
   id: string;
@@ -271,9 +271,13 @@ export type HaltReason = 'COMPLETE' | 'HUMAN_GATE' | 'NEEDS_HUMAN' | 'FAILED' | 
 
 export type TicketSummary = { id: TicketId; title: string; kind: Kind; parentId: NullableTicketId; column: Column; columnLabel: string; subState: SubState };
 
-export type TicketDetail = { id: TicketId; title: string; kind: Kind; parentId: NullableTicketId; column: Column; columnLabel: string; subState: SubState; escalation: Escalation | null; specPin: NullableSpecPin; pullRequestUrl: NullableString };
+export type TicketDetail = { id: TicketId; title: string; kind: Kind; parentId: NullableTicketId; column: Column; columnLabel: string; subState: SubState; escalation: Escalation | null; specPin: NullableSpecPin; pullRequestUrl: NullableString; contractChange: ContractChange | null };
+
+export type ContractChange = { paths: StringList; approvedBy: GateRecordId | null };
 
 export type SubStateChange = { ticketId: TicketId; subState: SubState };
+
+export type ConfirmationDeclined = { ticketId: TicketId; declined: true };
 
 export type TicketRunResult = { ticketId: TicketId; column: Column; subState: SubState; attempts: number; artifactPath: NullableString; reviewPath: NullableString; runIds: Array<RunId>; costUsd: Usd; escalation: Escalation | null };
 

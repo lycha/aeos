@@ -55,6 +55,7 @@ function createMockGitGateway(): GitGateway {
     defaultBranch: vi.fn().mockReturnValue('main'),
     hasRemote: vi.fn().mockReturnValue(true),
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
+    commitOf: vi.fn().mockReturnValue(null),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
     userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
@@ -94,6 +95,7 @@ const TEMPLATE_ROLES: Record<string, ColumnRole | undefined> = {
 function createPullRequestMocks() {
   return {
     prGateway: {
+      needsPush: true as boolean,
       isAvailable: vi.fn().mockReturnValue({ ok: true }),
       create: vi.fn().mockReturnValue({ url: 'https://example.test/pull/7' }),
       updateBody: vi.fn(),
@@ -134,6 +136,12 @@ beforeEach(() => {
 const PROJECT_ID = 'startup-a';
 const PROJECT_PATH = path.join(os.tmpdir(), 'aeos-test-project');
 const TICKET_ID = 'AEOS-1';
+
+/** An epic as `ticket create --spec` leaves it. */
+const inBacklog = (): Ticket => ({
+  ...signedOffTicket('BACKLOG'),
+  specPin: { repo: 'AEOS-aeos', commit: 'abc1234def', path: 'features/sample' },
+});
 
 function signedOffTicket(column: Ticket['column'] = 'SPEC_REVIEW'): Ticket {
   return {
@@ -394,8 +402,7 @@ describe('TicketApproveUseCase', () => {
   });
 
   it('should allow advancing BACKLOG ticket with null sub-state (no sign-off needed)', () => {
-    const ticket = signedOffTicket('BACKLOG');
-    ticket.subState = null;
+    const ticket = { ...inBacklog(), subState: null };
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(ticket);
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
     expect(result).toEqual({
@@ -408,10 +415,68 @@ describe('TicketApproveUseCase', () => {
     });
   });
 
-  it('should return already_done when ticket is in DONE column', () => {
-    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket('DONE'));
+  describe('an epic from before spec pins, still in BACKLOG', () => {
+    const unpinned = (overrides: Partial<Ticket> = {}): Ticket => ({
+      ...signedOffTicket('BACKLOG'),
+      subState: null,
+      specPin: undefined,
+      ...overrides,
+    });
+
+    it.each([{}, { byEngine: true }])('is refused with what to do instead (%o)', (options) => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(unpinned());
+
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, options);
+
+      expect(result).toMatchObject({
+        status: 'error',
+        error: expect.stringMatching(
+          /Epic AEOS-1 has no spec.*aeos ticket create <title> --spec <feature>.*aeos ticket move/s,
+        ),
+      });
+      expect(stateMachine.transition).not.toHaveBeenCalled();
+      expect(gateRecorder.record).not.toHaveBeenCalled();
+    });
+
+    it('does not concern a task, or a bug', () => {
+      for (const task of [
+        unpinned({ kind: 'TASK', parentId: 'AEOS-9' }),
+        unpinned({ kind: 'TASK', track: 'bug' }),
+      ]) {
+        (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(task);
+
+        expect(useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID).status).toBe('advanced');
+      }
+    });
+  });
+
+  it('returns already_done for a finished ticket, which has no sub-state', () => {
+    // READY is what a task approved into DONE was left with before.
+    for (const subState of [null, 'READY', 'SIGNED_OFF'] as const) {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...signedOffTicket('DONE'),
+        subState,
+      });
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(result).toEqual({ status: 'already_done', ticketId: TICKET_ID });
+    }
+  });
+
+  it('leaves a ticket approved into DONE with no sub-state', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...signedOffTicket('QA'),
+      kind: 'TASK',
+      parentId: 'AEOS-9',
+    });
+
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
-    expect(result).toEqual({ status: 'already_done', ticketId: TICKET_ID });
+
+    expect(result).toMatchObject({ status: 'advanced', toColumn: 'DONE' });
+    expect(stateMachine.setSubState).not.toHaveBeenCalled();
+    const document = (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => String(call[3]))
+      .join('\n');
+    expect(document).not.toContain('READY');
   });
 
   it('should return error when transition fails', () => {
@@ -428,7 +493,7 @@ describe('TicketApproveUseCase', () => {
   });
 
   it('should advance BACKLOG ticket to SPEC_REVIEW', () => {
-    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket('BACKLOG'));
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(inBacklog());
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
     expect(result).toEqual({
       status: 'advanced',
@@ -720,6 +785,21 @@ describe('TicketApproveUseCase — pull requests', () => {
     expect(body).not.toContain('Spec pin: not recorded yet');
   });
 
+  it('pushes nothing for a gateway with no host (stub mode), and still records its URL', () => {
+    approving(epicAtIntegrationReview());
+    pr.prGateway.needsPush = false;
+
+    const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result.status).toBe('advanced');
+    expect(gitGateway.push).not.toHaveBeenCalled();
+    expect(ticketRepo.setPrUrl).toHaveBeenCalledWith(
+      PROJECT_ID,
+      TICKET_ID,
+      'https://example.test/pull/7',
+    );
+  });
+
   it('opens the pull request without pushing when the repository has no remote', () => {
     approving(epicAtIntegrationReview());
     (gitGateway.hasRemote as ReturnType<typeof vi.fn>).mockReturnValue(false);
@@ -729,6 +809,38 @@ describe('TicketApproveUseCase — pull requests', () => {
     expect(result.status).toBe('advanced');
     expect(gitGateway.push).not.toHaveBeenCalled();
     expect(pr.prGateway.create).toHaveBeenCalled();
+  });
+
+  it('asks whether the code host is in place exactly when it is about to open a pull request', () => {
+    const pullRequestHost = vi.fn().mockReturnValue(false);
+
+    // A column that opens none, a child task, and a project without pull requests.
+    approving(signedOffTicket('TECH_SPEC'));
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+    approving({ ...standaloneTaskAtQa(), parentId: 'AEOS-9' });
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+    const config = pr.projectRepo.readExecutorConfig as ReturnType<typeof vi.fn>;
+    config.mockReturnValue({ pullRequests: { enabled: false } });
+    approving(epicAtIntegrationReview());
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+    expect(pullRequestHost).not.toHaveBeenCalled();
+    expect(stateMachine.transition).toHaveBeenCalledTimes(3);
+
+    // An approval that would be refused anyway never gets as far as asking.
+    config.mockReturnValue({});
+    approving({ ...epicAtIntegrationReview(), subState: 'READY' });
+    useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+    expect(pullRequestHost).not.toHaveBeenCalled();
+
+    for (const ticket of [epicAtIntegrationReview(), standaloneTaskAtQa()]) {
+      approving(ticket);
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID, { pullRequestHost });
+      expect(result.status).toBe('error');
+    }
+    expect(pullRequestHost).toHaveBeenCalledTimes(2);
+    expect(pr.prGateway.isAvailable).not.toHaveBeenCalled();
+    expect(pr.prGateway.create).not.toHaveBeenCalled();
+    expect(stateMachine.transition).toHaveBeenCalledTimes(3);
   });
 
   it('stops with the cause and leaves the ticket SIGNED_OFF when gh is not on PATH', () => {

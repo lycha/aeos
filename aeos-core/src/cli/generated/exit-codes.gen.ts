@@ -1,6 +1,6 @@
 // GENERATED from cli-contract.yaml — do not edit
 
-export const CONTRACT_VERSION = 0;
+export const CONTRACT_VERSION = 1;
 
 /** The whole exit-code vocabulary, by name. */
 export const EXIT = {

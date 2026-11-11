@@ -200,7 +200,7 @@ export function registerGenerated(
   ticket
     .command('list')
     .description('List all tickets in the current project')
-    .option('--column <column>', 'Filter by pipeline column')
+    .option('--column <column>', 'Filter by pipeline column (identifier or label)')
     .option('--json', 'Write one JSON envelope to stdout instead of text')
     .action((options: T.TicketListOptions) =>
       run(resources, setExit, 'ticketList', 'ticket list', options, [
@@ -249,7 +249,7 @@ export function registerGenerated(
 
   ticket
     .command('run')
-    .description('Run the full column cycle for a ticket (preflight → executor → review → sign-off)')
+    .description('Run the full column cycle for a ticket (preflight → executor → checks → review → sign-off)')
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
     .option('--executor <type>', 'Override executor type (claude-cli, auggie-cli, opencode-cli, ollama-cli)')
     .option('--model <model>', 'Override model identifier')
@@ -292,7 +292,7 @@ export function registerGenerated(
     .command('move')
     .description('Move a ticket to any workflow status')
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
-    .argument('<status>', 'Target workflow status / column')
+    .argument('<status>', 'Target column (identifier or label)')
     .requiredOption('--reason <text>', 'Why the normal path is being bypassed. Recorded as a gate')
     .option('--json', 'Write one JSON envelope to stdout instead of text')
     .action((id: string, status: string, options: T.TicketMoveOptions) =>
@@ -316,7 +316,7 @@ export function registerGenerated(
 
   ticket
     .command('dod-approve')
-    .description('Review DoD checklist and approve a DOD_GATE ticket as DONE')
+    .description('Review the conformance report and approve a final-gate ticket as DONE')
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
     .option('--reason <text>', 'Required when any criterion is failed or unverified')
     .option('--verified <ids>', 'Criteria a person vouches for, comma-separated (e.g. AC-3,AC-7). Each gains a human instrument citing the gate record', list(','))
@@ -347,7 +347,7 @@ export function registerGenerated(
     .command('run')
     .description('Run an epic until it completes, needs a human, or hits its budget')
     .argument('<epicId>', 'Epic ticket ID')
-    .option('--budget <usd>', 'USD ceiling for this epic (persisted for later runs)', parseFloat)
+    .option('--budget <usd>', 'USD ceiling for this epic (persisted for later runs). Refused on an executor that cannot report cost', parseFloat)
     .option('--max-steps <n>', 'Safety bound on scheduled actions', integer)
     .option('--json', 'Write one JSON envelope to stdout instead of text')
     .action((epicId: string, options: T.OrchestratorRunOptions) =>

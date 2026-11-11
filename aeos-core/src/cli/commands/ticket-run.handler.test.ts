@@ -137,6 +137,20 @@ describe('the ticket run handler', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('shows the columns an error names by their labels', async () => {
+    (useCase.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'failed',
+      ticketId: 'AEOS-1',
+      error: 'Ticket AEOS-1 is in BACKLOG. Advance to IMPLEMENTATION first.',
+    });
+
+    await program.parseAsync(['node', 'aeos', 'ticket', 'run', 'AEOS-1']);
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '✗ Ticket AEOS-1 failed: Ticket AEOS-1 is in Backlog. Advance to Implementation first.',
+    );
+  });
+
   it('requests a graceful interrupt when SIGINT is received', async () => {
     let resolveExecute:
       | ((value: Awaited<ReturnType<TicketRunPort['execute']>>) => void)

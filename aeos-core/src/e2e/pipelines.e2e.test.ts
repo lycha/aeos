@@ -5,6 +5,8 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import yaml from 'js-yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { outputProblems } from '../cli/contract/contract-output.fixture.js';
+import { loadContract } from '../cli/contract/load-contract.js';
 import type { GateRecord } from '../domain/model/gate-record.js';
 import { getDb } from '../infrastructure/persistence/database.js';
 
@@ -120,7 +122,7 @@ describe('pipelines file', { timeout: 30_000 }, () => {
 
     const moved = await runCli('ticket', 'move', task, 'NOT_A_COLUMN', '--reason', 'testing');
 
-    expect(moved.exitCode).toBe(1);
+    expect(moved.exitCode).toBe(2);
     expect(moved.output).toContain('Backlog, Implementation, Code review, QA, Done');
     expect(moved.output).not.toContain('Tech spec');
     expect(ticketState(task).column).toBe('BACKLOG');
@@ -190,6 +192,10 @@ describe('pipelines file', { timeout: 30_000 }, () => {
       expect(refused.output).toContain(`${task} (CODE_REVIEW)`);
       expect(refused.output).toContain('BACKLOG, IMPLEMENTATION, CODE_REVIEW, QA, DONE');
       expect(ticketState(task)).toMatchObject({ column: 'CODE_REVIEW', subState: 'READY' });
+      // Any guarded command can be refused this way: exit 3 is a global response.
+      const ready = await runCli('ticket', 'ready', task, '--json');
+      expect(ready.exitCode).toBe(3);
+      expect(outputProblems(loadContract(), 'ticket ready', ready.stdout, 3)).toEqual([]);
 
       const listed = await runCli('ticket', 'list', '--column', 'qa');
       expect(listed.exitCode).toBe(0);

@@ -12,7 +12,7 @@ const envelope = (changes: Record<string, unknown> = {}): string =>
     ok: true,
     command: 'ticket ready',
     exit: 0,
-    contractVersion: 0,
+    contractVersion: 1,
     data: { ticketId: 'AEOS-1', subState: 'READY' },
     error: null,
     warnings: [],
@@ -51,7 +51,18 @@ describe('outputProblems', () => {
   });
 
   it('fails an exit code that is not a key of the command responses', () => {
-    expect(check(refusal(3), 3)).toEqual(['ticket ready: exit 3 is not a response of the command']);
+    expect(check(refusal(130), 130)).toEqual([
+      'ticket ready: exit 130 is not a response of the command',
+    ]);
+  });
+
+  it('passes exit 3 on every command: a pipeline change in flight can stop any of them', () => {
+    expect(check(refusal(3), 3)).toEqual([]);
+    expect(
+      Object.entries(contract.commands)
+        .filter(([, command]) => !('3' in command.responses))
+        .map(([commandPath]) => commandPath),
+    ).toEqual([]);
   });
 
   it('fails a field the data schema does not declare', () => {

@@ -57,6 +57,7 @@ function createMockGitGateway(): GitGateway {
     defaultBranch: vi.fn().mockReturnValue('main'),
     hasRemote: vi.fn().mockReturnValue(true),
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
+    commitOf: vi.fn().mockReturnValue(null),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
     userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
@@ -141,7 +142,7 @@ describe('TicketDodApproveUseCase', () => {
     costRepo = createMockCostRepo();
     conformance = { buildConformance: vi.fn() };
     runRecordStore = { write: vi.fn(), list: vi.fn().mockReturnValue([]) };
-    pullRequests = { isAvailable: vi.fn(), create: vi.fn(), updateBody: vi.fn() };
+    pullRequests = { needsPush: true, isAvailable: vi.fn(), create: vi.fn(), updateBody: vi.fn() };
     // As the templates declare it: the column called DOD_GATE is the final gate.
     columnSpecLoader = {
       load: vi.fn((column: string) => ({
@@ -546,6 +547,22 @@ describe('TicketDodApproveUseCase', () => {
       ticketId: TICKET_ID,
       error: `Ticket ${TICKET_ID} not found`,
     });
+  });
+
+  it('says why a ticket cannot be decided, without reviewing or recording anything', () => {
+    expect(useCase.refusal(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toBeNull();
+
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...dodGateTicket(),
+      column: 'QA',
+    });
+    expect(useCase.refusal(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toContain('is not in DOD_GATE');
+
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    expect(useCase.refusal(PROJECT_ID, PROJECT_PATH, TICKET_ID)).toBe(
+      `Ticket ${TICKET_ID} not found`,
+    );
+    expect(gateRecorder.record).not.toHaveBeenCalled();
   });
 
   it('should return error when ticket is not in DOD_GATE column', () => {

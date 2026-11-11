@@ -88,6 +88,7 @@ export function createTempProject(): TempProject {
   // clean here and the pipeline cases still run; a case that tests the lint
   // itself must be skipped on `pythonReady` instead.
   if (!pythonReady) {
+    vi.spyOn(PythonDecisionsLint.prototype, 'ready').mockReturnValue(true);
     vi.spyOn(PythonDecisionsLint.prototype, 'lint').mockReturnValue({
       schemaErrors: [],
       lintErrors: [],

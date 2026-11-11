@@ -151,6 +151,7 @@ describe('OrchestratorUseCase', () => {
       defaultBranch: vi.fn().mockReturnValue('main'),
       hasRemote: vi.fn().mockReturnValue(true),
       headCommit: vi.fn().mockReturnValue('c0ffee1'),
+      commitOf: vi.fn().mockReturnValue(null),
       showFile: vi.fn().mockReturnValue(''),
       pathChangedSince: vi.fn().mockReturnValue(false),
       userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
@@ -334,6 +335,13 @@ describe('OrchestratorUseCase', () => {
       await expect(run()).rejects.toThrow(/TECH_SPEC.*'ollama-cli'/);
     });
 
+    it('refuses when it is on the final gate, which the orchestrator runs', async () => {
+      at('TECH_SPEC', []);
+      ollamaIn('DOD_GATE');
+
+      await expect(run()).rejects.toThrow(/DOD_GATE.*'ollama-cli'/);
+    });
+
     it('accepts when the epic is beyond decomposition and every child is past the task column', async () => {
       at('INTEGRATION_REVIEW', [Column.DONE, 'QA']);
       ollamaIn('CODE_REVIEW');
@@ -392,6 +400,21 @@ describe('OrchestratorUseCase', () => {
 
     expect(gitGateway.ensureOnBranch).toHaveBeenCalledWith(PROJECT_PATH, 'aeos/AEOS-1');
     expect(gitGateway.tagHere).toHaveBeenCalledWith(PROJECT_PATH, 'aeos-base/AEOS-1');
+  });
+
+  it('does not mark the epic running when its branch cannot be switched to', async () => {
+    (gitGateway.isRepo as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (gitGateway.ensureOnBranch as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new Error("Cannot switch to branch 'aeos/AEOS-1'");
+    });
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      epic({ column: 'DOD_GATE', subState: SubState.READY }),
+    );
+
+    await expect(useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID)).rejects.toThrow(
+      "Cannot switch to branch 'aeos/AEOS-1'",
+    );
+    expect(stateRepo.upsert).not.toHaveBeenCalled();
   });
 
   it('skips git isolation when the project path is not a repo', async () => {
@@ -462,6 +485,37 @@ describe('OrchestratorUseCase', () => {
     expect(result.haltReason).toBe(HaltReason.HUMAN_GATE);
     expect(ticketApprove.execute).not.toHaveBeenCalled();
     expect(ticketRun.execute).not.toHaveBeenCalled();
+  });
+
+  it('runs the final gate of a spec-backed epic once, then halts for the person', async () => {
+    let subState: SubState = SubState.READY;
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      epic({
+        column: 'DOD_GATE',
+        subState,
+        specPin: { repo: 'AEOS-aeos', commit: 'abc1234', path: 'features/f' },
+      }),
+    );
+    (ticketRun.execute as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      subState = SubState.SIGNED_OFF;
+      return {
+        status: 'success',
+        ticketId: EPIC_ID,
+        artifactPath: '',
+        reviewPath: '',
+        attempts: 1,
+      };
+    });
+
+    const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+    expect(result.haltReason).toBe(HaltReason.HUMAN_GATE);
+    expect(result.steps.map((s) => `${s.action} ${s.column}`)).toEqual(['run DOD_GATE']);
+    expect(ticketApprove.execute).not.toHaveBeenCalled();
+
+    // Already run: a second orchestrator run halts without running it again.
+    await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+    expect(ticketRun.execute).toHaveBeenCalledTimes(1);
   });
 
   it('honours a manual column even when the global mode is auto', async () => {

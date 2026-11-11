@@ -43,11 +43,16 @@ export class TicketApproveUseCase implements TicketApprovePort {
     projectId: string,
     projectPath: string,
     ticketId: string,
-    options: { byEngine?: boolean; contract?: boolean } = {},
+    options: { byEngine?: boolean; contract?: boolean; pullRequestHost?: () => boolean } = {},
   ): TicketApproveResult {
     const ticket = this.ticketRepo.findById(projectId, ticketId);
     if (!ticket) {
       return { status: 'error', ticketId, error: `Ticket ${ticketId} not found` };
+    }
+
+    // Asked first: a finished ticket has no sub-state, so it is never "not signed off".
+    if (ticket.column === Column.DONE) {
+      return { status: 'already_done', ticketId };
     }
 
     // BACKLOG tickets can advance without sign-off (no agent pipeline in BACKLOG).
@@ -64,8 +69,15 @@ export class TicketApproveUseCase implements TicketApprovePort {
     }
 
     const currentColumn = ticket.column;
-    if (currentColumn === Column.DONE) {
-      return { status: 'already_done', ticketId };
+
+    // An epic is reviewed against its pinned spec. One created before pins has
+    // none, and would reach the spec-review column with nothing to review.
+    if (isBacklog && ticket.kind === TicketKind.EPIC && !ticket.specPin) {
+      return {
+        status: 'error',
+        ticketId,
+        error: `Epic ${ticketId} has no spec. An epic is now built from a spec a person wrote: write one with the spec skills (prototype-harvest, gap-interrogation-solo or gap-interrogation-capture, spec-writer), create a new epic with "aeos ticket create <title> --spec <feature>", and close this one with "aeos ticket move".`,
+      };
     }
 
     // What this column is for decides what leaving it means: never its name.
@@ -154,6 +166,13 @@ export class TicketApproveUseCase implements TicketApprovePort {
       opensPullRequest &&
       this.projectRepo.readExecutorConfig(projectPath)?.pullRequests?.enabled !== false
     ) {
+      if (options.pullRequestHost?.() === false) {
+        return {
+          status: 'error',
+          ticketId,
+          error: `Cannot open a pull request for ${ticketId}: the code host is not in place.`,
+        };
+      }
       const error = this.openPullRequest(projectId, projectPath, ticket, columnSpec);
       if (error) return { status: 'error', ticketId, error };
     }
@@ -182,14 +201,18 @@ export class TicketApproveUseCase implements TicketApprovePort {
       return { status: 'error', ticketId, error: transitionResult.reason };
     }
 
-    // Set sub-state to READY (new column awaits its first `ticket run`)
-    const subStateResult = this.stateMachine.setSubState(projectId, ticketId, SubState.READY);
-    if (!subStateResult.ok) {
-      return {
-        status: 'error',
-        ticketId,
-        error: `Failed to set READY state: ${subStateResult.reason}`,
-      };
+    // A new column awaits its first `ticket run`; DONE has no sub-state, and
+    // the transition has already cleared it.
+    const nextSubState = nextColumn === Column.DONE ? null : SubState.READY;
+    if (nextSubState) {
+      const subStateResult = this.stateMachine.setSubState(projectId, ticketId, nextSubState);
+      if (!subStateResult.ok) {
+        return {
+          status: 'error',
+          ticketId,
+          error: `Failed to set READY state: ${subStateResult.reason}`,
+        };
+      }
     }
 
     // Mirrored to disk; SQLite is authoritative for column and sub-state, so
@@ -197,7 +220,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
     syncTicketDocument(this.artifactStore, projectPath, {
       ...ticket,
       column: nextColumn,
-      subState: SubState.READY,
+      subState: nextSubState,
     });
 
     return {
@@ -228,8 +251,9 @@ export class TicketApproveUseCase implements TicketApprovePort {
 
     const head = `aeos/${ticket.id}`;
     try {
-      // No remote only gets this far with a gateway that needs none (the stub).
-      if (this.gitGateway.hasRemote(projectPath)) this.gitGateway.push(projectPath, head);
+      if (this.pullRequestGateway.needsPush && this.gitGateway.hasRemote(projectPath)) {
+        this.gitGateway.push(projectPath, head);
+      }
       const { url } = this.pullRequestGateway.create({
         cwd: projectPath,
         base: this.gitGateway.defaultBranch(projectPath),

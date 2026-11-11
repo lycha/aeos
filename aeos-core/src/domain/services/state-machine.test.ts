@@ -221,6 +221,12 @@ describe('StateMachineService', () => {
       expect(ticket.subState).toBeNull();
     });
 
+    it('resets sub_state to null when moving into DONE', () => {
+      seedTicket(ticketRepo, { column: 'QA', subState: SubState.SIGNED_OFF });
+      stateMachine.transition(PROJECT_ID, 'T-1', Column.DONE);
+      expect(ticketRepo.findById(PROJECT_ID, 'T-1')!.subState).toBeNull();
+    });
+
     it('does NOT reset sub_state when moving backward to non-BACKLOG column', () => {
       seedTicket(ticketRepo, { column: 'TECH_SPEC', subState: SubState.WORKING });
       stateMachine.transition(PROJECT_ID, 'T-1', 'TECH_SPEC');

@@ -12,6 +12,14 @@ export const ticketDodApprove: Handlers['ticketDodApprove'] = async (
 ) => {
   const { projectPath, prompt } = context;
 
+  const project = context.container.projectRepo.read(projectPath);
+  const useCase = context.container.ticketDodApprove;
+
+  // The real reason first: a ticket that cannot be decided here is not waiting
+  // for a terminal.
+  const refusal = useCase.refusal(project.id, projectPath, ticketId);
+  if (refusal) return failed(refusal);
+
   // The release decision is a person's. With no terminal there is nobody to
   // ask, and there is no --yes: nothing is reviewed and nothing is recorded.
   if (!prompt.interactive) {
@@ -21,9 +29,6 @@ export const ticketDodApprove: Handlers['ticketDodApprove'] = async (
       `Approving ${ticketId} as done is a person's decision, and stdin is not a terminal. Run \`aeos ticket dod-approve ${ticketId}\` at one.`,
     );
   }
-
-  const project = context.container.projectRepo.read(projectPath);
-  const useCase = context.container.ticketDodApprove;
 
   // 1. What is being decided: a verdict per criterion, then the pull request.
   const verified = options.verified ?? [];

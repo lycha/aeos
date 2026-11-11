@@ -12,7 +12,6 @@ export const ErrorCode = {
   INVALID_ARGUMENT: 'INVALID_ARGUMENT',
   RESOURCE_MISSING: 'RESOURCE_MISSING',
   CONFIRMATION_REQUIRED: 'CONFIRMATION_REQUIRED',
-  CONFIRMATION_DECLINED: 'CONFIRMATION_DECLINED',
   TICKET_NOT_FOUND: 'TICKET_NOT_FOUND',
   PROJECT_NOT_FOUND: 'PROJECT_NOT_FOUND',
   NOT_SIGNED_OFF: 'NOT_SIGNED_OFF',
@@ -46,8 +45,12 @@ const BY_WORDING: readonly (readonly [RegExp, ErrorCode, Situation?, T.Error['re
   [/carries a contract change/, 'CONTRACT_APPROVAL_REQUIRED', 'gate-refused'],
   [/needs --reason/, 'REASON_REQUIRED', 'gate-refused'],
   [/needs a written reason/, 'REASON_REQUIRED', 'usage'],
+  [/^Unknown status '/, 'INVALID_ARGUMENT', 'usage'],
+  // Guards answer for `ticket create --spec` and `ticket repin`. Still read
+  // here: the amendment lint of `ticket answer`, which declares no python.
   [/python3 is not on PATH|python3 modules/, 'RESOURCE_MISSING', 'missing-resource', 'python'],
-  [/`gh`( command)? is not /, 'RESOURCE_MISSING', 'missing-resource', 'gh'],
+  // The `gh` guard finds the command; whether it is logged in, only running it says.
+  [/`gh` is not authenticated/, 'RESOURCE_MISSING', 'missing-resource', 'gh'],
   [/^Cannot open a pull request/, 'PULL_REQUEST_FAILED'],
   [/CLI not found on PATH/, 'EXECUTOR_NOT_FOUND'],
   [/exited with code/, 'EXECUTOR_NONZERO_EXIT'],

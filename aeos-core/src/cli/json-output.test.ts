@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { programWith } from './commands/program.fixture.js';
 import type { Container } from './container.js';
+import { outputProblems } from './contract/contract-output.fixture.js';
+import { loadContract } from './contract/load-contract.js';
+import type { ResourceName } from './generated/resources.gen.js';
 import { runCli } from './index.js';
 import type { Prompt } from './prompt.js';
 import { displayOrder } from '../domain/model/column.js';
@@ -51,6 +54,7 @@ async function cli(
   container: Record<string, unknown>,
   args: string[],
   prompt?: Prompt,
+  missing: ResourceName[] = [],
 ): Promise<Ran> {
   const out: string[] = [];
   const err: string[] = [];
@@ -62,6 +66,7 @@ async function cli(
     { projectRepo, columnLabels: () => labels, ...container } as unknown as Container,
     new Command(),
     prompt,
+    missing,
   );
   await program.parseAsync(['node', 'aeos', ...args]);
   const exit = process.exitCode;
@@ -95,7 +100,7 @@ describe('--json', () => {
       ok: true,
       command: 'ticket ready',
       exit: 0,
-      contractVersion: 0,
+      contractVersion: 1,
       data: { ticketId: 'AEOS-1', subState: 'READY' },
       error: null,
       warnings: [],
@@ -341,10 +346,20 @@ describe('exit codes', () => {
       ok: false,
       error: { code: 'CONTRACT_APPROVAL_REQUIRED' },
     });
-    expect(execute).toHaveBeenLastCalledWith('proj-1', '/test', 'AEOS-1', { contract: false });
+    expect(execute).toHaveBeenLastCalledWith(
+      'proj-1',
+      '/test',
+      'AEOS-1',
+      expect.objectContaining({ contract: false }),
+    );
 
     await cli({ ticketApprove: { execute } }, ['ticket', 'approve', 'AEOS-1', '--contract']);
-    expect(execute).toHaveBeenLastCalledWith('proj-1', '/test', 'AEOS-1', { contract: true });
+    expect(execute).toHaveBeenLastCalledWith(
+      'proj-1',
+      '/test',
+      'AEOS-1',
+      expect.objectContaining({ contract: true }),
+    );
   });
 
   it('a missing required argument is usage', async () => {
@@ -374,6 +389,73 @@ describe('exit codes', () => {
     expect(ran.envelope()).toMatchObject({
       error: { code: 'RESOURCE_MISSING', resource: 'project' },
     });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('ticket create asks for python exactly when --spec is given', async () => {
+    const execute = vi.fn().mockReturnValue({
+      ticketId: 'AEOS-2',
+      kind: 'TASK',
+      parentId: null,
+      title: 'A bug',
+      alreadyExisted: false,
+    });
+    const create = (...args: string[]): Promise<Ran> =>
+      cli({ ticketCreate: { execute } }, ['ticket', 'create', ...args, '--json'], undefined, [
+        'python',
+      ]);
+
+    expect((await create('A bug', '--bug')).exit).toBe(0);
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    const ran = await create('An epic', '--spec', 'sample');
+    expect(ran.exit).toBe(4);
+    expect(ran.envelope()).toMatchObject({
+      error: { code: 'RESOURCE_MISSING', resource: 'python' },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('ticket approve asks for gh exactly when the approval opens a pull request', async () => {
+    const advanced = {
+      status: 'advanced',
+      ticketId: 'AEOS-1',
+      fromColumn: 'TECH_SPEC',
+      toColumn: 'TASK_BREAKDOWN',
+      pullRequestUrl: null,
+      gateRecordId: 'GATE-1',
+    };
+    const approve = (execute: unknown): Promise<Ran> =>
+      cli({ ticketApprove: { execute } }, ['ticket', 'approve', 'AEOS-1', '--json'], undefined, [
+        'gh',
+      ]);
+
+    // The use case opens no pull request, so it never asks.
+    expect((await approve(() => advanced)).exit).toBe(0);
+
+    // It is about to open one, and asks through the option the handler gave it.
+    const ran = await approve(
+      (_project: string, _path: string, id: string, options: { pullRequestHost(): boolean }) =>
+        options.pullRequestHost()
+          ? advanced
+          : { status: 'error', ticketId: id, error: 'no code host' },
+    );
+    expect(ran.exit).toBe(4);
+    expect(ran.envelope()).toMatchObject({ error: { code: 'RESOURCE_MISSING', resource: 'gh' } });
+  });
+
+  it('ticket repin without python is missing_resource', async () => {
+    const execute = vi.fn();
+
+    const ran = await cli(
+      { ticketRepin: { execute } },
+      ['ticket', 'repin', 'AEOS-1', '--json'],
+      undefined,
+      ['python'],
+    );
+
+    expect(ran.exit).toBe(4);
+    expect(ran.envelope()).toMatchObject({ error: { resource: 'python' } });
     expect(execute).not.toHaveBeenCalled();
   });
 });
@@ -422,7 +504,7 @@ describe('prompts', () => {
   });
 
   it('ticket dod-approve without a terminal is needs_human and records nothing', async () => {
-    const useCase = { review: vi.fn(), execute: vi.fn() };
+    const useCase = { refusal: vi.fn().mockReturnValue(null), review: vi.fn(), execute: vi.fn() };
 
     const ran = await cli(
       { ticketDodApprove: useCase },
@@ -435,6 +517,29 @@ describe('prompts', () => {
     expect(useCase.review).not.toHaveBeenCalled();
     expect(useCase.execute).not.toHaveBeenCalled();
     expect(silent.ask).not.toHaveBeenCalled();
+  });
+
+  it('ticket dod-approve gives the real reason before it asks for a terminal', async () => {
+    const useCase = {
+      refusal: vi
+        .fn()
+        .mockReturnValue(
+          'Ticket AEOS-1 is not in DOD_GATE (current column: QA). Only DOD_GATE tickets can be approved via dod-approve.',
+        ),
+      review: vi.fn(),
+      execute: vi.fn(),
+    };
+
+    const ran = await cli(
+      { ticketDodApprove: useCase },
+      ['ticket', 'dod-approve', 'AEOS-1', '--json'],
+      silent,
+    );
+
+    expect(ran.exit).toBe(1);
+    expect(ran.envelope()).toMatchObject({ error: { code: 'NOT_AT_FINAL_GATE' } });
+    expect(useCase.review).not.toHaveBeenCalled();
+    expect(useCase.execute).not.toHaveBeenCalled();
   });
 
   it('ticket answer on an unmodified file without a terminal needs --yes', async () => {
@@ -502,9 +607,74 @@ describe('prompts', () => {
     expect(refused.exit).toBe(2);
   });
 
+  it.each([
+    ['answer', 'ticketAnswer'],
+    ['resolve', 'ticketResolve'],
+  ])(
+    'ticket %s: declining at a terminal is success, changes nothing, and is valid output',
+    async (verb, useCase) => {
+      const execute = vi.fn().mockReturnValue({ ok: false, needsConfirmation: true, reason: '' });
+      const container = { [useCase]: { execute } };
+
+      const ran = await cli(container, ['ticket', verb, 'AEOS-1', '--json'], answering('n'));
+
+      expect(ran.exit).toBe(0);
+      expect(ran.envelope()).toMatchObject({
+        ok: true,
+        data: { ticketId: 'AEOS-1', declined: true },
+        error: null,
+      });
+      expect(outputProblems(loadContract(), `ticket ${verb}`, ran.out.join('\n'), 0)).toEqual([]);
+      // Asked once, never confirmed.
+      expect(execute).toHaveBeenCalledTimes(1);
+
+      const text = await cli(container, ['ticket', verb, 'AEOS-1'], answering('n'));
+      expect(text.exit).toBe(0);
+      expect(text.out).toEqual(['Aborted.']);
+    },
+  );
+
+  it('ticket approve on a ticket that is already done is still a failure', async () => {
+    const execute = vi.fn().mockReturnValue({ status: 'already_done', ticketId: 'AEOS-1' });
+
+    const ran = await cli({ ticketApprove: { execute } }, [
+      'ticket',
+      'approve',
+      'AEOS-1',
+      '--json',
+    ]);
+
+    expect(ran.exit).toBe(1);
+    expect(ran.envelope()).toMatchObject({ error: { code: 'ALREADY_DONE' } });
+  });
+
+  it('ticket approve prints the sub-state of the new column, and none for DONE', async () => {
+    const advanced = (toColumn: string) => ({
+      ticketApprove: {
+        execute: () => ({
+          status: 'advanced',
+          ticketId: 'AEOS-1',
+          fromColumn: 'QA',
+          toColumn,
+          pullRequestUrl: null,
+          gateRecordId: 'GATE-1',
+        }),
+      },
+    });
+
+    const done = await cli(advanced('DONE'), ['ticket', 'approve', 'AEOS-1']);
+    expect(done.out).toEqual([`✓ Ticket AEOS-1 advanced: ${labels.QA} → Done`]);
+
+    const next = await cli(advanced('CODE_REVIEW'), ['ticket', 'approve', 'AEOS-1']);
+    expect(next.out).toEqual([
+      `✓ Ticket AEOS-1 advanced: ${labels.QA} → Code review (sub-state: READY)`,
+    ]);
+  });
+
   it('a command that asks under --json still writes one JSON object to stdout', async () => {
     const person = answering('y');
     const useCase = {
+      refusal: vi.fn().mockReturnValue(null),
       review: vi.fn().mockResolvedValue({ ok: true, review: { report: null, prUrl: null } }),
       execute: vi.fn().mockReturnValue({
         status: 'approved',

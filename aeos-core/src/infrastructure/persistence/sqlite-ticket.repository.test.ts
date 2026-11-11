@@ -42,6 +42,16 @@ afterEach(() => {
   resetDb();
 });
 
+describe('SqliteTicketRepository — DONE', () => {
+  it('reads a finished ticket stored with a sub-state as having none', () => {
+    // A task approved into DONE used to be stored READY.
+    repo.save(ticket({ column: 'DONE', subState: SubState.READY }));
+
+    expect(repo.findById('p', 'AEOS-1')!.subState).toBeNull();
+    expect(repo.findByProject('p')[0]!.subState).toBeNull();
+  });
+});
+
 describe('SqliteTicketRepository — escalation', () => {
   it('round-trips a recorded escalation', () => {
     repo.save(ticket({ subState: SubState.ESCALATED }));

@@ -371,6 +371,59 @@ describe('SimpleGitGateway branches and remotes', () => {
     expect(gateway.currentBranch(repo)).toBe('aeos/AEOS-1');
   });
 
+  const rev = (ref: string): string =>
+    execFileSync('git', ['rev-parse', ref], { cwd: repo, encoding: 'utf-8' }).trim();
+
+  it('resolves a tag to its commit, and an unknown ref to null', () => {
+    git('tag', 'aeos-base/AEOS-1');
+    fs.writeFileSync(path.join(repo, 'a.md'), 'later\n');
+    git('commit', '-am', 'later');
+
+    expect(gateway.commitOf(repo, 'aeos-base/AEOS-1')).toBe(rev('HEAD~1'));
+    expect(gateway.commitOf(repo, 'aeos-base/AEOS-2')).toBeNull();
+  });
+
+  it('cuts a new branch from the default branch, wherever HEAD is', () => {
+    git('checkout', '-b', 'aeos/AEOS-1');
+    fs.writeFileSync(path.join(repo, 'one.md'), 'one\n');
+    git('add', '.');
+    git('commit', '-m', 'work of AEOS-1');
+
+    gateway.ensureOnBranch(repo, 'aeos/AEOS-2');
+
+    expect(gateway.currentBranch(repo)).toBe('aeos/AEOS-2');
+    expect(rev('HEAD')).toBe(rev('master'));
+    expect(fs.existsSync(path.join(repo, 'one.md'))).toBe(false);
+  });
+
+  it('checks out an existing branch as it is', () => {
+    git('checkout', '-b', 'aeos/AEOS-1');
+    fs.writeFileSync(path.join(repo, 'one.md'), 'one\n');
+    git('add', '.');
+    git('commit', '-m', 'work of AEOS-1');
+    const tip = rev('HEAD');
+    git('checkout', 'master');
+
+    gateway.ensureOnBranch(repo, 'aeos/AEOS-1');
+
+    expect(gateway.currentBranch(repo)).toBe('aeos/AEOS-1');
+    expect(rev('HEAD')).toBe(tip);
+  });
+
+  it('refuses a switch the uncommitted changes prevent, and leaves them where they are', () => {
+    git('checkout', '-b', 'aeos/AEOS-1');
+    fs.writeFileSync(path.join(repo, 'a.md'), 'committed on AEOS-1\n');
+    git('commit', '-am', 'work of AEOS-1');
+    fs.writeFileSync(path.join(repo, 'a.md'), 'not committed\n');
+
+    expect(() => gateway.ensureOnBranch(repo, 'aeos/AEOS-2')).toThrow(
+      /Cannot switch to branch 'aeos\/AEOS-2'.*a\.md.*[Cc]ommit or stash/s,
+    );
+    expect(gateway.currentBranch(repo)).toBe('aeos/AEOS-1');
+    expect(fs.readFileSync(path.join(repo, 'a.md'), 'utf-8')).toBe('not committed\n');
+    expect(gateway.refExists(repo, 'refs/heads/aeos/AEOS-2')).toBe(false);
+  });
+
   it('takes the default branch from the local branches when there is no remote', () => {
     expect(gateway.defaultBranch(repo)).toBe('master');
     git('branch', 'main');

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { templatePipelines } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TicketRunUseCase } from './ticket-run.use-case.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
@@ -89,6 +90,7 @@ function createMockGitGateway(): GitGateway {
     defaultBranch: vi.fn().mockReturnValue('main'),
     hasRemote: vi.fn().mockReturnValue(true),
     headCommit: vi.fn().mockReturnValue('c0ffee1'),
+    commitOf: vi.fn().mockReturnValue(null),
     showFile: vi.fn().mockReturnValue(''),
     pathChangedSince: vi.fn().mockReturnValue(false),
     userIdentity: vi.fn().mockReturnValue('Test <test@test.com>'),
@@ -395,6 +397,7 @@ describe('TicketRunUseCase', () => {
           generatorStamps = stamps;
         },
       },
+      { load: () => templatePipelines() },
     );
   }
 
@@ -1681,6 +1684,22 @@ describe('TicketRunUseCase', () => {
     expect(result.status).toBe('failed');
   });
 
+  it.each([
+    ['EPIC', 'SPEC_REVIEW'],
+    ['TASK', 'IMPLEMENTATION'],
+  ] as const)("names a %s's own first column when it is still in BACKLOG", async (kind, first) => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      runnableTicket({ kind, column: 'BACKLOG' }),
+    );
+
+    const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: `Ticket ${TICKET_ID} is in BACKLOG. Run 'aeos ticket approve ${TICKET_ID}' to advance to ${first} first.`,
+    });
+  });
+
   it('should return failed for DOD_GATE column', async () => {
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
       runnableTicket({ column: 'DOD_GATE' }),
@@ -1724,30 +1743,36 @@ describe('TicketRunUseCase', () => {
       expect(order(gitGateway.tagHere)).toBeLessThan(order(executor.run));
     });
 
-    it('refuses to run a child task while HEAD is the default branch', async () => {
+    it("puts a child task on its epic's tagged branch before any executor runs", async () => {
       running({ parentId: 'AEOS-9' });
       onDefaultBranch();
 
       const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-      expect(result).toMatchObject({ status: 'failed' });
-      const { error } = result as { error: string };
-      expect(error).toContain("default branch 'main'");
-      expect(error).toContain('aeos/AEOS-9');
-      expect(executor.run).not.toHaveBeenCalled();
-      expect(preflight.run).not.toHaveBeenCalled();
-      expect(stateMachine.setSubState).not.toHaveBeenCalled();
-      expect(gitGateway.ensureOnBranch).not.toHaveBeenCalled();
+      expect(result.status).toBe('success');
+      expect(gitGateway.ensureOnBranch).toHaveBeenCalledWith(PROJECT_PATH, 'aeos/AEOS-9');
+      expect(gitGateway.tagHere).toHaveBeenCalledWith(PROJECT_PATH, 'aeos-base/AEOS-9');
+      expect(order(gitGateway.ensureOnBranch)).toBeLessThan(order(gitGateway.tagHere));
+      expect(order(gitGateway.tagHere)).toBeLessThan(order(preflight.run));
+      expect(order(gitGateway.tagHere)).toBeLessThan(order(executor.run));
     });
 
-    it("runs a child task on its epic's branch without switching", async () => {
+    it('fails before anything runs when the branch cannot be switched to', async () => {
       running({ parentId: 'AEOS-9' });
-      (gitGateway.currentBranch as ReturnType<typeof vi.fn>).mockReturnValue('aeos/AEOS-9');
+      (gitGateway.ensureOnBranch as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw new Error("Cannot switch to branch 'aeos/AEOS-9': a.md would be overwritten.");
+      });
 
       const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
-      expect(result.status).toBe('success');
-      expect(gitGateway.ensureOnBranch).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        status: 'failed',
+        ticketId: TICKET_ID,
+        error: "Cannot switch to branch 'aeos/AEOS-9': a.md would be overwritten.",
+      });
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(preflight.run).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
     });
 
     it('leaves an epic where it is', async () => {
@@ -2849,6 +2874,20 @@ describe('TicketRunUseCase', () => {
       await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
 
       expect(checksRunner.run).not.toHaveBeenCalled();
+    });
+
+    it('does not run generators on an agentic column that requires no repository diff', async () => {
+      // A decomposition column: nothing isolates it from the default branch.
+      generators = [GENERATOR];
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue(
+        defaultColumnSpec({ requiresRepoDiff: false }),
+      );
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result.status).toBe('success');
+      expect(checksRunner.run).not.toHaveBeenCalled();
+      expect(projectCommits()).toEqual([]);
     });
 
     it('fails the attempt with the output of a generator that fails, and never runs the worker', async () => {

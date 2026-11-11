@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { getDb } from '../infrastructure/persistence/database.js';
+import { PythonDecisionsLint } from '../infrastructure/spec/decisions-lint.adapter.js';
 import { aeosHome } from '../shared/config.js';
 import type { Container } from './container.js';
 import type { ResourceName } from './generated/resources.gen.js';
@@ -74,6 +75,10 @@ export function createResources(container: Container, prompt: Prompt = terminalP
       const binary = options.executor && EXECUTOR_BINARIES[options.executor];
       return !binary || onPath(binary);
     },
+    python: () => new PythonDecisionsLint().ready(),
+    // Found is all that is asked: `gh` is never run here. The stub's pull
+    // request gateway needs none.
+    gh: () => process.env.AEOS_EXECUTOR === 'stub' || onPath('gh'),
   };
 
   return {

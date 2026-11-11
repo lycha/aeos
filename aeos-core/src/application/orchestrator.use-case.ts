@@ -138,11 +138,12 @@ export class OrchestratorUseCase implements OrchestratorPort {
     const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
     const steps: OrchestratorStep[] = [];
 
+    // Isolate this epic's work on its own branch before any task runs, and
+    // before the epic is marked running: a refused switch throws.
+    this.setUpGitIsolation(projectPath, epicId);
+
     this.writeState(projectId, epicId, OrchestratorStatus.RUNNING, null, null, budgetUsd);
     let settled = false;
-
-    // Isolate this epic's work on its own branch before any task runs.
-    this.setUpGitIsolation(projectPath, epicId);
 
     try {
       for (let step = 0; step < maxSteps; step += 1) {
@@ -406,8 +407,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
     ];
     for (const column of ahead) {
       const spec = columnSpecOf(this.columnSpecLoader, projectPath, column);
-      // The final gate is a person's: nothing the orchestrator runs spends there.
-      if (!spec || spec.role === 'final-gate') continue;
+      if (!spec) continue;
       for (const agentFile of [spec.workerAgentFile, spec.reviewerAgentFile]) {
         const agent = this.agentSpecLoader.load(agentFile, projectPath);
         const { executorType } = this.executorConfigResolver.resolveExecutorConfig(

@@ -122,6 +122,28 @@ describe('the ticket move handler', () => {
     );
   });
 
+  it('an unknown status is a usage error, and still lists the pipeline', async () => {
+    (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
+      status: 'error',
+      ticketId: 'AEOS-1',
+      error: "Unknown status 'NOT_A_COLUMN' for TASK AEOS-1. Valid statuses: BACKLOG, QA, DONE",
+    });
+    await program.parseAsync([
+      'node',
+      'aeos',
+      'ticket',
+      'move',
+      'AEOS-1',
+      'NOT_A_COLUMN',
+      '--reason',
+      REASON,
+    ]);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Error: Unknown status 'NOT_A_COLUMN' for TASK AEOS-1. Valid statuses: Backlog, Qa, Done",
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
   it('shows use case errors and sets exit code 1', async () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       status: 'error',

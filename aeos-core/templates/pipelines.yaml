@@ -10,7 +10,7 @@
 #   - every column listed has a column spec in .aeos/column-specs/
 #   - an EPIC pipeline has exactly one column with role `decomposition`, and it
 #     comes before any column with role `integration` or `final-gate`
-#   - a pipeline has at most one `final-gate`, and it is the last column before DONE
+#   - an EPIC pipeline has exactly one `final-gate`, and it is the last column before DONE
 #   - a column identifier appears at most once per pipeline
 #   - the order of a kind may change only when every ticket of that kind is in
 #     BACKLOG or DONE (decided 10 Nov 2026; I1-M4-005c)

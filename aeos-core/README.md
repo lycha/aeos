@@ -13,7 +13,7 @@ An AI-assisted development pipeline that takes a ticket from idea to code review
   - `opencode` — [install](https://opencode.ai/docs/cli/)
   - `ollama` — [install](https://docs.ollama.com/cli)
 - **GitHub CLI (`gh`)**, authenticated, and a git remote — for the pull requests AEOS opens. Not needed with `"pullRequests": { "enabled": false }` (see [Branches and pull requests](#branches-and-pull-requests)).
-- **Python 3 with `PyYAML` and `jsonschema`** — only for `aeos ticket create --spec`, which runs `lint_decisions.py` (see [Spec-backed epics](#spec-backed-epics)).
+- **Python 3 with `PyYAML` and `jsonschema`** — only for `aeos ticket create --spec`, which runs `lint_decisions.py`. The feature it names must have `spec.md`, `decisions.yaml` and `feature-inventory.yaml`, all committed (see [Spec-backed epics](#spec-backed-epics)).
 - macOS or Linux
 
 ## Install
@@ -42,21 +42,26 @@ aeos project init --name "My Project" --key MYPRJ
 aeos ticket create "Add user authentication" --spec user-authentication
 
 # 3. Edit the ticket description
-$EDITOR .aeos/MYPRJ-1-ticket.md
+$EDITOR .aeos/tickets/MYPRJ-1/MYPRJ-1-ticket.md
 
-# 4. Run the current column (agent executes → reviewer evaluates)
+# 4. Approve it out of BACKLOG, into its first column
+aeos ticket approve MYPRJ-1
+
+# 5. Run the current column (agent executes → reviewer evaluates)
 aeos ticket run MYPRJ-1
 
 # Optional: override executor/model for a single run
 aeos ticket run MYPRJ-1 --executor opencode-cli --model ollama/qwen2.5-coder:14b
 
-# 5. Approve to advance to the next column
+# 6. Approve to advance to the next column
 aeos ticket approve MYPRJ-1
 
-# Optional: move a ticket directly to any workflow status
-aeos ticket move MYPRJ-1 QA --reason "Built by hand; skipping to QA."
+# Optional: move a ticket directly to any column of its own pipeline
+aeos ticket move MYPRJ-1 TECH_SPEC --reason "Spec reviewed by hand; skipping ahead."
 
-# 6. Repeat steps 4–5 for each column, then final approval
+# 7. Repeat steps 5–6 for each column. The child tasks created in TASK_BREAKDOWN
+#    go through their own columns the same way (see "Epics and Tasks"), or let
+#    `aeos orchestrator run MYPRJ-1` drive them. Then, at the final gate:
 aeos ticket dod-approve MYPRJ-1
 ```
 
@@ -116,8 +121,11 @@ Each column follows the same cycle:
 ├── agents/                worker and reviewer agent specs
 ├── rubrics/               reviewer rubrics and artifact templates
 ├── schemas/               artefact schemas and lint_decisions.py, with a .source stamp
+├── skills/                the aeos skill, linked into .claude/skills and .augment/skills
 ├── features/              one directory per feature: its human-written spec
-└── contexts/              one directory per bounded context: glossary, constraints
+├── contexts/              one directory per bounded context: glossary, constraints
+└── tickets/               one directory per ticket, from the first `ticket create`:
+                           its document, artifacts, gate records and run records
 ```
 
 `.aeos/` is the project's **artefact tree**: its own git repository, ignored by the
@@ -131,8 +139,13 @@ Everything under `column-specs/`, `agents/`, and `rubrics/` is scaffolded from t
 templates shipped with AEOS and is **yours to edit** — changing pipeline behaviour
 usually means editing this YAML, not TypeScript.
 
+`project init` commits what it wrote in `.aeos` (`[<KEY>][INIT] scaffold`), so the
+protected-path check guards the scaffold from the first run on. If git refuses the commit
+(no identity, usually), it fails and says how to set one; run it again afterwards.
+
 Re-running `aeos project init` is the repair path: it restores anything missing and
-never overwrites a file you have edited.
+never overwrites a file you have edited. It commits what is then uncommitted in `.aeos`,
+your own uncommitted edits there included, as `ticket create` does.
 
 ### Column names
 
@@ -179,7 +192,7 @@ executorMode: agentic
 | `spec-review` | approving out of it is recorded as the `spec` gate |
 | `decomposition` | the epic waits here while the orchestrator drives its child tasks, and cannot leave until every child is `DONE`; its reviewer is told which criteria no task claims |
 | `integration` | criteria are traced before the worker runs; approving an epic out of it opens the pull request |
-| `final-gate` | `ticket run` builds the conformance report; approval is `ticket dod-approve`; the orchestrator halts here whatever `advanceMode` says |
+| `final-gate` | `ticket run` builds the conformance report; approval is `ticket dod-approve`; the orchestrator runs the column, then halts here whatever `advanceMode` says |
 
 `diffContext` is the diff the column's agents are given: `none` (default), `task` (the working tree of one task, for its code review; that column's review is the one a task's pull request cites) or `epic` (the epic's `base..HEAD`). `executorMode` is `artifact` unless the spec says `agentic`; no column is agentic because of its name.
 
@@ -198,11 +211,11 @@ The file is checked every time it is loaded, and a command that needs it fails w
 - every column listed (other than `BACKLOG` and `DONE`) has a column spec in `.aeos/column-specs/`
 - an `EPIC` pipeline has exactly one `spec-review` column, before the `decomposition` column
 - an `EPIC` pipeline has exactly one `decomposition` column, before any `integration` or `final-gate` column
-- a pipeline has at most one `final-gate` column, and it is the last before `DONE`
+- an `EPIC` pipeline has exactly one `final-gate` column, and it is the last before `DONE`. Column specs scaffolded before roles existed declare none, so such a project is refused until `aeos project sync --force` brings them up to the templates
 - a `TASK` pipeline has no `spec-review`, `decomposition` or `final-gate` column
 - only the kinds `EPIC` and `TASK` exist; any other key is refused
 
-`ticket move` takes a column of that ticket's own pipeline; anything else is refused with the list. The file is a protected path: an agentic run may not edit it.
+`ticket move` takes a column of that ticket's own pipeline; anything else is refused with the list, as a usage error (exit `2`, `INVALID_ARGUMENT`). The file is a protected path: an agentic run may not edit it.
 
 **The order of a kind may change only while none of its tickets is in flight**, that is, while every ticket of that kind is in `BACKLOG` or `DONE`. AEOS remembers the pipeline it last accepted for each kind and compares the file with it whenever a `ticket` or `orchestrator` command runs:
 
@@ -267,7 +280,7 @@ With possible detours to:
 - `FAILED` when execution, validation, or review fails
 - `INTERRUPTED` when work is stopped intentionally
 
-After a human approves the ticket with `aeos ticket approve <id>`, it moves to the next column and is reset to `READY`.
+After a human approves the ticket with `aeos ticket approve <id>`, it moves to the next column and is reset to `READY`. A ticket that reaches `DONE`, by any command, has no sub-state.
 
 ### Valid stored combinations
 
@@ -426,7 +439,7 @@ The engine can build a verdict per criterion from deterministic sources: the cri
    - A no is recorded as a `rejected` gate with its reason, and the epic stays at the gate.
 3. **On a yes**, `.aeos/features/<feature>/conformance.yaml` and `conformance.md` are committed in the same commit as the `definition-of-done` gate record, the epic becomes `DONE`, and the conformance section of the pull request is filled with the summary and the table (`gh pr edit`). If the pull request cannot be updated the approval stands and a warning is printed.
 
-The orchestrator still halts with `HUMAN_GATE` when the epic arrives at `DOD_GATE`; it does not run the column for you. Approving without running it is allowed: the criteria no test answered are then `unverified`, and the approval needs a reason.
+The orchestrator does step 1 for a spec-backed epic: it runs the column when the epic arrives at `DOD_GATE`, then halts with `HUMAN_GATE`. It never approves, and a column that has already been run is not run again. Approving without running it is allowed: the criteria no test answered are then `unverified`, and the approval needs a reason.
 
 An existing project needs the new templates: `aeos project sync` reports `agents/conformance-agent.yaml` as missing and `column-specs/dod-gate.yaml` and `rubrics/dod/dod-evaluation.md` as drifted.
 
@@ -440,7 +453,7 @@ npm run generate:cli      # regenerate src/cli/generated/ and the command refere
 npm run verify:generated  # fail if either differs from what the contract generates
 ```
 
-Command registration is generated from the contract, not written by hand: `scripts/generate-cli.mjs` writes `src/cli/generated/` (the Commander tree, the argument and option types of every command, each command's required resources, the environment table) and the command reference under [Commands](#commands) and in `skills/aeos/SKILL.md`. Never edit generated code; it is a protected path, and CI fails when it is stale. What is hand-written is one handler per command in `src/cli/commands/` and the resource guards in `src/cli/resources.ts`. A handler prints nothing: it returns a result (exit code, `data`, error, warnings, and the text a person reads), and the generated registration writes it, as text or as the `--json` envelope (see [Output and exit codes](#output-and-exit-codes)). Before a handler runs, each parameter is checked against its schema in the contract (exit `2`), then each resource its command requires, and the first one missing stops the command with the contract's description and fix (exit `4`). The types of every command's `data` are generated from the contract's JSON Schemas, so a handler that returns another shape does not compile. Help text is the contract's current wording; a `pending` rewording shows once the contract makes it current. An item the contract marks `proposed` is not generated, except the built ones listed as `LANDED` in the generator until the contract's markers are updated.
+Command registration is generated from the contract, not written by hand: `scripts/generate-cli.mjs` writes `src/cli/generated/` (the Commander tree, the argument and option types of every command, each command's required resources, the environment table) and the command reference under [Commands](#commands) and in `skills/aeos/SKILL.md`. Never edit generated code; it is a protected path, and CI fails when it is stale. What is hand-written is one handler per command in `src/cli/commands/` and the resource guards in `src/cli/resources.ts`. A handler prints nothing: it returns a result (exit code, `data`, error, warnings, and the text a person reads), and the generated registration writes it, as text or as the `--json` envelope (see [Output and exit codes](#output-and-exit-codes)). Before a handler runs, each parameter is checked against its schema in the contract (exit `2`), then each resource its command requires, and the first one missing stops the command with the contract's description and fix (exit `4`). A resource needed only in a stated case is asked for when that case arises: `python` by `ticket create` when `--spec` is given, `gh` by `ticket approve` when the approval opens a pull request and `pullRequests.enabled` is not `false`. The types of every command's `data` are generated from the contract's JSON Schemas, so a handler that returns another shape does not compile. Help text is the contract's current wording; a `pending` rewording shows once the contract makes it current. An item the contract marks `proposed` is not generated.
 
 The check fails when a command, argument, option, flag, summary or description differs between the two, or when an `AEOS_*` variable is read and not declared (or declared and never read). What the contract marks `proposed` and the CLI does not have yet is listed as pending, not as an error; what it marks `proposed` or `pending` and the CLI already has is listed as landed, for a person to update the markers. Output is checked in `npm test` rather than by this command, because the JSON Schema validator is a dev dependency: every output schema must be valid JSON Schema, and every command is run under the stub with `--json` and held to the envelope, to the exit codes its `responses` declare, and to the `data` schema of the code it exited with (`src/e2e/contract-output.e2e.test.ts`).
 
@@ -479,7 +492,7 @@ Two more lists in `.aeos/project.json`, both the operator's to write:
 }
 ```
 
-**Generators.** Before the worker of a column with `executorMode: agentic`, AEOS hashes the files each generator's `inputs` match. When the hash differs from the one of its last run in this working copy (`.aeos/tmp/generators.json`), the command runs in the project root (ten-minute limit), what it wrote under `outputs` is committed as `[<ticket>][GENERATED] <name>`, and the worker starts on a scaffold that already matches the contract. A generator that fails fails the attempt with its output, and the worker never runs. Every invocation leaves a run record (`role: generator`, `executor: shell`, `cost_basis: none`). Every generator's `outputs` are protected paths for the run. Files a generator writes outside its `outputs` are not committed by the engine.
+**Generators.** Before the worker of a column with `executorMode: agentic` that requires a repository diff (so not `TASK_BREAKDOWN`, whose spec says `requiresRepoDiff: false`), AEOS hashes the files each generator's `inputs` match. When the hash differs from the one of its last run in this working copy (`.aeos/tmp/generators.json`), the command runs in the project root (ten-minute limit), what it wrote under `outputs` is committed as `[<ticket>][GENERATED] <name>`, and the worker starts on a scaffold that already matches the contract. A generator that fails fails the attempt with its output, and the worker never runs. Every invocation leaves a run record (`role: generator`, `executor: shell`, `cost_basis: none`). Every generator's `outputs` are protected paths for the run. Files a generator writes outside its `outputs` are not committed by the engine.
 
 **Contracts.** `contracts` are the paths a person must approve a change to; generator `inputs` are contracts without being listed. A contract path is not a protected path: a ticket may change one, and its diff is the proposal. When a worker's run changes one (the same before/after comparison as protected paths, which still win: a path on both lists is restored and the attempt fails), the run continues to review and the ticket is marked with the paths, which `aeos ticket show` prints. Then:
 
@@ -534,7 +547,7 @@ Every command takes `--json`. With it, stdout carries exactly one JSON object, t
   "ok": false,
   "command": "ticket run",
   "exit": 3,
-  "contractVersion": 0,
+  "contractVersion": 1,
   "data": { "ticketId": "AEOS-4", "column": "CODE_REVIEW", "subState": "ESCALATED", "attempts": 5, "artifactPath": null, "reviewPath": null, "runIds": ["RUN-…"], "costUsd": 1.42, "escalation": { "reason": "ITERATIONS_EXHAUSTED", "message": "…", "attempt": 5 } },
   "error": { "code": "ITERATIONS_EXHAUSTED", "message": "…", "resource": null },
   "warnings": []
@@ -547,7 +560,7 @@ The exit code tells a script what happened ([vocabulary](#exit-code-vocabulary))
 
 Parameter values are checked against the contract before anything runs (an executor name, a `--key`, a date, a budget above zero): a bad one exits `2` with `error.code` `INVALID_ARGUMENT`, naming the parameter.
 
-**Questions.** Three commands can ask one, always on stderr. When stdin is not a terminal none does: `ticket answer` and `ticket resolve` exit `2` unless `--yes` is given (at a terminal `--yes` skips the question), and `ticket dod-approve` exits `3` with `CONFIRMATION_REQUIRED`, records nothing and has no `--yes`, because the release decision is a person's.
+**Questions.** Three commands can ask one, always on stderr. When stdin is not a terminal none does: `ticket answer` and `ticket resolve` exit `2` unless `--yes` is given (at a terminal `--yes` skips the question), and `ticket dod-approve` exits `3` with `CONFIRMATION_REQUIRED`, records nothing and has no `--yes`, because the release decision is a person's. It checks the ticket first: one that does not exist or is not at the final gate exits `1` with that reason, terminal or not.
 
 ### Breaking changes
 
@@ -556,8 +569,13 @@ For anyone scripting on "non-zero means failed, and it is always `1`":
 - **Exit codes mean something now.** `3` is not a failure. A wrapper that loops while the exit code is `0` should stop cleanly on `3` and treat only `1` as broken. `orchestrator run` used to exit `0` on `HUMAN_GATE` and `AWAITING_APPROVAL` and `1` on the other early halts; all of them are `3` now. `ticket run` used to exit `0` on a block and `1` on an escalation; both are `3`, and an interrupted run is `130`.
 - **Usage errors exit `2`**, including Commander's own (a missing argument, an unknown option), which used to exit `1`. An unknown `ticket list --column`, an invalid ticket id, `--body` with `--body-file` and a reason shorter than ten characters are usage errors too.
 - **A missing resource exits `4`** (no project, no `aeos install`, an unknown `costs --project`), not `1`.
-- **`ticket approve` on a ticket that is already done exits `1`** (`ALREADY_DONE`); it used to print the same line and exit `0`. Declining the confirmation of `ticket answer` or `ticket resolve` exits `1` (`CONFIRMATION_DECLINED`), not `0`.
+- **`ticket approve` on a ticket that is already done exits `1`** (`ALREADY_DONE`); it used to print the same line and exit `0`. Declining the confirmation of `ticket answer` or `ticket resolve` exits `0`, as it always did: nothing went wrong and nothing changed (`data` is `{ ticketId, declined: true }`).
 - **Questions are on stderr**, and so is the conformance report `ticket dod-approve` shows before asking. Without a terminal no command waits on stdin any more (see above).
+- **An epic pipeline with no `final-gate` column is refused.** A project whose column specs were scaffolded before roles existed fails every `ticket` and `orchestrator` command that changes state until `aeos project sync --force` updates them (each overwritten file is backed up to `<file>.bak`).
+- **`orchestrator run` runs the final gate before halting `HUMAN_GATE`.** It used to halt on arrival and leave `aeos ticket run <epic>` to a person; a budget now also covers that column's agents, so it is refused when one of them does not report cost. A gate run that escalates or fails halts `NEEDS_HUMAN` or `FAILED`, not `HUMAN_GATE`.
+- **An epic with no spec cannot leave `BACKLOG`.** `ticket approve` exits `1` and says to create a new epic with `--spec` and close the old one with `ticket move`. Tasks and bugs are unaffected.
+- **Stub mode pushes nothing.** Under `AEOS_EXECUTOR=stub`, approving used to push `aeos/<id>` to `origin` when the repository had a remote; it no longer does.
+- **`project init` commits the scaffold in `.aeos`** and exits `1` when git refuses the commit (no identity). It used to leave the scaffold uncommitted until the first `ticket create`.
 - **Two error messages are reworded**: an executor that is not one of the four, and a `--key` that is not 2–4 uppercase letters, are now reported by the generated parameter check (`--executor must be one of …, got 'x'.`). All other text output is what it was.
 
 <!-- BEGIN GENERATED CLI REFERENCE -->
@@ -578,6 +596,7 @@ Exit codes:
 - `0` The AEOS home exists and the database is migrated.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 
 ### `aeos project init [options]`
 
@@ -596,6 +615,7 @@ Exit codes:
 - `0` The project is scaffolded.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos project sync [options]`
@@ -616,6 +636,7 @@ Exit codes:
 - `0` The comparison ran. Drift alone is not a failure.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket create [options] <title>`
@@ -634,13 +655,14 @@ Create a new ticket (an epic by default, or a task with --parent)
 | `--implements <ids>` | Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
-Requires: `project`, `state_db`.
+Requires: `project`, `state_db`. Also `python` when: --spec is given. The decisions lint runs before the epic is created.
 
 Exit codes:
 
 - `0` The ticket exists. Under a parent the command is idempotent, so it may have existed already.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket list [options]`
@@ -649,7 +671,7 @@ List all tickets in the current project
 
 | Parameter | Description |
 | --- | --- |
-| `--column <column>` | Filter by pipeline column |
+| `--column <column>` | Filter by pipeline column (identifier or label) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
@@ -659,6 +681,7 @@ Exit codes:
 - `0` The tickets, possibly none.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket show [options] <id>`
@@ -677,6 +700,7 @@ Exit codes:
 - `0` The ticket.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket answer [options] <id>`
@@ -693,9 +717,10 @@ Requires: `project`, `state_db`.
 
 Exit codes:
 
-- `0` The ticket is unblocked and its answers are promoted to decisions.
+- `0` The ticket is unblocked and its answers are promoted to decisions. Or the person declined the confirmation, and nothing changed.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket resolve [options] <id>`
@@ -712,14 +737,15 @@ Requires: `project`, `state_db`.
 
 Exit codes:
 
-- `0` The ticket can be run again.
+- `0` The ticket can be run again. Or the person declined the confirmation, and nothing changed.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket run [options] <id>`
 
-Run the full column cycle for a ticket (preflight → executor → review → sign-off)
+Run the full column cycle for a ticket (preflight → executor → checks → review → sign-off)
 
 | Parameter | Description |
 | --- | --- |
@@ -749,7 +775,7 @@ Advance a SIGNED_OFF ticket to the next pipeline column
 | `--contract` | Also approve the contract or schema change this ticket carries |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
-Requires: `project`, `state_db`, `git_repo`.
+Requires: `project`, `state_db`, `git_repo`. Also `gh` when: This approval opens a pull request and pullRequests.enabled is true.
 
 Exit codes:
 
@@ -776,6 +802,7 @@ Exit codes:
 - `0` The ticket is SIGNED_OFF and the override is recorded as a gate.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket move [options] <id> <status>`
@@ -785,7 +812,7 @@ Move a ticket to any workflow status
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
-| `<status>` | Target workflow status / column |
+| `<status>` | Target column (identifier or label) |
 | `--reason <text>` (required) | Why the normal path is being bypassed. Recorded as a gate |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
@@ -796,6 +823,7 @@ Exit codes:
 - `0` The ticket moved and the override is recorded as a gate.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket ready [options] <id>`
@@ -814,11 +842,12 @@ Exit codes:
 - `0` The ticket is READY.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket dod-approve [options] <id>`
 
-Review DoD checklist and approve a DOD_GATE ticket as DONE
+Review the conformance report and approve a final-gate ticket as DONE
 
 | Parameter | Description |
 | --- | --- |
@@ -846,13 +875,14 @@ Move a spec-backed ticket's pin to the current spec after an amendment
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
-Requires: `project`, `state_db`.
+Requires: `project`, `state_db`, `python`.
 
 Exit codes:
 
 - `0` The pin moved and the repin is recorded as a gate.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos orchestrator run [options] <epicId>`
@@ -862,7 +892,7 @@ Run an epic until it completes, needs a human, or hits its budget
 | Parameter | Description |
 | --- | --- |
 | `<epicId>` | Epic ticket ID |
-| `--budget <usd>` | USD ceiling for this epic (persisted for later runs) |
+| `--budget <usd>` | USD ceiling for this epic (persisted for later runs). Refused on an executor that cannot report cost |
 | `--max-steps <n>` | Safety bound on scheduled actions |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
@@ -893,6 +923,7 @@ Exit codes:
 - `0` The epic is paused.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos orchestrator resume [options] <epicId>`
@@ -911,6 +942,7 @@ Exit codes:
 - `0` The epic can be scheduled.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos orchestrator clear-budget [options] <epicId>`
@@ -929,6 +961,7 @@ Exit codes:
 - `0` The epic has no budget ceiling.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos orchestrator status [options] [epicId]`
@@ -947,6 +980,7 @@ Exit codes:
 - `0` One entry per epic, possibly none.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos costs [options]`
@@ -968,6 +1002,7 @@ Exit codes:
 - `0` The spend that matches, possibly none. totalUsd covers known costs; unknownRecords counts the rest.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### Resources
@@ -979,6 +1014,8 @@ Exit codes:
 | `state_db` | The state database at <AEOS_HOME>/state.db can be opened and migrated. | Run `aeos install`, or check AEOS_HOME. |
 | `git_repo` | The project root is inside a git work tree. | Run `git init`, or run the command from the repository. |
 | `executor` | The executor CLI resolved for this run is on PATH. | Install the executor, or choose another with --executor. |
+| `python` | python3 is on PATH (needed by lint_decisions.py). | Install Python 3. |
+| `gh` | The `gh` command is on PATH and authenticated for this repository. | Install GitHub CLI and run `gh auth login`. |
 
 ### Environment variables
 
@@ -1004,8 +1041,9 @@ Exit codes:
 
 A ticket created without a parent is an **epic**, and it must be backed by a
 spec (`--spec`, see [Spec-backed epics](#spec-backed-epics)). It carries that spec through
-spec review, tech spec, and decomposition, and its `TASK_BREAKDOWN` artifact (`tasks.md`)
-lists the atomic tasks that will implement it.
+spec review, tech spec, and decomposition. `TASK_BREAKDOWN` is an agentic column: the
+architect writes the breakdown (`tasks.md`) and, in the same run, creates one child task
+per entry by calling `aeos ticket create --parent <epic> --key T-NNN` itself.
 
 ```bash
 # 1. An epic
@@ -1014,15 +1052,15 @@ aeos ticket create "Add user authentication" --spec user-authentication   # → 
 # 2. Run it through spec review, tech spec, and breakdown
 aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # spec-review.md
 aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tech spec
-aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tasks.md
+aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tasks.md, and the child tasks
 
-# 3. Create the tasks the breakdown identified
-aeos ticket create "Add password hashing" --parent AEOS-1   # → AEOS-2 (TASK)
-aeos ticket create "Add session middleware" --parent AEOS-1 # → AEOS-3 (TASK)
+# 3. The run created the tasks (here AEOS-2 and AEOS-3). Only when it did not
+#    (the stub executor cannot run commands), create them yourself:
+aeos ticket create "Add password hashing" --parent AEOS-1 --key T-001   # → AEOS-2 (TASK)
+aeos ticket create "Add session middleware" --parent AEOS-1 --key T-002 # → AEOS-3 (TASK)
 
 # 4. Each task runs its own build pipeline, on the epic's branch
-git checkout -b aeos/AEOS-1                            # `orchestrator run` does this for you
-aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation
+aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation; switches to aeos/AEOS-1
 ...
 
 # 5. Only once every task is DONE can the epic advance
@@ -1037,8 +1075,10 @@ Nesting is one level deep: tasks hang off epics, and a task cannot itself have
 children. Attempting to advance an epic out of `TASK_BREAKDOWN` while any child
 is unfinished reports which tasks are outstanding and refuses the transition.
 
-> Creating child tickets from `tasks.md` is a manual step today. Automating that
-> decomposition belongs with the orchestrator, which owns scheduling.
+> AEOS does not parse `tasks.md` into tickets: the architect creates them during the
+> `TASK_BREAKDOWN` run. `ticket create --parent` is idempotent on `--key`, so a
+> review-loop retry does not duplicate a task. If the breakdown is signed off with no
+> child tasks, the orchestrator halts `AWAITING_DECOMPOSITION`; create them by hand.
 
 ## The bug track
 
@@ -1076,6 +1116,12 @@ An epic is always created from a human-written spec in the artefact tree and pin
 aeos ticket create "Checkout flow" --spec checkout     # reads .aeos/features/checkout/
 ```
 
+Before you run it:
+
+- `python3` is on `PATH` and can import `yaml` and `jsonschema` (`python3 -m pip install PyYAML jsonschema`).
+- `.aeos/features/<feature>/` contains `spec.md`, `decisions.yaml` and `feature-inventory.yaml` (the linter reads the inventory alongside the decisions).
+- All three are committed in the `.aeos` repository.
+
 The epic is refused, with the reason, unless all of this holds, checked in this order:
 
 1. `.aeos/features/<feature>/` exists and contains `spec.md` and `decisions.yaml`.
@@ -1103,15 +1149,17 @@ missing files and will not change a file you already have.
 
 ### Projects created before `SPEC_REVIEW`
 
-The column `PRODUCT_SCOPING` is now `SPEC_REVIEW`; the database is migrated on the next command. An epic that was in that column with no spec is kept, set `ESCALATED`, and says why in `aeos ticket show`: create a new epic with `--spec` and close the old one with `aeos ticket move`. In the project, `aeos project sync` lists `column-specs/spec-review.yaml`, `agents/spec-reviewer-agent.yaml` and `rubrics/structure/spec-review-structure.md` as missing (`--apply` adds them) and the retired `product-scoping.yaml`, `pm-agent.yaml` and PRD rubrics as obsolete; it never deletes those. The reworded agents and rubrics show as drifted (`--force` overwrites, with a backup).
+The column `PRODUCT_SCOPING` is now `SPEC_REVIEW`; the database is migrated on the next command. An epic that was in that column with no spec is kept, set `ESCALATED`, and says why in `aeos ticket show`: create a new epic with `--spec` and close the old one with `aeos ticket move`. An epic with no spec that was still in `BACKLOG` is not touched by the migration; `aeos ticket approve` (and the orchestrator's advance, which halts `NEEDS_HUMAN`) refuses to move it out of `BACKLOG`, with the same guidance. In the project, `aeos project sync` lists `column-specs/spec-review.yaml`, `agents/spec-reviewer-agent.yaml` and `rubrics/structure/spec-review-structure.md` as missing (`--apply` adds them) and the retired `product-scoping.yaml`, `pm-agent.yaml` and PRD rubrics as obsolete; it never deletes those. The reworded agents and rubrics show as drifted (`--force` overwrites, with a backup).
 
 ## Branches and pull requests
 
 Nothing the engine writes goes onto the default branch.
 
 - **Epic** — `aeos orchestrator run` puts the epic on `aeos/<epicId>` and tags its base `aeos-base/<epicId>`. Its tasks commit there.
-- **Child task** — runs on its epic's branch. `aeos ticket run` refuses a child task while `HEAD` is the default branch.
+- **Child task** — runs on its epic's branch. `aeos ticket run` switches to `aeos/<epicId>`, creating it and the tag `aeos-base/<epicId>` when the orchestrator has not.
 - **Standalone task** (no parent) — `aeos ticket run` switches to `aeos/<taskId>`, creating it and the tag `aeos-base/<taskId>` on the first run.
+
+A new `aeos/<id>` branch is cut from the local tip of the default branch (nothing is fetched), wherever `HEAD` is, so a ticket never starts on top of the previous ticket's branch; an existing one is checked out as it is. When uncommitted changes prevent the switch, the run fails with git's reason and nothing is carried across: commit or stash them and run again.
 
 The default branch is the remote's `HEAD` when there is one, otherwise a local `main`, then `master`. `AEOS_GIT_ISOLATION=none` turns the branch handling off.
 
@@ -1135,7 +1183,7 @@ If the pull request cannot be opened (`gh` not on `PATH`, not authenticated, no 
 { "pullRequests": { "enabled": false } }
 ```
 
-in `.aeos/project.json` skips the push and the pull request; branches and trailers stay. With `AEOS_EXECUTOR=stub` no `gh` call is made and a placeholder URL is stored, but the branch is still pushed if the repository has a remote.
+in `.aeos/project.json` skips the push and the pull request; branches and trailers stay. With `AEOS_EXECUTOR=stub` nothing is pushed and no `gh` call is made; a placeholder URL is stored.
 
 ## Orchestrator
 
@@ -1173,7 +1221,7 @@ Every exit is a named halt reason, including the successful ones.
 | Halt reason              | Meaning                                                  |
 | ------------------------ | -------------------------------------------------------- |
 | `COMPLETE`               | The epic reached `DONE`                                  |
-| `HUMAN_GATE`             | Reached `DOD_GATE` — final sign-off is human-only. Run `aeos ticket run <epic>` there for the residual conformance judgement, then `aeos ticket dod-approve <epic>` |
+| `HUMAN_GATE`             | Reached `DOD_GATE` and, for a spec-backed epic, ran it (the residual conformance judgement) — final sign-off is human-only. Run `aeos ticket dod-approve <epic>` |
 | `AWAITING_APPROVAL`      | A column is set to manual advance                        |
 | `AWAITING_DECOMPOSITION` | The breakdown is signed off but no child tasks exist yet |
 | `NEEDS_HUMAN`            | A ticket escalated, blocked, or was interrupted          |
@@ -1291,8 +1339,12 @@ is a hard escalation, never silently treated as approval.
 
 `AEOS_EXECUTOR=stub` drives the full pipeline offline: the stub clears preflight,
 satisfies structural validation, and emits an APPROVED verdict when standing in for
-a reviewer. The one thing it cannot do is agentic `IMPLEMENTATION` — it writes no
-code, so the required repo diff is absent and the run fails by design.
+a reviewer. On the bug track it also plays both phases (a reproducing script that
+fails, then the file that makes it pass), so a `--bug` task goes through
+`IMPLEMENTATION` to `DONE` under the stub. Outside the bug track it writes no
+repository change, so a non-bug task's `IMPLEMENTATION` run fails with "Agentic
+implementation produced no repository changes". It runs no commands either, so
+`TASK_BREAKDOWN` passes but creates no child tasks.
 
 ## Architecture
 

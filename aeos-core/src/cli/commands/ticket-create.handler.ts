@@ -24,6 +24,12 @@ export const ticketCreate: Handlers['ticketCreate'] = async ({ title }, options,
     }
   }
 
+  // The decisions lint runs before a spec-backed epic is created.
+  if (options.spec !== undefined) {
+    const missing = context.require('python');
+    if (missing) return missing;
+  }
+
   const project = context.container.projectRepo.read(projectPath);
 
   const result = context.container.ticketCreate.execute({
