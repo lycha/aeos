@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lycha/aeos/schemas/gates/0",
+  "title": "Gate records (DRAFT — for human review)",
+  "description": "Every human decision at a gate, as a structured record in git (task I1-M3-004). One file per feature at .aeos/features/<feature>/gates.yaml for spec-backed work, or .aeos/tickets/<id>/<id>-gates.yaml for a ticket with no feature. Records are appended, never edited.",
+  "type": "object",
+  "required": ["schema_version", "records"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 0 },
+    "feature": { "type": ["string", "null"] },
+    "records": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/record" }
+    }
+  },
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "description": "References are triples, as in decisions.schema.json.",
+      "required": ["repo", "commit", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "repo": { "type": "string" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "path": { "type": "string" }
+      }
+    },
+    "record": {
+      "type": "object",
+      "required": ["id", "gate", "ticket", "decided_by", "decided_at", "verdict"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^GATE-[0-9]+$" },
+        "gate": {
+          "description": "Which gate this decision was made at.",
+          "enum": [
+            "spec",
+            "contract",
+            "column-approval",
+            "definition-of-done",
+            "sign-off-override",
+            "move-override",
+            "answer",
+            "escalation-resolution",
+            "amendment",
+            "repin",
+            "pipeline-change"
+          ]
+        },
+        "ticket": { "type": "string" },
+        "column": { "type": ["string", "null"] },
+        "from_column": { "type": ["string", "null"] },
+        "to_column": { "type": ["string", "null"] },
+        "decided_by": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The person, from the project repository's git user.name and user.email. Never an agent."
+        },
+        "decided_at": { "type": "string", "format": "date-time" },
+        "verdict": { "enum": ["approved", "rejected", "overridden"] },
+        "reason": {
+          "type": "string",
+          "minLength": 10,
+          "description": "Why. Required for every override and every rejection."
+        },
+        "overrides": {
+          "type": ["string", "null"],
+          "description": "The run id of the review or check verdict this decision overrode, if any. This is the input to the future override ledger."
+        },
+        "evidence": {
+          "type": "array",
+          "description": "What the person was shown: review, checks, conformance report, run records.",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "spec_pin": {
+          "description": "The spec revision in force when the decision was made.",
+          "oneOf": [{ "$ref": "#/$defs/ref" }, { "type": "null" }]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "verdict": { "enum": ["overridden", "rejected"] } } },
+          "then": { "required": ["reason"] }
+        },
+        {
+          "if": { "properties": { "gate": { "enum": ["sign-off-override", "move-override"] } } },
+          "then": {
+            "required": ["reason"],
+            "properties": { "verdict": { "const": "overridden" } }
+          }
+        }
+      ]
+    }
+  }
+}

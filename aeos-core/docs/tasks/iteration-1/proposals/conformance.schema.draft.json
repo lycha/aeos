@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lycha/aeos/schemas/conformance/0",
+  "title": "Conformance report (DRAFT — for human review)",
+  "description": "A verdict per acceptance criterion, naming the instrument that produced it (tasks I1-M4-002a/b). Written to .aeos/features/<feature>/conformance.yaml when the definition-of-done gate is approved. This is what makes 'it shipped' and 'it was specified' the same claim.",
+  "type": "object",
+  "required": ["schema_version", "meta", "criteria", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 0 },
+    "meta": {
+      "type": "object",
+      "required": ["feature", "epic", "spec", "code", "generated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "feature": { "type": "string" },
+        "epic": { "type": "string" },
+        "spec": { "$ref": "#/$defs/ref", "description": "The pinned spec the code was judged against." },
+        "code": {
+          "type": "object",
+          "required": ["repo", "commit"],
+          "additionalProperties": false,
+          "properties": {
+            "repo": { "type": "string" },
+            "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+            "base": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" }
+          }
+        },
+        "generated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/criterion" }
+    },
+    "non_goals": {
+      "type": "array",
+      "description": "Numbered non-goals from the spec, listed so the report shows what was deliberately not built.",
+      "items": { "type": "string", "pattern": "^NON-GOAL-[0-9]+$" }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total", "pass", "fail", "unverified"],
+      "additionalProperties": false,
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "pass": { "type": "integer", "minimum": 0 },
+        "fail": { "type": "integer", "minimum": 0 },
+        "unverified": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "required": ["repo", "commit", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "repo": { "type": "string" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "path": { "type": "string" }
+      }
+    },
+    "criterion": {
+      "type": "object",
+      "required": ["id", "verdict", "instruments"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^AC-[0-9]+[a-z]?$" },
+        "verdict": {
+          "enum": ["pass", "fail", "unverified"],
+          "description": "fail if any instrument failed; pass if at least one deterministic instrument passed and none failed; otherwise the agent's or person's verdict; unverified when no instrument answered."
+        },
+        "claimed_by": {
+          "type": "array",
+          "description": "Tasks that declared Implements: for this criterion.",
+          "items": { "type": "string" }
+        },
+        "instruments": {
+          "type": "array",
+          "description": "What answered. Empty only when verdict is unverified.",
+          "items": {
+            "type": "object",
+            "required": ["kind", "name", "result"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": ["test", "scenario", "check", "agent", "human"],
+                "description": "test = a named test from the runner's report; scenario = a tagged Gherkin scenario; check = a deterministic check; agent = the QA agent's judgement; human = a person, recorded as a gate."
+              },
+              "name": { "type": "string", "minLength": 1 },
+              "result": { "enum": ["pass", "fail"] },
+              "evidence": { "type": "string", "description": "Path to the report, run record or gate record." }
+            }
+          }
+        },
+        "notes": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "verdict": { "enum": ["pass", "fail"] } } },
+          "then": { "properties": { "instruments": { "minItems": 1 } } }
+        }
+      ]
+    }
+  }
+}
