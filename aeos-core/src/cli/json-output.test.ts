@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { programWith } from './commands/program.fixture.js';
 import type { Container } from './container.js';
+import type { ResourceName } from './generated/resources.gen.js';
 import { runCli } from './index.js';
 import type { Prompt } from './prompt.js';
 import { displayOrder } from '../domain/model/column.js';
@@ -51,6 +52,7 @@ async function cli(
   container: Record<string, unknown>,
   args: string[],
   prompt?: Prompt,
+  missing: ResourceName[] = [],
 ): Promise<Ran> {
   const out: string[] = [];
   const err: string[] = [];
@@ -62,6 +64,7 @@ async function cli(
     { projectRepo, columnLabels: () => labels, ...container } as unknown as Container,
     new Command(),
     prompt,
+    missing,
   );
   await program.parseAsync(['node', 'aeos', ...args]);
   const exit = process.exitCode;
@@ -374,6 +377,21 @@ describe('exit codes', () => {
     expect(ran.envelope()).toMatchObject({
       error: { code: 'RESOURCE_MISSING', resource: 'project' },
     });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('ticket repin without python is missing_resource', async () => {
+    const execute = vi.fn();
+
+    const ran = await cli(
+      { ticketRepin: { execute } },
+      ['ticket', 'repin', 'AEOS-1', '--json'],
+      undefined,
+      ['python'],
+    );
+
+    expect(ran.exit).toBe(4);
+    expect(ran.envelope()).toMatchObject({ error: { resource: 'python' } });
     expect(execute).not.toHaveBeenCalled();
   });
 });

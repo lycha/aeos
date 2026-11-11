@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { PythonDecisionsLint, type PythonRunner } from './decisions-lint.adapter.js';
 import { FsProjectRepository } from '../filesystem/fs-project.repository.js';
@@ -68,6 +68,17 @@ describe('PythonDecisionsLint', () => {
     expect(() => new PythonDecisionsLint(noModules).lint(tree, 'feature-sample')).toThrow(
       /PyYAML.*jsonschema/,
     );
+  });
+
+  it('is ready exactly when python3 imports both modules', () => {
+    const exits = (status: number | null, notFound = false): PythonRunner =>
+      vi.fn(() => ({ status, stdout: '', stderr: '', notFound }));
+    const found = exits(0);
+
+    expect(new PythonDecisionsLint(found).ready()).toBe(true);
+    expect(found).toHaveBeenCalledWith(['-c', 'import yaml, jsonschema'], expect.any(String));
+    expect(new PythonDecisionsLint(exits(1)).ready()).toBe(false);
+    expect(new PythonDecisionsLint(exits(null, true)).ready()).toBe(false);
   });
 
   it('runs the seeded linter from the tree root, as the schemas README documents', () => {

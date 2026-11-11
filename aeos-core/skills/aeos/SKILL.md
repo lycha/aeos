@@ -204,7 +204,7 @@ Create a new ticket (an epic by default, or a task with --parent)
 | `--implements <ids>` | Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
-Requires: `project`, `state_db`.
+Requires: `project`, `state_db`. Also `python` when: --spec is given. The decisions lint runs before the epic is created.
 
 Exit codes:
 
@@ -219,7 +219,7 @@ List all tickets in the current project
 
 | Parameter | Description |
 | --- | --- |
-| `--column <column>` | Filter by pipeline column |
+| `--column <column>` | Filter by pipeline column (identifier or label) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
@@ -289,7 +289,7 @@ Exit codes:
 
 ### `aeos ticket run [options] <id>`
 
-Run the full column cycle for a ticket (preflight → executor → review → sign-off)
+Run the full column cycle for a ticket (preflight → executor → checks → review → sign-off)
 
 | Parameter | Description |
 | --- | --- |
@@ -319,7 +319,7 @@ Advance a SIGNED_OFF ticket to the next pipeline column
 | `--contract` | Also approve the contract or schema change this ticket carries |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
-Requires: `project`, `state_db`, `git_repo`.
+Requires: `project`, `state_db`, `git_repo`. Also `gh` when: This approval opens a pull request and pullRequests.enabled is true.
 
 Exit codes:
 
@@ -355,7 +355,7 @@ Move a ticket to any workflow status
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
-| `<status>` | Target workflow status / column |
+| `<status>` | Target column (identifier or label) |
 | `--reason <text>` (required) | Why the normal path is being bypassed. Recorded as a gate |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
@@ -388,7 +388,7 @@ Exit codes:
 
 ### `aeos ticket dod-approve [options] <id>`
 
-Review DoD checklist and approve a DOD_GATE ticket as DONE
+Review the conformance report and approve a final-gate ticket as DONE
 
 | Parameter | Description |
 | --- | --- |
@@ -416,7 +416,7 @@ Move a spec-backed ticket's pin to the current spec after an amendment
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
-Requires: `project`, `state_db`.
+Requires: `project`, `state_db`, `python`.
 
 Exit codes:
 
@@ -432,7 +432,7 @@ Run an epic until it completes, needs a human, or hits its budget
 | Parameter | Description |
 | --- | --- |
 | `<epicId>` | Epic ticket ID |
-| `--budget <usd>` | USD ceiling for this epic (persisted for later runs) |
+| `--budget <usd>` | USD ceiling for this epic (persisted for later runs). Refused on an executor that cannot report cost |
 | `--max-steps <n>` | Safety bound on scheduled actions |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
@@ -549,6 +549,8 @@ Exit codes:
 | `state_db` | The state database at <AEOS_HOME>/state.db can be opened and migrated. | Run `aeos install`, or check AEOS_HOME. |
 | `git_repo` | The project root is inside a git work tree. | Run `git init`, or run the command from the repository. |
 | `executor` | The executor CLI resolved for this run is on PATH. | Install the executor, or choose another with --executor. |
+| `python` | python3 is on PATH (needed by lint_decisions.py). | Install Python 3. |
+| `gh` | The `gh` command is on PATH and authenticated for this repository. | Install GitHub CLI and run `gh auth login`. |
 
 ### Environment variables
 

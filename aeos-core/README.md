@@ -440,7 +440,7 @@ npm run generate:cli      # regenerate src/cli/generated/ and the command refere
 npm run verify:generated  # fail if either differs from what the contract generates
 ```
 
-Command registration is generated from the contract, not written by hand: `scripts/generate-cli.mjs` writes `src/cli/generated/` (the Commander tree, the argument and option types of every command, each command's required resources, the environment table) and the command reference under [Commands](#commands) and in `skills/aeos/SKILL.md`. Never edit generated code; it is a protected path, and CI fails when it is stale. What is hand-written is one handler per command in `src/cli/commands/` and the resource guards in `src/cli/resources.ts`. A handler prints nothing: it returns a result (exit code, `data`, error, warnings, and the text a person reads), and the generated registration writes it, as text or as the `--json` envelope (see [Output and exit codes](#output-and-exit-codes)). Before a handler runs, each parameter is checked against its schema in the contract (exit `2`), then each resource its command requires, and the first one missing stops the command with the contract's description and fix (exit `4`). The types of every command's `data` are generated from the contract's JSON Schemas, so a handler that returns another shape does not compile. Help text is the contract's current wording; a `pending` rewording shows once the contract makes it current. An item the contract marks `proposed` is not generated, except the built ones listed as `LANDED` in the generator until the contract's markers are updated.
+Command registration is generated from the contract, not written by hand: `scripts/generate-cli.mjs` writes `src/cli/generated/` (the Commander tree, the argument and option types of every command, each command's required resources, the environment table) and the command reference under [Commands](#commands) and in `skills/aeos/SKILL.md`. Never edit generated code; it is a protected path, and CI fails when it is stale. What is hand-written is one handler per command in `src/cli/commands/` and the resource guards in `src/cli/resources.ts`. A handler prints nothing: it returns a result (exit code, `data`, error, warnings, and the text a person reads), and the generated registration writes it, as text or as the `--json` envelope (see [Output and exit codes](#output-and-exit-codes)). Before a handler runs, each parameter is checked against its schema in the contract (exit `2`), then each resource its command requires, and the first one missing stops the command with the contract's description and fix (exit `4`). The types of every command's `data` are generated from the contract's JSON Schemas, so a handler that returns another shape does not compile. Help text is the contract's current wording; a `pending` rewording shows once the contract makes it current. An item the contract marks `proposed` is not generated.
 
 The check fails when a command, argument, option, flag, summary or description differs between the two, or when an `AEOS_*` variable is read and not declared (or declared and never read). What the contract marks `proposed` and the CLI does not have yet is listed as pending, not as an error; what it marks `proposed` or `pending` and the CLI already has is listed as landed, for a person to update the markers. Output is checked in `npm test` rather than by this command, because the JSON Schema validator is a dev dependency: every output schema must be valid JSON Schema, and every command is run under the stub with `--json` and held to the envelope, to the exit codes its `responses` declare, and to the `data` schema of the code it exited with (`src/e2e/contract-output.e2e.test.ts`).
 
@@ -634,7 +634,7 @@ Create a new ticket (an epic by default, or a task with --parent)
 | `--implements <ids>` | Acceptance criteria this task claims, comma-separated (e.g. AC-1,AC-2) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
-Requires: `project`, `state_db`.
+Requires: `project`, `state_db`. Also `python` when: --spec is given. The decisions lint runs before the epic is created.
 
 Exit codes:
 
@@ -649,7 +649,7 @@ List all tickets in the current project
 
 | Parameter | Description |
 | --- | --- |
-| `--column <column>` | Filter by pipeline column |
+| `--column <column>` | Filter by pipeline column (identifier or label) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`.
@@ -719,7 +719,7 @@ Exit codes:
 
 ### `aeos ticket run [options] <id>`
 
-Run the full column cycle for a ticket (preflight → executor → review → sign-off)
+Run the full column cycle for a ticket (preflight → executor → checks → review → sign-off)
 
 | Parameter | Description |
 | --- | --- |
@@ -749,7 +749,7 @@ Advance a SIGNED_OFF ticket to the next pipeline column
 | `--contract` | Also approve the contract or schema change this ticket carries |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
-Requires: `project`, `state_db`, `git_repo`.
+Requires: `project`, `state_db`, `git_repo`. Also `gh` when: This approval opens a pull request and pullRequests.enabled is true.
 
 Exit codes:
 
@@ -785,7 +785,7 @@ Move a ticket to any workflow status
 | Parameter | Description |
 | --- | --- |
 | `<id>` | Ticket ID (e.g. AEOS-1) |
-| `<status>` | Target workflow status / column |
+| `<status>` | Target column (identifier or label) |
 | `--reason <text>` (required) | Why the normal path is being bypassed. Recorded as a gate |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
@@ -818,7 +818,7 @@ Exit codes:
 
 ### `aeos ticket dod-approve [options] <id>`
 
-Review DoD checklist and approve a DOD_GATE ticket as DONE
+Review the conformance report and approve a final-gate ticket as DONE
 
 | Parameter | Description |
 | --- | --- |
@@ -846,7 +846,7 @@ Move a spec-backed ticket's pin to the current spec after an amendment
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
-Requires: `project`, `state_db`.
+Requires: `project`, `state_db`, `python`.
 
 Exit codes:
 
@@ -862,7 +862,7 @@ Run an epic until it completes, needs a human, or hits its budget
 | Parameter | Description |
 | --- | --- |
 | `<epicId>` | Epic ticket ID |
-| `--budget <usd>` | USD ceiling for this epic (persisted for later runs) |
+| `--budget <usd>` | USD ceiling for this epic (persisted for later runs). Refused on an executor that cannot report cost |
 | `--max-steps <n>` | Safety bound on scheduled actions |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
@@ -979,6 +979,8 @@ Exit codes:
 | `state_db` | The state database at <AEOS_HOME>/state.db can be opened and migrated. | Run `aeos install`, or check AEOS_HOME. |
 | `git_repo` | The project root is inside a git work tree. | Run `git init`, or run the command from the repository. |
 | `executor` | The executor CLI resolved for this run is on PATH. | Install the executor, or choose another with --executor. |
+| `python` | python3 is on PATH (needed by lint_decisions.py). | Install Python 3. |
+| `gh` | The `gh` command is on PATH and authenticated for this repository. | Install GitHub CLI and run `gh auth login`. |
 
 ### Environment variables
 

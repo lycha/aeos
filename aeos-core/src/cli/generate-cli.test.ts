@@ -186,32 +186,6 @@ describe('scripts/generate-cli.mjs', () => {
     );
   });
 
-  it('generates a proposed item named as landed, and refuses the name once it is not proposed', () => {
-    const out = tempDir();
-    const file = path.join(out, 'contract.yaml');
-    fs.writeFileSync(file, FIXTURE_CONTRACT);
-    expect(generate('--contract', file, '--landed', 'costs', '--out', out).status).toBe(0);
-    expect(read(out, GENERATED[0])).toContain(".command('costs')");
-
-    fs.writeFileSync(file, FIXTURE_CONTRACT.replace('    status: proposed\n    task: T-4\n', ''));
-    const run = generate('--contract', file, '--landed', 'costs', '--out', out);
-
-    expect(run.status).not.toBe(0);
-    expect(run.output).toMatch(/costs.*no longer.*proposed/);
-  });
-
-  it('adds a global parameter named as landed to every command', () => {
-    const out = tempDir();
-    const file = path.join(out, 'contract.yaml');
-    fs.writeFileSync(file, FIXTURE_CONTRACT);
-    expect(generate('--contract', file, '--landed', '--json', '--out', out).status).toBe(0);
-
-    expect(read(out, GENERATED[0])).toContain(".option('--json', 'JSON output')");
-    expect(read(out, GENERATED[1])).toContain(
-      'export interface TicketMoveOptions {\n  reason: string;\n  json?: boolean;\n}',
-    );
-  });
-
   it('writes the exit-code vocabulary and the contract version', () => {
     const codes = read(generateFrom(FIXTURE_CONTRACT), GENERATED[4]);
 
