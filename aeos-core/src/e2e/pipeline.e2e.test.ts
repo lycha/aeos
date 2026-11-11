@@ -141,7 +141,10 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     // is asked about it, and the reviewer about the agent. Then the person
     // decides, vouching for AC-1 as well.
     const stubCallsBeforeGate = vi.mocked(StubExecutor.prototype.run).mock.calls.length;
-    await runCli('ticket', 'run', epic);
+    // The orchestrator runs the gate's column, then stops for the person.
+    const gateRun = await runCli('orchestrator', 'run', epic);
+    expect(gateRun.output).toContain(`${epic} — HUMAN_GATE`);
+    expect(gateRun.exitCode).toBe(3);
     expect(ticketState(epic)).toMatchObject({ column: 'DOD_GATE', subState: 'SIGNED_OFF' });
     const gateCalls = vi.mocked(StubExecutor.prototype.run).mock.calls.slice(stubCallsBeforeGate);
     expect(gateCalls.map(([invocation]) => path.basename(invocation.outputPath))).toEqual([

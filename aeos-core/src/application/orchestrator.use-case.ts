@@ -406,8 +406,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
     ];
     for (const column of ahead) {
       const spec = columnSpecOf(this.columnSpecLoader, projectPath, column);
-      // The final gate is a person's: nothing the orchestrator runs spends there.
-      if (!spec || spec.role === 'final-gate') continue;
+      if (!spec) continue;
       for (const agentFile of [spec.workerAgentFile, spec.reviewerAgentFile]) {
         const agent = this.agentSpecLoader.load(agentFile, projectPath);
         const { executorType } = this.executorConfigResolver.resolveExecutorConfig(

@@ -79,11 +79,10 @@ function needsHuman(ticket: Ticket): HaltReason | null {
 }
 
 /** A ticket is runnable when it is queued and not already terminal. */
-function isRunnable(ticket: Ticket, roleOf: (column: Column) => ColumnRole): boolean {
+function isRunnable(ticket: Ticket): boolean {
   return (
     ticket.column !== Column.DONE &&
     ticket.column !== Column.BACKLOG &&
-    roleOf(ticket.column) !== 'final-gate' &&
     (ticket.subState === SubState.READY || ticket.subState === null)
   );
 }
@@ -91,7 +90,6 @@ function isRunnable(ticket: Ticket, roleOf: (column: Column) => ColumnRole): boo
 function decideForTicket(
   ticket: Ticket,
   autoAdvance: (column: Column) => boolean,
-  roleOf: (column: Column) => ColumnRole,
 ): OrchestratorAction | null {
   const halt = needsHuman(ticket);
   if (halt) {
@@ -120,7 +118,7 @@ function decideForTicket(
     };
   }
 
-  if (isRunnable(ticket, roleOf)) {
+  if (isRunnable(ticket)) {
     return {
       kind: 'run',
       ticketId: ticket.id,
@@ -177,15 +175,6 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
     };
   }
 
-  // DoD is human-only by design: its column runs when a person asks, never from here.
-  if (roleOf(epic.column) === 'final-gate') {
-    return {
-      kind: 'halt',
-      reason: HaltReason.HUMAN_GATE,
-      message: `Epic ${epic.id} reached ${epic.column}. Final sign-off is human-only — run \`aeos ticket dod-approve ${epic.id}\`.`,
-    };
-  }
-
   const epicHalt = needsHuman(epic);
   if (epicHalt) {
     return {
@@ -195,6 +184,24 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
         `Epic ${epic.id} is ${epic.subState} in ${epic.column} and needs a human before work continues.`,
         epic,
       ),
+    };
+  }
+
+  // The engine runs the final gate's column (the conformance judgement) once,
+  // then stops: the approval is a person's. Without a spec there is nothing to
+  // judge, and `ticket run` refuses the column.
+  if (roleOf(epic.column) === 'final-gate') {
+    if (epic.specPin && isRunnable(epic)) {
+      return {
+        kind: 'run',
+        ticketId: epic.id,
+        reason: `Running ${epic.column} for ${epic.id}; its approval stays with a person.`,
+      };
+    }
+    return {
+      kind: 'halt',
+      reason: HaltReason.HUMAN_GATE,
+      message: `Epic ${epic.id} reached ${epic.column}. Final sign-off is human-only — run \`aeos ticket dod-approve ${epic.id}\`.`,
     };
   }
 
@@ -231,7 +238,7 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
     // tasks touching overlapping paths would otherwise race in the worktree.
     for (const child of children) {
       if (child.column === Column.DONE) continue;
-      const action = decideForTicket(child, autoAdvance, roleOf);
+      const action = decideForTicket(child, autoAdvance);
       if (action) return action;
     }
 
@@ -250,7 +257,7 @@ export function decideNextAction(input: OrchestratorPolicyInput): OrchestratorAc
     };
   }
 
-  const epicAction = decideForTicket(epic, autoAdvance, roleOf);
+  const epicAction = decideForTicket(epic, autoAdvance);
   if (epicAction) return epicAction;
 
   return {

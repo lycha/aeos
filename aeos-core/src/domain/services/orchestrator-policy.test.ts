@@ -217,15 +217,38 @@ describe('decideNextAction', () => {
       },
     );
 
-    it('halts at DOD_GATE — final sign-off is human-only', () => {
+    const specPin = { repo: 'AEOS-aeos', commit: 'abc1234', path: 'features/f' };
+
+    // Was "halts at DOD_GATE": since 11 Nov 2026 the orchestrator runs the
+    // gate's column (the conformance judgement) first. It still never approves.
+    it('runs the final gate of a spec-backed epic before halting', () => {
+      expect(
+        decide({ epic: epic({ column: 'DOD_GATE', subState: SubState.READY, specPin }) }),
+      ).toMatchObject({ kind: 'run', ticketId: 'AEOS-1' });
+    });
+
+    it('halts at a final gate already run — final sign-off is human-only', () => {
       const action = decide({
-        epic: epic({ column: 'DOD_GATE', subState: SubState.READY }),
+        epic: epic({ column: 'DOD_GATE', subState: SubState.SIGNED_OFF, specPin }),
       });
 
       expect(action.kind).toBe('halt');
       if (action.kind !== 'halt') return;
       expect(action.reason).toBe(HaltReason.HUMAN_GATE);
       expect(action.message).toContain('dod-approve');
+    });
+
+    it('halts at the final gate without running it for an epic with no spec', () => {
+      // `ticket run` refuses the gate without a spec; running it would loop.
+      expect(
+        decide({ epic: epic({ column: 'DOD_GATE', subState: SubState.READY }) }),
+      ).toMatchObject({ kind: 'halt', reason: HaltReason.HUMAN_GATE });
+    });
+
+    it('reports a final-gate run that escalated as needing a human, not as the gate', () => {
+      expect(
+        decide({ epic: epic({ column: 'DOD_GATE', subState: SubState.ESCALATED, specPin }) }),
+      ).toMatchObject({ kind: 'halt', reason: HaltReason.NEEDS_HUMAN });
     });
 
     it('halts as complete when the epic is DONE', () => {

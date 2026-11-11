@@ -334,6 +334,13 @@ describe('OrchestratorUseCase', () => {
       await expect(run()).rejects.toThrow(/TECH_SPEC.*'ollama-cli'/);
     });
 
+    it('refuses when it is on the final gate, which the orchestrator runs', async () => {
+      at('TECH_SPEC', []);
+      ollamaIn('DOD_GATE');
+
+      await expect(run()).rejects.toThrow(/DOD_GATE.*'ollama-cli'/);
+    });
+
     it('accepts when the epic is beyond decomposition and every child is past the task column', async () => {
       at('INTEGRATION_REVIEW', [Column.DONE, 'QA']);
       ollamaIn('CODE_REVIEW');
@@ -462,6 +469,37 @@ describe('OrchestratorUseCase', () => {
     expect(result.haltReason).toBe(HaltReason.HUMAN_GATE);
     expect(ticketApprove.execute).not.toHaveBeenCalled();
     expect(ticketRun.execute).not.toHaveBeenCalled();
+  });
+
+  it('runs the final gate of a spec-backed epic once, then halts for the person', async () => {
+    let subState: SubState = SubState.READY;
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      epic({
+        column: 'DOD_GATE',
+        subState,
+        specPin: { repo: 'AEOS-aeos', commit: 'abc1234', path: 'features/f' },
+      }),
+    );
+    (ticketRun.execute as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      subState = SubState.SIGNED_OFF;
+      return {
+        status: 'success',
+        ticketId: EPIC_ID,
+        artifactPath: '',
+        reviewPath: '',
+        attempts: 1,
+      };
+    });
+
+    const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+    expect(result.haltReason).toBe(HaltReason.HUMAN_GATE);
+    expect(result.steps.map((s) => `${s.action} ${s.column}`)).toEqual(['run DOD_GATE']);
+    expect(ticketApprove.execute).not.toHaveBeenCalled();
+
+    // Already run: a second orchestrator run halts without running it again.
+    await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+    expect(ticketRun.execute).toHaveBeenCalledTimes(1);
   });
 
   it('honours a manual column even when the global mode is auto', async () => {

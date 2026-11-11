@@ -179,7 +179,7 @@ executorMode: agentic
 | `spec-review` | approving out of it is recorded as the `spec` gate |
 | `decomposition` | the epic waits here while the orchestrator drives its child tasks, and cannot leave until every child is `DONE`; its reviewer is told which criteria no task claims |
 | `integration` | criteria are traced before the worker runs; approving an epic out of it opens the pull request |
-| `final-gate` | `ticket run` builds the conformance report; approval is `ticket dod-approve`; the orchestrator halts here whatever `advanceMode` says |
+| `final-gate` | `ticket run` builds the conformance report; approval is `ticket dod-approve`; the orchestrator runs the column, then halts here whatever `advanceMode` says |
 
 `diffContext` is the diff the column's agents are given: `none` (default), `task` (the working tree of one task, for its code review; that column's review is the one a task's pull request cites) or `epic` (the epic's `base..HEAD`). `executorMode` is `artifact` unless the spec says `agentic`; no column is agentic because of its name.
 
@@ -426,7 +426,7 @@ The engine can build a verdict per criterion from deterministic sources: the cri
    - A no is recorded as a `rejected` gate with its reason, and the epic stays at the gate.
 3. **On a yes**, `.aeos/features/<feature>/conformance.yaml` and `conformance.md` are committed in the same commit as the `definition-of-done` gate record, the epic becomes `DONE`, and the conformance section of the pull request is filled with the summary and the table (`gh pr edit`). If the pull request cannot be updated the approval stands and a warning is printed.
 
-The orchestrator still halts with `HUMAN_GATE` when the epic arrives at `DOD_GATE`; it does not run the column for you. Approving without running it is allowed: the criteria no test answered are then `unverified`, and the approval needs a reason.
+The orchestrator does step 1 for a spec-backed epic: it runs the column when the epic arrives at `DOD_GATE`, then halts with `HUMAN_GATE`. It never approves, and a column that has already been run is not run again. Approving without running it is allowed: the criteria no test answered are then `unverified`, and the approval needs a reason.
 
 An existing project needs the new templates: `aeos project sync` reports `agents/conformance-agent.yaml` as missing and `column-specs/dod-gate.yaml` and `rubrics/dod/dod-evaluation.md` as drifted.
 
@@ -559,6 +559,7 @@ For anyone scripting on "non-zero means failed, and it is always `1`":
 - **`ticket approve` on a ticket that is already done exits `1`** (`ALREADY_DONE`); it used to print the same line and exit `0`. Declining the confirmation of `ticket answer` or `ticket resolve` exits `0`, as it always did: nothing went wrong and nothing changed (`data` is `{ ticketId, declined: true }`).
 - **Questions are on stderr**, and so is the conformance report `ticket dod-approve` shows before asking. Without a terminal no command waits on stdin any more (see above).
 - **An epic pipeline with no `final-gate` column is refused.** A project whose column specs were scaffolded before roles existed fails every `ticket` and `orchestrator` command that changes state until `aeos project sync --force` updates them (each overwritten file is backed up to `<file>.bak`).
+- **`orchestrator run` runs the final gate before halting `HUMAN_GATE`.** It used to halt on arrival and leave `aeos ticket run <epic>` to a person; a budget now also covers that column's agents, so it is refused when one of them does not report cost. A gate run that escalates or fails halts `NEEDS_HUMAN` or `FAILED`, not `HUMAN_GATE`.
 - **Two error messages are reworded**: an executor that is not one of the four, and a `--key` that is not 2–4 uppercase letters, are now reported by the generated parameter check (`--executor must be one of …, got 'x'.`). All other text output is what it was.
 
 <!-- BEGIN GENERATED CLI REFERENCE -->
@@ -1193,7 +1194,7 @@ Every exit is a named halt reason, including the successful ones.
 | Halt reason              | Meaning                                                  |
 | ------------------------ | -------------------------------------------------------- |
 | `COMPLETE`               | The epic reached `DONE`                                  |
-| `HUMAN_GATE`             | Reached `DOD_GATE` — final sign-off is human-only. Run `aeos ticket run <epic>` there for the residual conformance judgement, then `aeos ticket dod-approve <epic>` |
+| `HUMAN_GATE`             | Reached `DOD_GATE` and, for a spec-backed epic, ran it (the residual conformance judgement) — final sign-off is human-only. Run `aeos ticket dod-approve <epic>` |
 | `AWAITING_APPROVAL`      | A column is set to manual advance                        |
 | `AWAITING_DECOMPOSITION` | The breakdown is signed off but no child tasks exist yet |
 | `NEEDS_HUMAN`            | A ticket escalated, blocked, or was interrupted          |
