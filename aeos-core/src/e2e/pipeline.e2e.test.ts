@@ -1136,6 +1136,17 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect((await runCli('ticket', 'show', task)).output).toContain(
       'Contract change: db/schema.sql (needs approval',
     );
+    /** `ticket show --json`, held to the contract: what it says of the ticket's contract change. */
+    const shownChange = async (id: string): Promise<unknown> => {
+      const shown = await runCli('ticket', 'show', id, '--json');
+      expect(outputProblems(loadContract(), 'ticket show', shown.stdout, shown.exitCode)).toEqual(
+        [],
+      );
+      return (JSON.parse(shown.stdout) as { data: { ticket: { contractChange: unknown } } }).data
+        .ticket.contractChange;
+    };
+    expect(await shownChange(epic)).toBeNull();
+    expect(await shownChange(task)).toEqual({ paths: ['db/schema.sql'], approvedBy: null });
 
     // A person without --contract is refused too, and shown the diff.
     const refused = await runCli('ticket', 'approve', task);
@@ -1159,5 +1170,9 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect((await runCli('ticket', 'show', task)).output).toMatch(
       /Contract change: db\/schema\.sql \(approved in GATE-\d+\)/,
     );
+    expect(await shownChange(task)).toEqual({
+      paths: ['db/schema.sql'],
+      approvedBy: gates[0]!.id,
+    });
   }, 60_000);
 });

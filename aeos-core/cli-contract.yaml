@@ -264,7 +264,7 @@ components:
     TicketDetail:
       type: object
       additionalProperties: false
-      required: [id, title, kind, parentId, column, columnLabel, subState, escalation, specPin, pullRequestUrl]
+      required: [id, title, kind, parentId, column, columnLabel, subState, escalation, specPin, pullRequestUrl, contractChange]
       properties:
         id: { $ref: "#/components/schemas/TicketId" }
         title: { type: string }
@@ -276,6 +276,17 @@ components:
         escalation: { anyOf: [{ $ref: "#/components/schemas/Escalation" }, { type: "null" }] }
         specPin: { $ref: "#/components/schemas/NullableSpecPin" }
         pullRequestUrl: { $ref: "#/components/schemas/NullableString" }
+        contractChange: { anyOf: [{ $ref: "#/components/schemas/ContractChange" }, { type: "null" }] }
+    ContractChange:
+      description: The contract paths this ticket's work changed. Null on the ticket when it changed none.
+      type: object
+      additionalProperties: false
+      required: [paths, approvedBy]
+      properties:
+        paths: { $ref: "#/components/schemas/StringList" }
+        approvedBy:
+          description: The gate record of the approval (`ticket approve --contract`). Null until a person approves.
+          anyOf: [{ $ref: "#/components/schemas/GateRecordId" }, { type: "null" }]
     SubStateChange:
       type: object
       additionalProperties: false
