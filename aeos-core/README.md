@@ -561,6 +561,7 @@ For anyone scripting on "non-zero means failed, and it is always `1`":
 - **An epic pipeline with no `final-gate` column is refused.** A project whose column specs were scaffolded before roles existed fails every `ticket` and `orchestrator` command that changes state until `aeos project sync --force` updates them (each overwritten file is backed up to `<file>.bak`).
 - **`orchestrator run` runs the final gate before halting `HUMAN_GATE`.** It used to halt on arrival and leave `aeos ticket run <epic>` to a person; a budget now also covers that column's agents, so it is refused when one of them does not report cost. A gate run that escalates or fails halts `NEEDS_HUMAN` or `FAILED`, not `HUMAN_GATE`.
 - **An epic with no spec cannot leave `BACKLOG`.** `ticket approve` exits `1` and says to create a new epic with `--spec` and close the old one with `ticket move`. Tasks and bugs are unaffected.
+- **Stub mode pushes nothing.** Under `AEOS_EXECUTOR=stub`, approving used to push `aeos/<id>` to `origin` when the repository had a remote; it no longer does.
 - **Two error messages are reworded**: an executor that is not one of the four, and a `--key` that is not 2–4 uppercase letters, are now reported by the generated parameter check (`--executor must be one of …, got 'x'.`). All other text output is what it was.
 
 <!-- BEGIN GENERATED CLI REFERENCE -->
@@ -1157,7 +1158,7 @@ If the pull request cannot be opened (`gh` not on `PATH`, not authenticated, no 
 { "pullRequests": { "enabled": false } }
 ```
 
-in `.aeos/project.json` skips the push and the pull request; branches and trailers stay. With `AEOS_EXECUTOR=stub` no `gh` call is made and a placeholder URL is stored, but the branch is still pushed if the repository has a remote.
+in `.aeos/project.json` skips the push and the pull request; branches and trailers stay. With `AEOS_EXECUTOR=stub` nothing is pushed and no `gh` call is made; a placeholder URL is stored.
 
 ## Orchestrator
 

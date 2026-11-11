@@ -238,8 +238,9 @@ export class TicketApproveUseCase implements TicketApprovePort {
 
     const head = `aeos/${ticket.id}`;
     try {
-      // No remote only gets this far with a gateway that needs none (the stub).
-      if (this.gitGateway.hasRemote(projectPath)) this.gitGateway.push(projectPath, head);
+      if (this.pullRequestGateway.needsPush && this.gitGateway.hasRemote(projectPath)) {
+        this.gitGateway.push(projectPath, head);
+      }
       const { url } = this.pullRequestGateway.create({
         cwd: projectPath,
         base: this.gitGateway.defaultBranch(projectPath),

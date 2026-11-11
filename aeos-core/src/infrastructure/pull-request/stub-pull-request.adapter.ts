@@ -6,6 +6,8 @@ import type {
 } from '../../domain/ports/driven/pull-request-gateway.port.js';
 
 export class StubPullRequestGateway implements PullRequestGateway {
+  readonly needsPush = false;
+
   isAvailable(): { ok: boolean } {
     return { ok: true };
   }

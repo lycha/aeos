@@ -94,6 +94,7 @@ const TEMPLATE_ROLES: Record<string, ColumnRole | undefined> = {
 function createPullRequestMocks() {
   return {
     prGateway: {
+      needsPush: true as boolean,
       isAvailable: vi.fn().mockReturnValue({ ok: true }),
       create: vi.fn().mockReturnValue({ url: 'https://example.test/pull/7' }),
       updateBody: vi.fn(),
@@ -758,6 +759,21 @@ describe('TicketApproveUseCase — pull requests', () => {
       '<!-- aeos:spec-pin -->\nSpec: `AEOS-aeos@c0ffee1`, `features/checkout`',
     );
     expect(body).not.toContain('Spec pin: not recorded yet');
+  });
+
+  it('pushes nothing for a gateway with no host (stub mode), and still records its URL', () => {
+    approving(epicAtIntegrationReview());
+    pr.prGateway.needsPush = false;
+
+    const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result.status).toBe('advanced');
+    expect(gitGateway.push).not.toHaveBeenCalled();
+    expect(ticketRepo.setPrUrl).toHaveBeenCalledWith(
+      PROJECT_ID,
+      TICKET_ID,
+      'https://example.test/pull/7',
+    );
   });
 
   it('opens the pull request without pushing when the repository has no remote', () => {

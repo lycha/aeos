@@ -17,6 +17,8 @@ const spawn: CommandRunner = (command, args, cwd) =>
   execFileSync(command, args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
 
 export class GhPullRequestGateway implements PullRequestGateway {
+  readonly needsPush = true;
+
   /** The runner is replaceable so tests never start `gh`. */
   constructor(private readonly run: CommandRunner = spawn) {}
 

@@ -106,6 +106,10 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     git('add', '-A');
     git('commit', '-m', 'aeos project init');
     const defaultBranch = git('branch', '--show-current').trim();
+    // A local bare repository as `origin`: stub mode must push nothing to it.
+    const origin = path.join(project.projectPath, '..', 'origin.git');
+    execFileSync('git', ['init', '--bare', origin], { stdio: 'ignore' });
+    git('remote', 'add', 'origin', origin);
 
     // Epic: BACKLOG → SPEC_REVIEW → TECH_SPEC → TASK_BREAKDOWN
     const epic = await createEpic('An epic');
@@ -178,6 +182,8 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     for (const id of [epic, ...tasks, standalone]) {
       expect(ticketState(id).column, id).toBe('DONE');
     }
+    // Both stub pull requests were recorded, and nothing was pushed for them.
+    expect(execFileSync('git', ['for-each-ref'], { cwd: origin, encoding: 'utf-8' })).toBe('');
 
     // Gate records: one per human decision, valid against the approved schema.
     // The epic and its tasks are spec-backed, so theirs are with the feature.

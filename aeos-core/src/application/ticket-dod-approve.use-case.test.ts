@@ -141,7 +141,7 @@ describe('TicketDodApproveUseCase', () => {
     costRepo = createMockCostRepo();
     conformance = { buildConformance: vi.fn() };
     runRecordStore = { write: vi.fn(), list: vi.fn().mockReturnValue([]) };
-    pullRequests = { isAvailable: vi.fn(), create: vi.fn(), updateBody: vi.fn() };
+    pullRequests = { needsPush: true, isAvailable: vi.fn(), create: vi.fn(), updateBody: vi.fn() };
     // As the templates declare it: the column called DOD_GATE is the final gate.
     columnSpecLoader = {
       load: vi.fn((column: string) => ({

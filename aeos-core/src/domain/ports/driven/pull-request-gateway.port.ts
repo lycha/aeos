@@ -10,6 +10,9 @@ export interface PullRequestRequest {
 }
 
 export interface PullRequestGateway {
+  /** Whether `head` must be on the remote before `create`. False with no host (the stub): nothing is pushed. */
+  readonly needsPush: boolean;
+
   /** Whether a pull request can be opened from `cwd`; `reason` names the cause and the fix. */
   isAvailable(cwd: string): { ok: boolean; reason?: string };
 
