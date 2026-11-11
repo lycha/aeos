@@ -29,14 +29,25 @@ export type LoopDecision =
   | { readonly action: 'retry'; readonly nextAttempt: number; readonly reason: string }
   | { readonly action: 'escalate'; readonly escalation: Escalation };
 
-export interface LoopDecisionInput {
-  readonly verdict: ReviewVerdict;
+/** The blocker topic of a failed check, for convergence detection. */
+export function checkBlockerTopic(checkName: string): string {
+  return `check:${checkName}`;
+}
+
+/**
+ * What the attempt ended with: a reviewer verdict, or the name of the check
+ * that failed before the reviewer was asked. A failed check is a rejection.
+ */
+export type LoopDecisionInput = LoopDecisionBase &
+  ({ readonly verdict: ReviewVerdict } | { readonly failedCheck: string });
+
+interface LoopDecisionBase {
   /** 1-based number of the attempt that just completed. */
   readonly attempt: number;
   readonly config: LoopConfig;
   /**
    * Blocker topics from every prior attempt, oldest first, excluding the
-   * attempt described by `verdict`. Used to detect a stalled loop.
+   * attempt being decided. Used to detect a stalled loop.
    */
   readonly previousBlockerTopics: readonly (readonly string[])[];
   readonly reviewPath?: string;
@@ -60,7 +71,22 @@ function hasStalled(current: readonly string[], previous: readonly (readonly str
 }
 
 export function decideNextAttempt(input: LoopDecisionInput): LoopDecision {
-  const { verdict, attempt, config, previousBlockerTopics, reviewPath } = input;
+  const { attempt, config, previousBlockerTopics, reviewPath } = input;
+  const failedCheck = 'failedCheck' in input ? input.failedCheck : undefined;
+  const verdict: ReviewVerdict =
+    'verdict' in input
+      ? input.verdict
+      : {
+          verdict: Verdict.REJECTED,
+          blockers: 1,
+          warnings: 0,
+          info: 0,
+          blockerTopics: [checkBlockerTopic(input.failedCheck)],
+        };
+  const reported =
+    failedCheck === undefined
+      ? `Reviewer reported ${verdict.blockers} blocker(s)`
+      : `Check '${failedCheck}' failed`;
 
   // Guard 1 — severity gate. Only a rejection blocks. APPROVED_WITH_WARNINGS
   // advances by design: warnings are recorded on the artifact for a human,
@@ -94,7 +120,9 @@ export function decideNextAttempt(input: LoopDecisionInput): LoopDecision {
 
   // Guard 2 — iteration ceiling.
   if (attempt >= effectiveMax) {
-    if (config.escalation === 'mark_done') {
+    // A red check is never marked done: nothing was reviewed, and the checks
+    // stage is the evidence the build works.
+    if (config.escalation === 'mark_done' && failedCheck === undefined) {
       return {
         action: 'advance',
         reason: `Iteration limit (${effectiveMax}) reached with ${verdict.blockers} unresolved blocker(s); column escalation policy is 'mark_done', advancing anyway.`,
@@ -104,9 +132,11 @@ export function decideNextAttempt(input: LoopDecisionInput): LoopDecision {
       action: 'escalate',
       escalation: {
         reason: EscalationReason.ITERATIONS_EXHAUSTED,
-        message: config.enabled
-          ? `Reviewer still reports ${verdict.blockers} blocker(s) after ${attempt} attempt(s) (limit ${effectiveMax}).`
-          : `Reviewer reported ${verdict.blockers} blocker(s) and the revision loop is disabled.`,
+        message: !config.enabled
+          ? `${reported} and the revision loop is disabled.`
+          : failedCheck === undefined
+            ? `Reviewer still reports ${verdict.blockers} blocker(s) after ${attempt} attempt(s) (limit ${effectiveMax}).`
+            : `Check '${failedCheck}' still fails after ${attempt} attempt(s) (limit ${effectiveMax}).`,
         attempt,
         artifactPath: reviewPath,
       },
@@ -116,6 +146,6 @@ export function decideNextAttempt(input: LoopDecisionInput): LoopDecision {
   return {
     action: 'retry',
     nextAttempt: attempt + 1,
-    reason: `Reviewer reported ${verdict.blockers} blocker(s); starting attempt ${attempt + 1} of ${effectiveMax}.`,
+    reason: `${reported}; starting attempt ${attempt + 1} of ${effectiveMax}.`,
   };
 }

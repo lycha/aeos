@@ -15,6 +15,7 @@ import {
 } from '../domain/model/column.js';
 import { OrchestratorStatus, type OrchestratorState } from '../domain/model/orchestrator-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
+import type { Ticket } from '../domain/model/ticket.js';
 import {
   decideNextAction,
   HaltReason,
@@ -135,7 +136,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
 
     // A budget supplied on this run persists, so later runs inherit the ceiling.
     const budgetUsd = options.budgetUsd ?? existing?.budgetUsd ?? null;
-    if (budgetUsd !== null) this.assertExecutorsReportCost(projectPath, epicId);
+    if (budgetUsd !== null) this.assertExecutorsReportCost(projectId, projectPath, epic);
     const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
     const steps: OrchestratorStep[] = [];
 
@@ -191,7 +192,7 @@ export class OrchestratorUseCase implements OrchestratorPort {
         // stage this step drove.
         const actingColumn = this.ticketRepo.findById(projectId, action.ticketId)?.column ?? '—';
 
-        const outcome = await this.perform(
+        const { outcome, approveError } = await this.perform(
           action,
           projectId,
           projectPath,
@@ -207,6 +208,21 @@ export class OrchestratorUseCase implements OrchestratorPort {
         steps.push(recorded);
         observer?.onStep?.(recorded);
         this.heartbeat(projectId, epicId, true);
+
+        // An approval that fails will fail again on the next tick (a pull
+        // request that cannot be opened, say), so it is the operator's turn.
+        if (approveError !== undefined) {
+          settled = true;
+          return this.haltWith(
+            projectId,
+            epicId,
+            HaltReason.NEEDS_HUMAN,
+            approveError,
+            steps,
+            this.spendFor(projectId, epicId),
+            OrchestratorStatus.IDLE,
+          );
+        }
 
         // The action just finished — if the operator interrupted during it, the
         // in-flight ticket was already stopped; halt now rather than scheduling
@@ -306,14 +322,14 @@ export class OrchestratorUseCase implements OrchestratorPort {
     projectPath: string,
     onProgress: () => void,
     ticketRunObserver: TicketRunObserver | undefined,
-  ): Promise<string> {
+  ): Promise<{ outcome: string; approveError?: string }> {
     if (action.kind === 'advance') {
       const result = this.ticketApprove.execute(projectId, projectPath, action.ticketId);
       if (result.status === 'advanced') {
-        return `advanced ${result.fromColumn} → ${result.toColumn}`;
+        return { outcome: `advanced ${result.fromColumn} → ${result.toColumn}` };
       }
-      if (result.status === 'already_done') return 'already DONE';
-      return `approve failed: ${result.error}`;
+      if (result.status === 'already_done') return { outcome: 'already DONE' };
+      return { outcome: `approve failed: ${result.error}`, approveError: result.error };
     }
 
     // A single agentic run can exceed 30 minutes. Riding the run's own event
@@ -334,13 +350,13 @@ export class OrchestratorUseCase implements OrchestratorPort {
     );
     switch (result.status) {
       case 'success':
-        return `run succeeded in ${result.attempts} attempt(s)`;
+        return { outcome: `run succeeded in ${result.attempts} attempt(s)` };
       case 'escalated':
-        return `escalated: ${result.reason}`;
+        return { outcome: `escalated: ${result.reason}` };
       case 'blocked':
-        return `blocked: ${result.blockers.join('; ')}`;
+        return { outcome: `blocked: ${result.blockers.join('; ')}` };
       case 'failed':
-        return `failed: ${result.error}`;
+        return { outcome: `failed: ${result.error}` };
     }
   }
 
@@ -362,11 +378,26 @@ export class OrchestratorUseCase implements OrchestratorPort {
   }
 
   /**
-   * A budget is only a ceiling if every run reports what it cost. Refuses when
-   * any agent of any pipeline column resolves to an executor that cannot.
+   * A budget is only a ceiling if every run still to come reports what it
+   * cost. Refuses when any agent of a column still ahead resolves to an
+   * executor that cannot: the epic's current column and later ones, and each
+   * task column unless the epic is beyond decomposition and every child is
+   * past it.
    */
-  private assertExecutorsReportCost(projectPath: string, epicId: string): void {
-    for (const column of [...EPIC_COLUMN_ORDER, ...TASK_COLUMN_ORDER]) {
+  private assertExecutorsReportCost(projectId: string, projectPath: string, epic: Ticket): void {
+    const epicId = epic.id;
+    const epicAt = EPIC_COLUMN_ORDER.indexOf(epic.column as (typeof EPIC_COLUMN_ORDER)[number]);
+    const canDecompose = epicAt <= EPIC_COLUMN_ORDER.indexOf(Column.TASK_BREAKDOWN);
+    const children = this.ticketRepo.findChildren(projectId, epicId);
+    const taskOrder: readonly Column[] = TASK_COLUMN_ORDER;
+    const ahead = [
+      ...EPIC_COLUMN_ORDER.slice(Math.max(epicAt, 0)),
+      ...TASK_COLUMN_ORDER.filter(
+        (column, at) =>
+          canDecompose || children.some((child) => taskOrder.indexOf(child.column) <= at),
+      ),
+    ];
+    for (const column of ahead) {
       if (column === Column.BACKLOG || column === Column.DONE || column === Column.DOD_GATE) {
         continue;
       }

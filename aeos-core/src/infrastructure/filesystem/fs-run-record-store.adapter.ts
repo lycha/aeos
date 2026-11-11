@@ -10,7 +10,7 @@ export class FsRunRecordStore implements RunRecordStore {
   write(
     projectPath: string,
     record: RunRecord,
-    files: { brief: string; transcript: string },
+    files: { brief?: string; transcript: string },
   ): string[] {
     validatePathComponent(record.ticket, 'ticketId');
     validatePathComponent(record.run_id, 'runId');
@@ -18,8 +18,9 @@ export class FsRunRecordStore implements RunRecordStore {
     const abs = (relative: string): string => path.join(projectPath, '.aeos', relative);
     fs.mkdirSync(path.dirname(abs(paths.record)), { recursive: true });
     fs.writeFileSync(abs(paths.record), `${JSON.stringify(record, null, 2)}\n`, 'utf-8');
-    fs.writeFileSync(abs(paths.brief), files.brief, 'utf-8');
     fs.writeFileSync(abs(paths.transcript), files.transcript, 'utf-8');
+    if (files.brief === undefined) return [abs(paths.record), abs(paths.transcript)];
+    fs.writeFileSync(abs(paths.brief), files.brief, 'utf-8');
     return [abs(paths.record), abs(paths.brief), abs(paths.transcript)];
   }
 

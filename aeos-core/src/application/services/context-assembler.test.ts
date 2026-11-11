@@ -41,6 +41,12 @@ function createMockGitGateway(): GitGateway {
     tagHere: vi.fn(),
     diffRange: vi.fn().mockReturnValue(''),
     refExists: vi.fn().mockReturnValue(false),
+    changedFiles: vi.fn().mockReturnValue([]),
+    restoreFiles: vi.fn(),
+    push: vi.fn(),
+    currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
+    defaultBranch: vi.fn().mockReturnValue('main'),
+    hasRemote: vi.fn().mockReturnValue(true),
     diff: vi.fn().mockReturnValue(''),
   };
 }

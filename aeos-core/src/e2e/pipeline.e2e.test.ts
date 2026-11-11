@@ -53,7 +53,8 @@ async function driveTaskToDone(taskId: string): Promise<void> {
   for (let i = 0; i < 3; i++) await driveColumn(taskId);
 }
 
-describe('stub end-to-end pipeline', () => {
+// Each case spawns git and runs whole pipelines; the 5s default is too tight.
+describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
   let project: TempProject;
   let registryBefore: string | null;
 
@@ -74,9 +75,14 @@ describe('stub end-to-end pipeline', () => {
     // Commit what init scaffolded (skill symlinks), as a user would, so the
     // first task's baseline has nothing to pick up.
     const git = (...args: string[]): string =>
-      execFileSync('git', args, { cwd: project.projectPath, encoding: 'utf-8' });
+      execFileSync('git', args, {
+        cwd: project.projectPath,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
     git('add', '-A');
     git('commit', '-m', 'aeos project init');
+    const defaultBranch = git('branch', '--show-current').trim();
 
     // Epic: BACKLOG → PRODUCT_SCOPING → TECH_SPEC → TASK_BREAKDOWN
     const epic = await createTicket('An epic');
@@ -92,7 +98,15 @@ describe('stub end-to-end pipeline', () => {
       await createTicket('First task', '--parent', epic, '--key', 'T-001'),
       await createTicket('Second task', '--parent', epic, '--key', 'T-002'),
     ];
-    for (const task of tasks) await driveTaskToDone(task);
+    // A child task is refused on the default branch. `orchestrator run` would
+    // have put the epic on its own branch; the test plays that part too.
+    await runCli('ticket', 'approve', tasks[0]!);
+    const refused = await runCli('ticket', 'run', tasks[0]!);
+    expect(refused.output).toContain(`on the default branch '${defaultBranch}'`);
+    expect(ticketState(tasks[0]!)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'READY' });
+    git('checkout', '-b', `aeos/${epic}`);
+    for (let i = 0; i < 3; i++) await driveColumn(tasks[0]!);
+    await driveTaskToDone(tasks[1]!);
 
     // Epic: TASK_BREAKDOWN → INTEGRATION_REVIEW → DOD_GATE → DONE
     expect((await runCli('ticket', 'approve', epic)).exitCode).toBe(0);
@@ -101,8 +115,20 @@ describe('stub end-to-end pipeline', () => {
     // DOD_GATE is human-only: no run, just the approval.
     dodApprove(epic);
 
+    // Approved out of INTEGRATION_REVIEW: the (stub) pull request is recorded.
+    expect((await runCli('ticket', 'show', epic)).output).toContain(
+      `PR:     https://stub.invalid/pull/aeos/${epic}`,
+    );
+
+    // A standalone task started from the default branch moves to its own.
+    git('checkout', defaultBranch);
     const standalone = createStandaloneTask('A standalone task');
     await driveTaskToDone(standalone);
+    expect(git('branch', '--show-current').trim()).toBe(`aeos/${standalone}`);
+    expect(git('tag', '--list', `aeos-base/${standalone}`).trim()).toBe(`aeos-base/${standalone}`);
+    expect((await runCli('ticket', 'show', standalone)).output).toContain(
+      `PR:     https://stub.invalid/pull/aeos/${standalone}`,
+    );
 
     for (const id of [epic, ...tasks, standalone]) {
       expect(ticketState(id).column, id).toBe('DONE');
@@ -126,6 +152,8 @@ describe('stub end-to-end pipeline', () => {
     );
     for (const record of records) {
       expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
+      // AEOS_EXECUTOR=stub is what ran, so it is what the record names.
+      expect(record).toMatchObject({ executor: 'stub', cost_basis: 'none' });
       expect(createHash('sha256').update(read(record.brief!.path)).digest('hex')).toBe(
         record.brief!.sha256,
       );
@@ -162,14 +190,19 @@ describe('stub end-to-end pipeline', () => {
     expect(costs).not.toContain(standalone);
     for (const role of ['preflight', 'worker', 'reviewer']) expect(costs).toContain(role);
 
-    // One git spawn for all commit assertions.
-    const subjects = git('log', '--format=%s').split('\n');
-    for (const id of [...tasks, standalone]) {
-      expect(
-        subjects.filter((s) => s.startsWith(`[${id}]`)),
-        id,
-      ).toHaveLength(1);
-    }
+    // One commit per task, on a task or epic branch, with its trailers.
+    const messages = git('log', '--all', '--format=%B%x00').split('\0');
+    const commitOf = (id: string): string[] =>
+      messages.map((message) => message.trim()).filter((m) => m.startsWith(`[${id}]`));
+    for (const id of [...tasks, standalone]) expect(commitOf(id), id).toHaveLength(1);
+    for (const id of tasks) expect(commitOf(id)[0]).toContain(`\n\nTicket: ${id}\nEpic: ${epic}`);
+    expect(commitOf(standalone)[0]).toMatch(new RegExp(`\\n\\nTicket: ${standalone}$`));
+
+    // The engine committed nothing on the default branch: only the test's own two commits.
+    expect(git('log', defaultBranch, '--format=%s').trim().split('\n')).toEqual([
+      'aeos project init',
+      'initial',
+    ]);
   });
 
   it('accepts a budget on a stub run and completes it', async () => {
@@ -208,5 +241,123 @@ describe('stub end-to-end pipeline', () => {
     await runCli('ticket', 'run', epic);
 
     expect(ticketState(epic)).toMatchObject({ column: 'PRODUCT_SCOPING', subState: 'ESCALATED' });
+  });
+
+  it('runs the project checks before the reviewer, and skips the reviewer when one fails', async () => {
+    await runCli('install');
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const setChecks = (command: string): void => {
+      const file = path.join(aeosDir, 'project.json');
+      const config = JSON.parse(fs.readFileSync(file, 'utf-8')) as object;
+      const checks = [{ name: 'gate', command, timeoutSeconds: 30 }];
+      fs.writeFileSync(file, JSON.stringify({ ...config, checks }), 'utf-8');
+    };
+    const runsOf = (ticketId: string): RunRecord[] => {
+      const dir = path.join(aeosDir, 'tickets', ticketId, 'runs');
+      return fs
+        .readdirSync(dir)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8')) as RunRecord);
+    };
+    const briefOf = (record: RunRecord): string =>
+      fs.readFileSync(path.join(aeosDir, record.brief!.path), 'utf-8');
+
+    // Passing: the reviewer is briefed with the checks table.
+    setChecks('node -e "process.exit(0)"');
+    const green = createStandaloneTask('A task with green checks');
+    await runCli('ticket', 'approve', green);
+    await runCli('ticket', 'run', green);
+
+    expect(ticketState(green)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'SIGNED_OFF' });
+    const greenRuns = runsOf(green);
+    // Run ids sort by second, so the order within one run is not fixed.
+    expect(greenRuns.map((record) => record.role).sort()).toEqual([
+      'checks',
+      'preflight',
+      'reviewer',
+      'worker',
+    ]);
+    expect(briefOf(greenRuns.find((record) => record.role === 'reviewer')!)).toMatch(
+      /\| gate \| passed \| [\d.]+s \|/,
+    );
+
+    // Failing: no reviewer run for the attempt, and the output reaches the retry.
+    setChecks(`node -e "console.log('gate is red'); process.exit(1)"`);
+    const red = createStandaloneTask('A task with red checks');
+    await runCli('ticket', 'approve', red);
+    await runCli('ticket', 'run', red);
+
+    expect(ticketState(red)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'ESCALATED' });
+    const redRuns = runsOf(red);
+    expect(redRuns.filter((record) => record.role === 'reviewer')).toEqual([]);
+    const redChecks = redRuns.filter((record) => record.role === 'checks');
+    expect(redChecks.length).toBeGreaterThan(0);
+    for (const record of [...greenRuns, ...redRuns]) {
+      expect(validateRunRecord(record), JSON.stringify(validateRunRecord.errors)).toBe(true);
+    }
+    for (const record of redChecks) {
+      expect(record).toMatchObject({ verdict: 'CHECKS_FAILED', executor: 'shell' });
+    }
+    const retry = redRuns.find((record) => record.role === 'worker' && record.attempt === 2)!;
+    expect(briefOf(retry)).toContain('gate is red');
+
+    // Every run record is committed, and so is the table the reviewer relied on.
+    const aeosGit = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: aeosDir, encoding: 'utf-8' });
+    expect(aeosGit('status', '--porcelain', '--', 'tickets/*/runs')).toBe('');
+    expect(aeosGit('ls-files', `tickets/${green}/${green}-checks.md`)).not.toBe('');
+  });
+
+  it('fails a run that touches a protected path, in either repository, and restores it', async () => {
+    await runCli('install');
+    await runCli('project', 'init', '--name', 'E2E', '--key', 'EE');
+    const aeosDir = path.join(project.projectPath, '.aeos');
+    const configFile = path.join(aeosDir, 'project.json');
+    const config = JSON.parse(fs.readFileSync(configFile, 'utf-8')) as object;
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({ ...config, protectedPaths: ['src/cli/generated/**'] }),
+      'utf-8',
+    );
+    const failedRun = (ticketId: string): RunRecord => {
+      const dir = path.join(aeosDir, 'tickets', ticketId, 'runs');
+      return fs
+        .readdirSync(dir)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8')) as RunRecord)
+        .find((record) => record.exit === 'failed')!;
+    };
+
+    // `.aeos` repository: a rubric the reviewer will judge the work against.
+    // Creating the epic commits the scaffold, so the rubric is tracked.
+    const epic = await createTicket('An epic');
+    await runCli('ticket', 'approve', epic);
+    const rubric = '.aeos/rubrics/structure/code-structure.md';
+    const rubricFile = path.join(project.projectPath, rubric);
+    const original = fs.readFileSync(rubricFile, 'utf-8');
+
+    vi.stubEnv('AEOS_STUB_TOUCH', rubric);
+    const epicRun = await runCli('ticket', 'run', epic);
+
+    expect(ticketState(epic)).toMatchObject({ column: 'PRODUCT_SCOPING', subState: 'FAILED' });
+    expect(epicRun.output).toContain(rubric);
+    expect(fs.readFileSync(rubricFile, 'utf-8')).toBe(original);
+    expect(failedRun(epic)).toMatchObject({ role: 'worker' });
+    expect(failedRun(epic).error).toContain(rubric);
+    expect(validateRunRecord(failedRun(epic)), JSON.stringify(validateRunRecord.errors)).toBe(true);
+
+    // Project repository: a new file under a configured glob.
+    const task = createStandaloneTask('A task that writes generated code');
+    await runCli('ticket', 'approve', task);
+    const generated = 'src/cli/generated/commands.ts';
+
+    vi.stubEnv('AEOS_STUB_TOUCH', generated);
+    const taskRun = await runCli('ticket', 'run', task);
+
+    expect(ticketState(task)).toMatchObject({ column: 'IMPLEMENTATION', subState: 'FAILED' });
+    expect(taskRun.output).toContain(generated);
+    expect(fs.existsSync(path.join(project.projectPath, generated))).toBe(false);
+    expect(failedRun(task).error).toContain(generated);
   });
 });

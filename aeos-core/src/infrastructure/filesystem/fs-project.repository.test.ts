@@ -164,6 +164,70 @@ describe('FsProjectRepository.readExecutorConfig()', () => {
     fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
     expect(repo.readExecutorConfig(tmpDir)).toBeNull();
   });
+
+  function writeChecks(checks: unknown): void {
+    fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.aeos', 'project.json'),
+      JSON.stringify({ id: 'my-project', checks }),
+      'utf-8',
+    );
+  }
+
+  it('returns the checks list in the order written', () => {
+    const checks = [
+      { name: 'lint', command: 'npm run lint', timeoutSeconds: 120 },
+      { name: 'test', command: 'npm test', timeoutSeconds: 600 },
+    ];
+    writeChecks(checks);
+
+    expect(repo.readExecutorConfig(tmpDir)?.checks).toEqual(checks);
+  });
+
+  it('returns protectedPaths, and throws when the list is not a list of globs', () => {
+    const write = (protectedPaths: unknown): void => {
+      fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.aeos', 'project.json'),
+        JSON.stringify({ id: 'my-project', protectedPaths }),
+        'utf-8',
+      );
+    };
+
+    write(['src/cli/generated/**']);
+    expect(repo.readExecutorConfig(tmpDir)?.protectedPaths).toEqual(['src/cli/generated/**']);
+
+    write('src/**');
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "protectedPaths" in .aeos\/project.json/,
+    );
+  });
+
+  it('throws on a pullRequests setting that is not { enabled: boolean }', () => {
+    fs.mkdirSync(path.join(tmpDir, '.aeos'), { recursive: true });
+    const write = (pullRequests: unknown): void =>
+      fs.writeFileSync(
+        path.join(tmpDir, '.aeos', 'project.json'),
+        JSON.stringify({ id: 'my-project', pullRequests }),
+        'utf-8',
+      );
+
+    write({ enabled: false });
+    expect(repo.readExecutorConfig(tmpDir)?.pullRequests).toEqual({ enabled: false });
+
+    write({ enabled: 'no' });
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "pullRequests" in .aeos\/project.json/,
+    );
+  });
+
+  it('throws on an invalid checks list rather than reading it as no checks', () => {
+    writeChecks([{ name: 'test' }]);
+
+    expect(() => repo.readExecutorConfig(tmpDir)).toThrow(
+      /Invalid "checks" in .aeos\/project.json/,
+    );
+  });
 });
 
 describe('FsProjectRepository.writeConstraintsPlaceholder()', () => {

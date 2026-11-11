@@ -39,6 +39,18 @@ describe('ExecutorConfigResolver', () => {
     resolver = new ExecutorConfigResolver(projectRepo);
   });
 
+  it('resolves to stub over every other source when the stub is forced', () => {
+    const forced = new ExecutorConfigResolver(projectRepo, true);
+
+    const result = forced.resolveExecutorConfig(
+      '/project',
+      createAgentSpec({ type: 'claude-cli' }),
+      { executorType: 'ollama-cli' },
+    );
+
+    expect(result.executorType).toBe('stub');
+  });
+
   it('reads project executor config through ProjectRepository', () => {
     (projectRepo.readExecutorConfig as ReturnType<typeof vi.fn>).mockReturnValue({
       uuid: '550e8400-e29b-41d4-a716-446655440000',

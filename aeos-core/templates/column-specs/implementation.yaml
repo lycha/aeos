@@ -1,6 +1,8 @@
 column: IMPLEMENTATION
 phase: BUILD
 executorMode: agentic
+# Run the `checks` of .aeos/project.json before the reviewer.
+runChecks: true
 workerAgentFile: agents/engineer-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml
 outputArtifact: implementation-notes.md

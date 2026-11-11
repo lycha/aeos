@@ -61,6 +61,15 @@ describe('FsRunRecordStore', () => {
     expect(fs.readFileSync(files[2]!, 'utf-8')).toBe('raw');
   });
 
+  it('writes no brief file for a run that had no prompt', () => {
+    const runs = path.join(tmpDir, '.aeos', 'tickets', 'AEOS-1', 'runs');
+
+    const files = store.write(tmpDir, { ...record('RUN-2'), brief: null }, { transcript: 'raw' });
+
+    expect(files).toEqual([path.join(runs, 'RUN-2.json'), path.join(runs, 'RUN-2.log')]);
+    expect(fs.existsSync(path.join(runs, 'RUN-2.brief.md'))).toBe(false);
+  });
+
   it('lists the records of a ticket, oldest first', () => {
     store.write(tmpDir, record('RUN-20261110T100001Z-aaaa'), { brief: 'b', transcript: 't' });
     store.write(tmpDir, record('RUN-20261110T100000Z-zzzz'), { brief: 'b', transcript: 't' });

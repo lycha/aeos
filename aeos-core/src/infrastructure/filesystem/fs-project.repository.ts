@@ -12,6 +12,11 @@ import {
 } from '../../shared/errors.js';
 import { CONSTRAINTS_PLACEHOLDER } from './defaults/constraints-placeholder.js';
 import { readTemplates } from './template-source.js';
+import {
+  ProjectChecksSchema,
+  ProjectProtectedPathsSchema,
+  ProjectPullRequestsSchema,
+} from '../spec-loader/schemas.js';
 import { scaffoldSkill } from './skill-source.js';
 
 const AEOS_DIR = '.aeos';
@@ -144,11 +149,32 @@ export class FsProjectRepository implements ProjectRepository {
   }
 
   readExecutorConfig(projectPath: string): ProjectExecutorConfig | null {
+    let config: ProjectExecutorConfig;
     try {
-      return readProjectExecutorConfig(projectPath);
+      config = readProjectExecutorConfig(projectPath);
     } catch {
       return null;
     }
+    // Thrown, not swallowed: an unreadable list must not read as an empty one.
+    const protectedPaths = ProjectProtectedPathsSchema.optional().safeParse(config.protectedPaths);
+    if (!protectedPaths.success) {
+      throw new Error(
+        `Invalid "protectedPaths" in .aeos/project.json: ${protectedPaths.error.message}`,
+      );
+    }
+    // A mistyped opt-out must not read as "enabled" and start pushing.
+    const pullRequests = ProjectPullRequestsSchema.optional().safeParse(config.pullRequests);
+    if (!pullRequests.success) {
+      throw new Error(
+        `Invalid "pullRequests" in .aeos/project.json: ${pullRequests.error.message}`,
+      );
+    }
+    if (config.checks === undefined) return config;
+    const checks = ProjectChecksSchema.safeParse(config.checks);
+    if (!checks.success) {
+      throw new Error(`Invalid "checks" in .aeos/project.json: ${checks.error.message}`);
+    }
+    return { ...config, checks: checks.data };
   }
 
   readConstraints(projectPath: string): string | null {

@@ -178,6 +178,15 @@ CREATE TABLE IF NOT EXISTS orchestrator_state (
       }
     },
   },
+  {
+    version: 8,
+    description: 'Remember the pull request opened for a ticket',
+    apply: (db) => {
+      if (!hasColumn(db, 'tickets', 'pr_url')) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN pr_url TEXT DEFAULT NULL`);
+      }
+    },
+  },
   // ── Future migrations go here ──────────────────────────────────
 ];
 

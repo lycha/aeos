@@ -76,6 +76,10 @@ export function registerTicketShowCommand(
       console.log(`Column: ${result.ticket.column}`);
       // eslint-disable-next-line no-console
       console.log(`State:  ${subState}`);
+      if (result.ticket.prUrl) {
+        // eslint-disable-next-line no-console
+        console.log(`PR:     ${result.ticket.prUrl}`);
+      }
 
       // The whole point of ESCALATED/BLOCKED is "a human must look" — so tell the
       // human why, right here, instead of making them open the review artifact.

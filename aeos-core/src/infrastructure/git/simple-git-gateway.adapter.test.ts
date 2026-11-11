@@ -175,3 +175,128 @@ describe('SimpleGitGateway.diff', () => {
     expect(result).toContain('modified content');
   });
 });
+
+describe('SimpleGitGateway changed and restored files', () => {
+  let repo: string;
+  const gateway = new SimpleGitGateway();
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  };
+  const write = (relative: string, content: string): void => {
+    fs.mkdirSync(path.dirname(path.join(repo, relative)), { recursive: true });
+    fs.writeFileSync(path.join(repo, relative), content);
+  };
+
+  beforeEach(() => {
+    repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-git-test-')));
+    git('init');
+    git('config', 'user.email', 'test@test.com');
+    git('config', 'user.name', 'Test');
+    write('tracked.md', 'original\n');
+    write('dir/staged.md', 'original\n');
+    git('add', '.');
+    git('commit', '-m', 'initial');
+  });
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('lists tracked modifications, staged changes and each untracked file', () => {
+    expect(gateway.changedFiles(repo)).toEqual([]);
+
+    write('tracked.md', 'edited\n');
+    write('dir/staged.md', 'edited\n');
+    git('add', 'dir/staged.md');
+    write('new/deep/untracked.md', 'new\n');
+
+    expect(gateway.changedFiles(repo).sort()).toEqual([
+      'dir/staged.md',
+      'new/deep/untracked.md',
+      'tracked.md',
+    ]);
+  });
+
+  it('reports paths relative to the directory when it is below the repository root', () => {
+    write('dir/more.md', 'new\n');
+    write('outside.md', 'new\n');
+
+    expect(gateway.changedFiles(path.join(repo, 'dir'))).toEqual(['more.md']);
+  });
+
+  it('returns nothing outside a repository', () => {
+    const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-plain-'));
+    try {
+      expect(gateway.changedFiles(plain)).toEqual([]);
+    } finally {
+      fs.rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  it('restores tracked paths and deletes untracked and newly staged ones', () => {
+    write('tracked.md', 'edited\n');
+    write('dir/staged.md', 'edited\n');
+    git('add', 'dir/staged.md');
+    write('new/untracked.md', 'new\n');
+    write('new/added.md', 'new\n');
+    git('add', 'new/added.md');
+    write('keep.md', 'not listed\n');
+
+    gateway.restoreFiles(repo, ['tracked.md', 'dir/staged.md', 'new/untracked.md', 'new/added.md']);
+
+    expect(fs.readFileSync(path.join(repo, 'tracked.md'), 'utf-8')).toBe('original\n');
+    expect(fs.readFileSync(path.join(repo, 'dir/staged.md'), 'utf-8')).toBe('original\n');
+    expect(fs.existsSync(path.join(repo, 'new/untracked.md'))).toBe(false);
+    expect(fs.existsSync(path.join(repo, 'new/added.md'))).toBe(false);
+    expect(gateway.changedFiles(repo)).toEqual(['keep.md']);
+  });
+});
+
+describe('SimpleGitGateway branches and remotes', () => {
+  let repo: string;
+  const gateway = new SimpleGitGateway();
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  };
+
+  beforeEach(() => {
+    repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aeos-git-test-')));
+    git('init', '--initial-branch=master');
+    git('config', 'user.email', 'test@test.com');
+    git('config', 'user.name', 'Test');
+    fs.writeFileSync(path.join(repo, 'a.md'), 'a\n');
+    git('add', '.');
+    git('commit', '-m', 'initial');
+  });
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('reports the current branch', () => {
+    expect(gateway.currentBranch(repo)).toBe('master');
+    git('checkout', '-b', 'aeos/AEOS-1');
+    expect(gateway.currentBranch(repo)).toBe('aeos/AEOS-1');
+  });
+
+  it('takes the default branch from the local branches when there is no remote', () => {
+    expect(gateway.defaultBranch(repo)).toBe('master');
+    git('branch', 'main');
+    expect(gateway.defaultBranch(repo)).toBe('main');
+  });
+
+  it("prefers the remote's HEAD for the default branch", () => {
+    // Set by hand: nothing is fetched from or pushed to anywhere.
+    git('update-ref', 'refs/remotes/origin/trunk', 'HEAD');
+    git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
+
+    expect(gateway.defaultBranch(repo)).toBe('trunk');
+  });
+
+  it('knows whether a remote is configured, and is false outside a repository', () => {
+    expect(gateway.hasRemote(repo)).toBe(false);
+    git('remote', 'add', 'origin', 'https://example.invalid/nowhere.git');
+    expect(gateway.hasRemote(repo)).toBe(true);
+    expect(gateway.hasRemote(os.tmpdir())).toBe(false);
+  });
+});

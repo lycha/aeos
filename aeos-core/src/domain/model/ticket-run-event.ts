@@ -7,6 +7,7 @@ export type TicketRunPhase =
   | 'state'
   | 'worker'
   | 'validation'
+  | 'checks'
   | 'artifact'
   | 'rubrics'
   | 'review-context'

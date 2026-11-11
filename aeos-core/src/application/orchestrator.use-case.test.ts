@@ -62,6 +62,7 @@ describe('OrchestratorUseCase', () => {
       updateColumn: vi.fn(),
       updateSubState: vi.fn(),
       setEscalation: vi.fn(),
+      setPrUrl: vi.fn(),
     };
     costRepo = {
       record: vi.fn(),
@@ -127,6 +128,12 @@ describe('OrchestratorUseCase', () => {
       tagHere: vi.fn(),
       diffRange: vi.fn().mockReturnValue(''),
       refExists: vi.fn().mockReturnValue(false),
+      changedFiles: vi.fn().mockReturnValue([]),
+      restoreFiles: vi.fn(),
+      push: vi.fn(),
+      currentBranch: vi.fn().mockReturnValue('aeos/AEOS-1'),
+      defaultBranch: vi.fn().mockReturnValue('main'),
+      hasRemote: vi.fn().mockReturnValue(true),
     };
 
     useCase = new OrchestratorUseCase(
@@ -183,6 +190,24 @@ describe('OrchestratorUseCase', () => {
     expect(result.message).toContain('dod-approve');
   });
 
+  it('halts for a human when an approval fails, instead of retrying it', async () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      epic({ column: Column.INTEGRATION_REVIEW, subState: SubState.SIGNED_OFF }),
+    );
+    (ticketApprove.execute as ReturnType<typeof vi.fn>).mockReturnValue({
+      status: 'error',
+      ticketId: EPIC_ID,
+      error: 'Cannot open a pull request for AEOS-1: `gh` is not authenticated.',
+    });
+
+    const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID);
+
+    expect(result.haltReason).toBe(HaltReason.NEEDS_HUMAN);
+    expect(result.message).toContain('`gh` is not authenticated');
+    expect(ticketApprove.execute).toHaveBeenCalledTimes(1);
+    expect(result.steps).toHaveLength(1);
+  });
+
   it('halts immediately when the budget is already spent', async () => {
     (costRepo.findByTicket as ReturnType<typeof vi.fn>).mockReturnValue([{ costUsd: 12.5 }]);
 
@@ -235,6 +260,72 @@ describe('OrchestratorUseCase', () => {
       const result = await useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { maxSteps: 1 });
 
       expect(result.steps).toHaveLength(1);
+    });
+  });
+
+  describe('budget refusal looks only at columns still ahead', () => {
+    // Puts the worker of one column on an executor that cannot report cost.
+    const ollamaIn = (column: Column): void => {
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockImplementation((c: Column) => ({
+        advanceMode: 'auto',
+        workerAgentFile: `agents/worker-${c}.yaml`,
+        reviewerAgentFile: 'agents/reviewer.yaml',
+      }));
+      (agentSpecLoader.load as ReturnType<typeof vi.fn>).mockImplementation((file: string) => ({
+        name: file,
+      }));
+      (executorConfigResolver.resolveExecutorConfig as ReturnType<typeof vi.fn>).mockImplementation(
+        (_path: string, agent: { name: string }) => ({
+          executorType: agent.name === `agents/worker-${column}.yaml` ? 'ollama-cli' : 'claude-cli',
+        }),
+      );
+    };
+    const at = (epicColumn: Column, childColumns: Column[]): void => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        epic({ column: epicColumn }),
+      );
+      (ticketRepo.findChildren as ReturnType<typeof vi.fn>).mockReturnValue(
+        childColumns.map((column, i) =>
+          epic({ id: `AEOS-${i + 2}`, kind: TicketKind.TASK, parentId: EPIC_ID, column }),
+        ),
+      );
+    };
+    const run = (): Promise<unknown> =>
+      useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID, { budgetUsd: 5, maxSteps: 1 });
+
+    it('accepts a budget when the non-reporting executor is on an epic column already passed', async () => {
+      at(Column.TECH_SPEC, []);
+      ollamaIn(Column.PRODUCT_SCOPING);
+
+      await expect(run()).resolves.toBeDefined();
+    });
+
+    it("refuses when it is on the epic's current column", async () => {
+      at(Column.TECH_SPEC, []);
+      ollamaIn(Column.TECH_SPEC);
+
+      await expect(run()).rejects.toThrow(/TECH_SPEC.*'ollama-cli'/);
+    });
+
+    it('accepts when the epic is beyond decomposition and every child is past the task column', async () => {
+      at(Column.INTEGRATION_REVIEW, [Column.DONE, Column.QA]);
+      ollamaIn(Column.CODE_REVIEW);
+
+      await expect(run()).resolves.toBeDefined();
+    });
+
+    it('refuses while a child still has the task column ahead', async () => {
+      at(Column.INTEGRATION_REVIEW, [Column.DONE, Column.CODE_REVIEW]);
+      ollamaIn(Column.QA);
+
+      await expect(run()).rejects.toThrow(/QA.*'ollama-cli'/);
+    });
+
+    it('refuses on any task column while the epic can still decompose', async () => {
+      at(Column.TASK_BREAKDOWN, [Column.DONE]);
+      ollamaIn(Column.IMPLEMENTATION);
+
+      await expect(run()).rejects.toThrow(/IMPLEMENTATION.*'ollama-cli'/);
     });
   });
 

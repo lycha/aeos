@@ -16,11 +16,19 @@ export interface ResolvedExecutorConfig {
 }
 
 export class ExecutorConfigResolver {
-  constructor(private readonly projectRepo: ProjectRepository) {}
+  /**
+   * `forceStub` is the AEOS_EXECUTOR=stub override, read at the composition
+   * root. It lives here so run records, cost records and the budget refusal
+   * all name the executor that actually runs.
+   */
+  constructor(
+    private readonly projectRepo: ProjectRepository,
+    private readonly forceStub = false,
+  ) {}
 
   /**
    * Resolves effective executor configuration with precedence:
-   * CLI flag > agent spec > project config > default
+   * forced stub > CLI flag > agent spec > project config > default
    */
   resolveExecutorConfig(
     projectPath: string,
@@ -58,6 +66,10 @@ export class ExecutorConfigResolver {
     agentSpec: AgentSpec,
     projectConfig: ProjectExecutorConfig | null,
   ): 'claude-cli' | 'auggie-cli' | 'opencode-cli' | 'ollama-cli' | 'stub' {
+    if (this.forceStub) {
+      return 'stub';
+    }
+
     // 1. CLI override takes highest precedence
     if (overrides?.executorType) {
       return overrides.executorType;

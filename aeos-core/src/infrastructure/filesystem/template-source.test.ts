@@ -51,6 +51,11 @@ describe('scaffolded project integrity', () => {
       const spec = columnLoader.load(column, tmpDir);
       expect(spec.column).toBe(column);
 
+      // The checks stage is on where code is built or assembled, and nowhere else.
+      expect(spec.runChecks === true, `runChecks for ${column}`).toBe(
+        column === 'IMPLEMENTATION' || column === 'INTEGRATION_REVIEW',
+      );
+
       // ...whose agents resolve...
       expect(() => agentLoader.load(spec.workerAgentFile, tmpDir)).not.toThrow();
       expect(() => agentLoader.load(spec.reviewerAgentFile, tmpDir)).not.toThrow();

@@ -39,6 +39,8 @@ import { TicketShowUseCase } from '../application/ticket-show.use-case.js';
 import { TicketAnswerUseCase } from '../application/ticket-answer.use-case.js';
 import { TicketResolveUseCase } from '../application/ticket-resolve.use-case.js';
 import { TicketRunUseCase } from '../application/ticket-run.use-case.js';
+import { CheckRegistry } from '../application/checks/check-registry.js';
+import { ShellChecksRunner } from '../infrastructure/checks/shell-checks-runner.adapter.js';
 import { TicketApproveUseCase } from '../application/ticket-approve.use-case.js';
 import { TicketSignOffUseCase } from '../application/ticket-sign-off.use-case.js';
 import { TicketMoveUseCase } from '../application/ticket-move.use-case.js';
@@ -60,6 +62,8 @@ import { PreflightService } from '../application/services/preflight.js';
 import { SqliteCostRepository } from '../infrastructure/persistence/sqlite-cost.repository.js';
 import { DecisionPromotionService } from '../application/services/decision-promotion.service.js';
 import { ExecutorConfigResolver } from '../application/services/executor-config-resolver.js';
+import { GhPullRequestGateway } from '../infrastructure/pull-request/gh-pull-request.adapter.js';
+import { StubPullRequestGateway } from '../infrastructure/pull-request/stub-pull-request.adapter.js';
 import type { AgentSpec } from '../domain/model/agent-spec.js';
 
 export interface Container {
@@ -112,9 +116,13 @@ export function createContainer(): Container {
   const getStateMachine = (): StateMachineService =>
     (stateMachine ??= new StateMachineService(getTicketRepo(), getTransitionRepo()));
 
-  // Executor selection: AEOS_EXECUTOR=stub for testing, otherwise use per-agent executor config.
+  // AEOS_EXECUTOR=stub is read here and handed to the resolver, which turns
+  // every agent's executor into `stub` before createExecutor sees it.
+  const newExecutorConfigResolver = (): ExecutorConfigResolver =>
+    new ExecutorConfigResolver(projectRepo, process.env.AEOS_EXECUTOR === 'stub');
+
   const createExecutor = (agentSpec: AgentSpec) => {
-    if (process.env.AEOS_EXECUTOR === 'stub' || agentSpec.executor.type === 'stub') {
+    if (agentSpec.executor.type === 'stub') {
       return new StubExecutor();
     }
 
@@ -180,7 +188,7 @@ export function createContainer(): Container {
       const agentSpecLoader = new YamlAgentSpecLoader();
       const rubricLoader = new FsRubricLoader();
       const preflight = new PreflightService(artifactStore, getStateMachine());
-      const executorConfigResolver = new ExecutorConfigResolver(projectRepo);
+      const executorConfigResolver = newExecutorConfigResolver();
       return new TicketRunUseCase(
         getTicketRepo(),
         getStateMachine(),
@@ -197,6 +205,8 @@ export function createContainer(): Container {
         executorConfigResolver,
         configStore,
         runRecordStore,
+        new CheckRegistry(projectRepo, new ShellChecksRunner()),
+        projectRepo,
       );
     },
     get ticketApprove() {
@@ -205,6 +215,13 @@ export function createContainer(): Container {
         artifactStore,
         getStateMachine(),
         gitGateway,
+        // A stub run must never reach the real code host.
+        process.env.AEOS_EXECUTOR === 'stub'
+          ? new StubPullRequestGateway()
+          : new GhPullRequestGateway(),
+        getCostRepo(),
+        new YamlColumnSpecLoader(),
+        projectRepo,
       );
     },
     get ticketSignOff() {
@@ -227,7 +244,7 @@ export function createContainer(): Container {
         this.ticketApprove,
         gitGateway,
         new YamlAgentSpecLoader(),
-        new ExecutorConfigResolver(projectRepo),
+        newExecutorConfigResolver(),
       );
     },
     get ticketDodApprove() {

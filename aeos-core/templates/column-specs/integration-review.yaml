@@ -5,6 +5,8 @@ phase: VERIFY
 # diff of the epic branch — against the epic's PRD and tech-spec decisions, then
 # the standard reviewer grades that report. Artifact mode: it produces a report,
 # not repo edits, so the agentic diff check does not apply.
+# Run the `checks` of .aeos/project.json before the reviewer.
+runChecks: true
 workerAgentFile: agents/integration-reviewer-agent.yaml
 reviewerAgentFile: agents/reviewer-agent.yaml
 outputArtifact: integration-review.md

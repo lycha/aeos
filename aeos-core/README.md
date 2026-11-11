@@ -12,6 +12,7 @@ An AI-assisted development pipeline that takes a ticket from idea to code review
   - `auggie` — [install](https://docs.augmentcode.com/cli/reference)
   - `opencode` — [install](https://opencode.ai/docs/cli/)
   - `ollama` — [install](https://docs.ollama.com/cli)
+- **GitHub CLI (`gh`)**, authenticated, and a git remote — for the pull requests AEOS opens. Not needed with `"pullRequests": { "enabled": false }` (see [Branches and pull requests](#branches-and-pull-requests)).
 - macOS or Linux
 
 ## Install
@@ -91,10 +92,11 @@ Each column follows the same cycle:
 1. **Pre-flight** — agent checks for blocking questions; if found, ticket is `BLOCKED` until answered via `aeos ticket answer`
 2. **Agent run** — specialised worker agent executes the current column. Most columns produce a markdown artifact; `IMPLEMENTATION` can run in agentic mode and modify the repository directly, then emit a concise implementation summary.
 3. **Validation** — rule-based structural checks (for example non-empty output, required sections, and column-specific constraints). Agentic `IMPLEMENTATION` runs must also leave a real repo diff.
-4. **Review** — a reviewer agent (on a _different model_ from the worker) evaluates against column-specific rubrics and emits a machine-readable verdict: `APPROVED`, `APPROVED_WITH_WARNINGS`, or `REJECTED`. Only `BLOCKER` findings gate; warnings are recorded on the artifact and do not block.
-5. **Revision loop** — a `REJECTED` review sends the artifact back to the worker with the review attached, up to the configured cap. See [Review Loop](#review-loop).
-6. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
-7. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
+4. **Checks** — on columns with `runChecks: true` (`IMPLEMENTATION` and `INTEGRATION_REVIEW` in the templates), the project's own commands (typecheck, lint, tests) run before any reviewer. See [Checks](#checks).
+5. **Review** — a reviewer agent (on a _different model_ from the worker) evaluates against column-specific rubrics and emits a machine-readable verdict: `APPROVED`, `APPROVED_WITH_WARNINGS`, or `REJECTED`. Only `BLOCKER` findings gate; warnings are recorded on the artifact and do not block.
+6. **Revision loop** — a `REJECTED` review, or a failed check, sends the artifact back to the worker with the review or the check's output attached, up to the configured cap. See [Review Loop](#review-loop).
+7. **Sign-off** — if review passes, ticket is set to `SIGNED_OFF`
+8. **Human gate** — operator can advance normally (`aeos ticket approve`) or override to any status (`aeos ticket move`)
 
 ## What `project init` creates
 
@@ -225,6 +227,48 @@ AEOS supports multiple executor backends. The effective executor for a run is re
 | `ollama-cli`   | Simple local artifact generation         | No — artifact-only               |
 | `stub`         | Tests / local dry runs                   | Yes (test stub only)             |
 
+### Checks
+
+Checks run first, review agents second. List the project's checks in `.aeos/project.json`; they run in the order written, so put the fastest first:
+
+```json
+{
+  "checks": [
+    { "name": "typecheck", "command": "npm run typecheck", "timeoutSeconds": 120 },
+    { "name": "lint", "command": "npm run lint", "timeoutSeconds": 120 },
+    { "name": "test", "command": "npm test", "timeoutSeconds": 600 }
+  ]
+}
+```
+
+A column runs them when its spec says `runChecks: true`. They run in the project root after validation and before the artifact is committed, and stop at the first failure. A command passes on exit code 0; one that exceeds its timeout is killed and counts as failed.
+
+- **All pass** — `<ticket>-checks.md` (name, result, duration) is committed with the artifact and is part of the reviewer's context.
+- **One fails** — the reviewer is not invoked. The failure counts as a rejection toward `maxIterations`, and the next worker attempt receives the last 200 lines of the check's output as `previous-checks.md`. The same check failing twice in a row escalates as not converging; a ticket whose checks never pass ends `ESCALATED`, not `FAILED`, even on a column whose escalation policy is `mark_done`.
+
+Each checks stage leaves a run record with `role: checks`. With no `checks` list, or on a column without `runChecks`, nothing changes. An invalid `checks` list is an error, never silently "no checks".
+
+### Protected paths
+
+An agent must not be able to weaken what it is judged against. Around every executor invocation (preflight, worker and reviewer, artifact and agentic) AEOS compares the changed files of the project repository and of `.aeos/` (its own repository) before and after. If the run changed a protected path, the path is restored (a tracked file is checked out, a new file is deleted), the run record carries the violation in `error`, and the attempt ends `FAILED`, not `ESCALATED`: the agent broke a rule.
+
+Always protected, whatever the configuration says:
+
+```
+.aeos/project.json        .aeos/rubrics/**         .aeos/schemas/**
+.aeos/pipelines.yaml      .aeos/column-specs/**    .aeos/features/**
+.aeos/CONSTRAINTS.md      .aeos/agents/**          .aeos/contexts/**
+.aeos/tickets/*/runs/**
+```
+
+Add project paths with `protectedPaths` in `.aeos/project.json`; the list can only add to the defaults:
+
+```json
+{ "protectedPaths": ["src/cli/generated/**"] }
+```
+
+Globs are relative to the project root: `*` matches within one path segment, `**` any number of segments. Detection is a diff after the run, so it works for every executor; it does not stop the write or any read. Two limits: a protected file that already had uncommitted changes before the run is not checked (commit `.aeos/` edits before running), and two runs in the same project at the same time can be blamed for each other's writes.
+
 ### Project-level executor defaults
 
 You can set a project-level default executor and model in `.aeos/project.json`:
@@ -295,14 +339,15 @@ aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tasks.md
 aeos ticket create "Add password hashing" --parent AEOS-1   # → AEOS-2 (TASK)
 aeos ticket create "Add session middleware" --parent AEOS-1 # → AEOS-3 (TASK)
 
-# 4. Each task runs its own build pipeline
+# 4. Each task runs its own build pipeline, on the epic's branch
+git checkout -b aeos/AEOS-1                            # `orchestrator run` does this for you
 aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation
 ...
 
 # 5. Only once every task is DONE can the epic advance
 aeos ticket approve AEOS-1                             # → INTEGRATION_REVIEW
 aeos ticket run AEOS-1                                 # reviews the whole feature vs PRD/spec
-aeos ticket approve AEOS-1                             # → DOD_GATE (after human reads the verdict)
+aeos ticket approve AEOS-1                             # → DOD_GATE, and opens the pull request
 ```
 
 Nesting is one level deep: tasks hang off epics, and a task cannot itself have
@@ -311,6 +356,35 @@ is unfinished reports which tasks are outstanding and refuses the transition.
 
 > Creating child tickets from `tasks.md` is a manual step today. Automating that
 > decomposition belongs with the orchestrator, which owns scheduling.
+
+## Branches and pull requests
+
+Nothing the engine writes goes onto the default branch.
+
+- **Epic** — `aeos orchestrator run` puts the epic on `aeos/<epicId>` and tags its base `aeos-base/<epicId>`. Its tasks commit there.
+- **Child task** — runs on its epic's branch. `aeos ticket run` refuses a child task while `HEAD` is the default branch.
+- **Standalone task** (no parent) — `aeos ticket run` switches to `aeos/<taskId>`, creating it and the tag `aeos-base/<taskId>` on the first run.
+
+The default branch is the remote's `HEAD` when there is one, otherwise a local `main`, then `master`. `AEOS_GIT_ISOLATION=none` turns the branch handling off.
+
+A finished task becomes one commit, with trailers:
+
+```
+[AEOS-12] Add password hashing
+
+Ticket: AEOS-12
+Epic: AEOS-10
+```
+
+`aeos ticket approve` then opens the pull request against the default branch: for an epic when it is approved out of `INTEGRATION_REVIEW`, for a standalone task when it is approved to `DONE`. It pushes the `aeos/<id>` branch to `origin` and runs `gh pr create`; if the branch already has an open pull request, that one is used. The body carries the ticket, the path of the integration (or code) review with its verdict, the checks table and the total recorded cost; artifact paths are not links because `.aeos/` has no remote. The URL is stored on the ticket and shown by `aeos ticket show`. Merging stays yours.
+
+If the pull request cannot be opened (`gh` not on `PATH`, not authenticated, no remote, or the host refuses), `approve` stops with the cause and the fix and the ticket stays `SIGNED_OFF`, so running `approve` again retries. Under `aeos orchestrator run` this halts the epic as needing a human. For a project with no code host:
+
+```json
+{ "pullRequests": { "enabled": false } }
+```
+
+in `.aeos/project.json` skips the push and the pull request; branches and trailers stay. With `AEOS_EXECUTOR=stub` no `gh` call is made and a placeholder URL is stored, but the branch is still pushed if the repository has a remote.
 
 ## Orchestrator
 
@@ -462,6 +536,7 @@ is a hard escalation, never silently treated as approval.
 | --------------- | --------- | ------------------------------------------------------------------------------- |
 | `AEOS_EXECUTOR` | unset     | Set to `stub` to force the stub executor for testing without real LLM/CLI calls |
 | `AEOS_HOME`     | `~/.aeos` | Override the global state directory (config, registry, `state.db`)              |
+| `AEOS_GIT_ISOLATION` | unset | Set to `none` to stop AEOS switching branches (epic and task branches)         |
 
 `AEOS_EXECUTOR=stub` drives the full pipeline offline: the stub clears preflight,
 satisfies structural validation, and emits an APPROVED verdict when standing in for
@@ -495,7 +570,7 @@ Every executor invocation (preflight, worker and reviewer) records token usage a
 
 `claude-cli` runs with `--output-format stream-json --verbose`; tokens and cost come from the final `result` line of that stream. The cost is the CLI's client-side estimate, not billing data. The other executors do not report usage yet.
 
-An unknown cost is stored and shown as `unknown`, never as `$0.00`. Only `claude-cli` and `stub` report cost, so `aeos orchestrator run --budget` (or a budget persisted earlier) is refused when any agent of the epic or task columns resolves to `auggie-cli`, `opencode-cli` or `ollama-cli`; the message names the agent and the executor. Spend is the sum of known costs. If a run with an unknown cost is recorded against a budgeted epic anyway (an `--executor` override, or an executor failure), the orchestrator halts with `COST_UNKNOWN`. The unknown record stays, so every later budgeted run halts the same way; `aeos orchestrator clear-budget <epicId>` removes the persisted ceiling so the next `orchestrator run` without `--budget` proceeds. It errors if the epic has no orchestrator state.
+An unknown cost is stored and shown as `unknown`, never as `$0.00`. Only `claude-cli` and `stub` report cost, so `aeos orchestrator run --budget` (or a budget persisted earlier) is refused when any agent of a column still ahead resolves to `auggie-cli`, `opencode-cli` or `ollama-cli`; the message names the agent and the executor. Columns already passed do not count: the epic's own columns from its current one on, and each task column unless the epic is past `TASK_BREAKDOWN` and every child task is past that column. Spend is the sum of known costs. If a run with an unknown cost is recorded against a budgeted epic anyway (an `--executor` override, or an executor failure), the orchestrator halts with `COST_UNKNOWN`. The unknown record stays, so every later budgeted run halts the same way; `aeos orchestrator clear-budget <epicId>` removes the persisted ceiling so the next `orchestrator run` without `--budget` proceeds. It errors if the epic has no orchestrator state.
 
 `aeos ticket show <id>` surfaces this history back to the operator as an `Executions:` section showing the column, agent, executor, model, and cost of each run.
 

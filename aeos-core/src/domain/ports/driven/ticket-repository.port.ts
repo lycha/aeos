@@ -35,4 +35,6 @@ export interface TicketRepository {
    * Called right after the sub-state is set to ESCALATED/BLOCKED.
    */
   setEscalation(projectId: string, ticketId: string, escalation: TicketEscalation | null): void;
+  /** Records the URL of the pull request opened for the ticket. */
+  setPrUrl(projectId: string, ticketId: string, prUrl: string): void;
 }
