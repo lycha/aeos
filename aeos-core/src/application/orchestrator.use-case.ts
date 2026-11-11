@@ -138,11 +138,12 @@ export class OrchestratorUseCase implements OrchestratorPort {
     const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
     const steps: OrchestratorStep[] = [];
 
+    // Isolate this epic's work on its own branch before any task runs, and
+    // before the epic is marked running: a refused switch throws.
+    this.setUpGitIsolation(projectPath, epicId);
+
     this.writeState(projectId, epicId, OrchestratorStatus.RUNNING, null, null, budgetUsd);
     let settled = false;
-
-    // Isolate this epic's work on its own branch before any task runs.
-    this.setUpGitIsolation(projectPath, epicId);
 
     try {
       for (let step = 0; step < maxSteps; step += 1) {

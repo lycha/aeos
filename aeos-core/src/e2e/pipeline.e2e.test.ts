@@ -171,8 +171,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       `PR:     https://stub.invalid/pull/aeos/${epic}`,
     );
 
-    // A standalone task started from the default branch moves to its own.
-    git('checkout', defaultBranch);
+    // HEAD is still the epic's branch; the next ticket's branch is cut from the default branch.
     // A bug does not travel an epic.
     const bugUnderEpic = await runCli('ticket', 'create', 'A bug', '--bug', '--parent', epic);
     expect(bugUnderEpic.exitCode).toBe(1);
@@ -181,6 +180,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     await driveTaskToDone(standalone);
     expect(git('branch', '--show-current').trim()).toBe(`aeos/${standalone}`);
     expect(git('tag', '--list', `aeos-base/${standalone}`).trim()).toBe(`aeos-base/${standalone}`);
+    expect(git('rev-parse', `aeos-base/${standalone}`)).toBe(git('rev-parse', defaultBranch));
     expect((await runCli('ticket', 'show', standalone)).output).toContain(
       `PR:     https://stub.invalid/pull/aeos/${standalone}`,
     );

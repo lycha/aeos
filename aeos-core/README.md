@@ -1141,6 +1141,8 @@ Nothing the engine writes goes onto the default branch.
 - **Child task** — runs on its epic's branch. `aeos ticket run` switches to `aeos/<epicId>`, creating it and the tag `aeos-base/<epicId>` when the orchestrator has not.
 - **Standalone task** (no parent) — `aeos ticket run` switches to `aeos/<taskId>`, creating it and the tag `aeos-base/<taskId>` on the first run.
 
+A new `aeos/<id>` branch is cut from the local tip of the default branch (nothing is fetched), wherever `HEAD` is, so a ticket never starts on top of the previous ticket's branch; an existing one is checked out as it is. When uncommitted changes prevent the switch, the run fails with git's reason and nothing is carried across: commit or stash them and run again.
+
 The default branch is the remote's `HEAD` when there is one, otherwise a local `main`, then `master`. `AEOS_GIT_ISOLATION=none` turns the branch handling off.
 
 A finished task becomes one commit, with trailers:

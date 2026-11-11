@@ -1738,6 +1738,24 @@ describe('TicketRunUseCase', () => {
       expect(order(gitGateway.tagHere)).toBeLessThan(order(executor.run));
     });
 
+    it('fails before anything runs when the branch cannot be switched to', async () => {
+      running({ parentId: 'AEOS-9' });
+      (gitGateway.ensureOnBranch as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw new Error("Cannot switch to branch 'aeos/AEOS-9': a.md would be overwritten.");
+      });
+
+      const result = await useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+      expect(result).toEqual({
+        status: 'failed',
+        ticketId: TICKET_ID,
+        error: "Cannot switch to branch 'aeos/AEOS-9': a.md would be overwritten.",
+      });
+      expect(executor.run).not.toHaveBeenCalled();
+      expect(preflight.run).not.toHaveBeenCalled();
+      expect(stateMachine.setSubState).not.toHaveBeenCalled();
+    });
+
     it('leaves an epic where it is', async () => {
       onDefaultBranch();
 

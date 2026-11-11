@@ -227,7 +227,11 @@ export class TicketRunUseCase implements TicketRunPort {
         };
       }
 
-      this.isolateTask(projectPath, mirroredTicket);
+      try {
+        this.isolateTask(projectPath, mirroredTicket);
+      } catch (err) {
+        return { status: 'failed', ticketId, error: (err as Error).message };
+      }
 
       const columnSpec = this.columnSpecLoader.load(mirroredTicket.column, projectPath);
       const workerAgentSpec = this.agentSpecLoader.load(columnSpec.workerAgentFile, projectPath);

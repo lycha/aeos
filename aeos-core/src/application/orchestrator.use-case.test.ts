@@ -401,6 +401,21 @@ describe('OrchestratorUseCase', () => {
     expect(gitGateway.tagHere).toHaveBeenCalledWith(PROJECT_PATH, 'aeos-base/AEOS-1');
   });
 
+  it('does not mark the epic running when its branch cannot be switched to', async () => {
+    (gitGateway.isRepo as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (gitGateway.ensureOnBranch as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new Error("Cannot switch to branch 'aeos/AEOS-1'");
+    });
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+      epic({ column: 'DOD_GATE', subState: SubState.READY }),
+    );
+
+    await expect(useCase.run(PROJECT_ID, PROJECT_PATH, EPIC_ID)).rejects.toThrow(
+      "Cannot switch to branch 'aeos/AEOS-1'",
+    );
+    expect(stateRepo.upsert).not.toHaveBeenCalled();
+  });
+
   it('skips git isolation when the project path is not a repo', async () => {
     (gitGateway.isRepo as ReturnType<typeof vi.fn>).mockReturnValue(false);
     (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
