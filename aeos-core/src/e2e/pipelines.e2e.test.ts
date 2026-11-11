@@ -122,7 +122,7 @@ describe('pipelines file', { timeout: 30_000 }, () => {
 
     const moved = await runCli('ticket', 'move', task, 'NOT_A_COLUMN', '--reason', 'testing');
 
-    expect(moved.exitCode).toBe(1);
+    expect(moved.exitCode).toBe(2);
     expect(moved.output).toContain('Backlog, Implementation, Code review, QA, Done');
     expect(moved.output).not.toContain('Tech spec');
     expect(ticketState(task).column).toBe('BACKLOG');

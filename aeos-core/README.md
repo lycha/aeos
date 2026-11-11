@@ -207,7 +207,7 @@ The file is checked every time it is loaded, and a command that needs it fails w
 - a `TASK` pipeline has no `spec-review`, `decomposition` or `final-gate` column
 - only the kinds `EPIC` and `TASK` exist; any other key is refused
 
-`ticket move` takes a column of that ticket's own pipeline; anything else is refused with the list. The file is a protected path: an agentic run may not edit it.
+`ticket move` takes a column of that ticket's own pipeline; anything else is refused with the list, as a usage error (exit `2`, `INVALID_ARGUMENT`). The file is a protected path: an agentic run may not edit it.
 
 **The order of a kind may change only while none of its tickets is in flight**, that is, while every ticket of that kind is in `BACKLOG` or `DONE`. AEOS remembers the pipeline it last accepted for each kind and compares the file with it whenever a `ticket` or `orchestrator` command runs:
 

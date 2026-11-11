@@ -45,6 +45,7 @@ const BY_WORDING: readonly (readonly [RegExp, ErrorCode, Situation?, T.Error['re
   [/carries a contract change/, 'CONTRACT_APPROVAL_REQUIRED', 'gate-refused'],
   [/needs --reason/, 'REASON_REQUIRED', 'gate-refused'],
   [/needs a written reason/, 'REASON_REQUIRED', 'usage'],
+  [/^Unknown status '/, 'INVALID_ARGUMENT', 'usage'],
   [/python3 is not on PATH|python3 modules/, 'RESOURCE_MISSING', 'missing-resource', 'python'],
   [/`gh`( command)? is not /, 'RESOURCE_MISSING', 'missing-resource', 'gh'],
   [/^Cannot open a pull request/, 'PULL_REQUEST_FAILED'],
