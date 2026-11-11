@@ -45,7 +45,9 @@ export function buildProgram(setExit: (code: number) => void = setProcessExit): 
         'Getting started:\n' +
         '  aeos install                              One-time global setup\n' +
         '  aeos project init --name "Name" --key XY  Initialise project\n' +
-        '  aeos ticket create "Title"                Create a ticket\n' +
+        '  aeos ticket create "Title" --spec <feature>\n' +
+        '                                            Create an epic from a written spec\n' +
+        '  aeos ticket create "Title" --bug          Create a standalone bug task\n' +
         '  aeos ticket run <id>                      Run the pipeline column\n' +
         '  aeos ticket approve <id>                  Advance to next column\n' +
         '  aeos ticket sign-off <id> --reason <text> Manually mark as SIGNED_OFF\n' +

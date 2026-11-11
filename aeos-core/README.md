@@ -42,21 +42,26 @@ aeos project init --name "My Project" --key MYPRJ
 aeos ticket create "Add user authentication" --spec user-authentication
 
 # 3. Edit the ticket description
-$EDITOR .aeos/MYPRJ-1-ticket.md
+$EDITOR .aeos/tickets/MYPRJ-1/MYPRJ-1-ticket.md
 
-# 4. Run the current column (agent executes → reviewer evaluates)
+# 4. Approve it out of BACKLOG, into its first column
+aeos ticket approve MYPRJ-1
+
+# 5. Run the current column (agent executes → reviewer evaluates)
 aeos ticket run MYPRJ-1
 
 # Optional: override executor/model for a single run
 aeos ticket run MYPRJ-1 --executor opencode-cli --model ollama/qwen2.5-coder:14b
 
-# 5. Approve to advance to the next column
+# 6. Approve to advance to the next column
 aeos ticket approve MYPRJ-1
 
-# Optional: move a ticket directly to any workflow status
-aeos ticket move MYPRJ-1 QA --reason "Built by hand; skipping to QA."
+# Optional: move a ticket directly to any column of its own pipeline
+aeos ticket move MYPRJ-1 TECH_SPEC --reason "Spec reviewed by hand; skipping ahead."
 
-# 6. Repeat steps 4–5 for each column, then final approval
+# 7. Repeat steps 5–6 for each column. The child tasks created in TASK_BREAKDOWN
+#    go through their own columns the same way (see "Epics and Tasks"), or let
+#    `aeos orchestrator run MYPRJ-1` drive them. Then, at the final gate:
 aeos ticket dod-approve MYPRJ-1
 ```
 
@@ -116,8 +121,11 @@ Each column follows the same cycle:
 ├── agents/                worker and reviewer agent specs
 ├── rubrics/               reviewer rubrics and artifact templates
 ├── schemas/               artefact schemas and lint_decisions.py, with a .source stamp
+├── skills/                the aeos skill, linked into .claude/skills and .augment/skills
 ├── features/              one directory per feature: its human-written spec
-└── contexts/              one directory per bounded context: glossary, constraints
+├── contexts/              one directory per bounded context: glossary, constraints
+└── tickets/               one directory per ticket, from the first `ticket create`:
+                           its document, artifacts, gate records and run records
 ```
 
 `.aeos/` is the project's **artefact tree**: its own git repository, ignored by the
@@ -1033,8 +1041,9 @@ Exit codes:
 
 A ticket created without a parent is an **epic**, and it must be backed by a
 spec (`--spec`, see [Spec-backed epics](#spec-backed-epics)). It carries that spec through
-spec review, tech spec, and decomposition, and its `TASK_BREAKDOWN` artifact (`tasks.md`)
-lists the atomic tasks that will implement it.
+spec review, tech spec, and decomposition. `TASK_BREAKDOWN` is an agentic column: the
+architect writes the breakdown (`tasks.md`) and, in the same run, creates one child task
+per entry by calling `aeos ticket create --parent <epic> --key T-NNN` itself.
 
 ```bash
 # 1. An epic
@@ -1043,11 +1052,12 @@ aeos ticket create "Add user authentication" --spec user-authentication   # → 
 # 2. Run it through spec review, tech spec, and breakdown
 aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # spec-review.md
 aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tech spec
-aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tasks.md
+aeos ticket approve AEOS-1 && aeos ticket run AEOS-1   # tasks.md, and the child tasks
 
-# 3. Create the tasks the breakdown identified
-aeos ticket create "Add password hashing" --parent AEOS-1   # → AEOS-2 (TASK)
-aeos ticket create "Add session middleware" --parent AEOS-1 # → AEOS-3 (TASK)
+# 3. The run created the tasks (here AEOS-2 and AEOS-3). Only when it did not
+#    (the stub executor cannot run commands), create them yourself:
+aeos ticket create "Add password hashing" --parent AEOS-1 --key T-001   # → AEOS-2 (TASK)
+aeos ticket create "Add session middleware" --parent AEOS-1 --key T-002 # → AEOS-3 (TASK)
 
 # 4. Each task runs its own build pipeline, on the epic's branch
 aeos ticket approve AEOS-2 && aeos ticket run AEOS-2   # implementation; switches to aeos/AEOS-1
@@ -1065,8 +1075,10 @@ Nesting is one level deep: tasks hang off epics, and a task cannot itself have
 children. Attempting to advance an epic out of `TASK_BREAKDOWN` while any child
 is unfinished reports which tasks are outstanding and refuses the transition.
 
-> Creating child tickets from `tasks.md` is a manual step today. Automating that
-> decomposition belongs with the orchestrator, which owns scheduling.
+> AEOS does not parse `tasks.md` into tickets: the architect creates them during the
+> `TASK_BREAKDOWN` run. `ticket create --parent` is idempotent on `--key`, so a
+> review-loop retry does not duplicate a task. If the breakdown is signed off with no
+> child tasks, the orchestrator halts `AWAITING_DECOMPOSITION`; create them by hand.
 
 ## The bug track
 
@@ -1327,8 +1339,12 @@ is a hard escalation, never silently treated as approval.
 
 `AEOS_EXECUTOR=stub` drives the full pipeline offline: the stub clears preflight,
 satisfies structural validation, and emits an APPROVED verdict when standing in for
-a reviewer. The one thing it cannot do is agentic `IMPLEMENTATION` — it writes no
-code, so the required repo diff is absent and the run fails by design.
+a reviewer. On the bug track it also plays both phases (a reproducing script that
+fails, then the file that makes it pass), so a `--bug` task goes through
+`IMPLEMENTATION` to `DONE` under the stub. Outside the bug track it writes no
+repository change, so a non-bug task's `IMPLEMENTATION` run fails with "Agentic
+implementation produced no repository changes". It runs no commands either, so
+`TASK_BREAKDOWN` passes but creates no child tasks.
 
 ## Architecture
 
