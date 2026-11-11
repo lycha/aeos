@@ -65,7 +65,7 @@ import { Column, nextColumnFor } from '../domain/model/column.js';
 import type { PipelineLoader } from '../domain/ports/driven/pipeline-loader.port.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { TicketKind } from '../domain/model/ticket-kind.js';
-import { validateOutput } from '../domain/services/output-validation.js';
+import { stripPreamble, validateOutput } from '../domain/services/output-validation.js';
 import { parseVerdict } from '../domain/services/verdict-parser.js';
 import { findViolations, protectedGlobs } from '../domain/services/path-guard.js';
 import {
@@ -731,7 +731,9 @@ export class TicketRunUseCase implements TicketRunPort {
 
     const worker = await this.invokeWorker(ctx, attempt, workerContext, repro ? 'fix' : undefined);
     if ('kind' in worker) return worker;
-    const { run, content, contractPaths } = worker;
+    const { run, contractPaths } = worker;
+    // Only the artefact is kept as the artefact; the whole output is in the run's log.
+    const content = stripPreamble(worker.content);
 
     // The fix may not weaken the test it has to pass.
     if (repro) {
@@ -1584,7 +1586,7 @@ export class TicketRunUseCase implements TicketRunPort {
       };
     }
 
-    const reviewContent = reviewResult.content ?? '';
+    const reviewContent = stripPreamble(reviewResult.content ?? '');
     const reviewCommitMessage = `[${ticketId}][REVIEW][${revision}][${ctx.reviewerAgentSpec.name}][create]`;
     const parsed = parseVerdict(reviewContent);
     const written = this.writeRunRecord(ctx, {

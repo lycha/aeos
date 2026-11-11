@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateOutput } from './output-validation.js';
+import { stripPreamble, validateOutput } from './output-validation.js';
 import type { ColumnSpec } from '../model/column-spec.js';
 
 // ---------------------------------------------------------------------------
@@ -156,5 +156,18 @@ describe('violation aggregation', () => {
     // Should at least have non-empty and word count violations
     expect(result.violations.length).toBeGreaterThanOrEqual(2);
     expect(result.violations).toContain('Output is empty');
+  });
+});
+
+describe('stripPreamble', () => {
+  it('drops the agent chatter ahead of the first heading', () => {
+    expect(stripPreamble('Lint and test both green. Done.\n\n# Summary\n\nBody\n')).toBe(
+      '# Summary\n\nBody\n',
+    );
+  });
+
+  it('leaves an artefact that starts with a heading, or has none, as it is', () => {
+    expect(stripPreamble('## Review\n\nFine #1\n')).toBe('## Review\n\nFine #1\n');
+    expect(stripPreamble('NO_BLOCKERS')).toBe('NO_BLOCKERS');
   });
 });

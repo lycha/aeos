@@ -821,7 +821,7 @@ describe('TicketRunUseCase', () => {
       (executor.run as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: true,
         artifactPath: '/tmp/artifact',
-        content: `${'A '.repeat(60)}\n\n${block}\n\n${reviewWith('APPROVED')}`,
+        content: `# Conformance\n\n${'A '.repeat(60)}\n\n${block}\n\n${reviewWith('APPROVED')}`,
       });
     };
 
