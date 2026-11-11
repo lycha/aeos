@@ -46,7 +46,7 @@ npm run smoke-test:auggie
 npm run smoke-test:opencode
 ```
 
-CI (`.github/workflows`) runs typecheck → lint → build → test on Node 22. Match that order locally before pushing.
+CI (`.github/workflows/ci.yml` at the repository root, not in this package; its steps run in `aeos-core/`) checks the schemas, `verify:generated` and `verify:contract`, then runs typecheck → lint → build → test on Node 22, with Python's `PyYAML` and `jsonschema` installed so the linter-backed tests do not skip. Match that order locally before pushing.
 
 ## Architecture
 
