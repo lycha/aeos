@@ -38,6 +38,7 @@ export class ProjectInitUseCase implements ProjectInitPort {
       this.ensureRegistered(existing, cwd);
       const restored = this.projectRepo.scaffoldDefaults(cwd);
       this.projectRepo.writeConstraintsPlaceholder(cwd);
+      this.commitScaffold(path.join(cwd, '.aeos'), existing.key);
       return { name: existing.name, key: existing.key, scaffolded: restored };
     }
 
@@ -70,7 +71,27 @@ export class ProjectInitUseCase implements ProjectInitPort {
     // 5. Register in global registry
     this.ensureRegistered(project, cwd);
 
+    // 6. Commit the scaffold
+    this.commitScaffold(aeosDir, key);
+
     return { name, key, scaffolded };
+  }
+
+  /**
+   * Commits whatever is uncommitted in `.aeos`. The protected-path and contract
+   * checks compare the changed files before and after a run, so a scaffolded
+   * file that was never committed would not be guarded. Like `ticket create`,
+   * this takes everything in the tree, a person's uncommitted edit included.
+   */
+  private commitScaffold(aeosDir: string, key: string): void {
+    if (this.gitGateway.changedFiles(aeosDir).length === 0) return;
+    this.gitGateway.commit(aeosDir, `[${key}][INIT] scaffold`);
+    // The gateway does not say when git refuses; what is still uncommitted does.
+    if (this.gitGateway.changedFiles(aeosDir).length > 0) {
+      throw new Error(
+        `The scaffold in ${aeosDir} could not be committed. If git has no identity there, set one: git config user.name "Your Name" && git config user.email you@example.com. Then run \`aeos project init\` again.`,
+      );
+    }
   }
 
   private ensureRegistered(project: Project, cwd: string): void {

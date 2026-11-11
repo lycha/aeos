@@ -95,6 +95,14 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     expect((await runCli('install')).exitCode).toBe(0);
     expect((await runCli('project', 'init', '--name', 'E2E', '--key', 'EE')).exitCode).toBe(0);
     expect(fs.existsSync(path.join(project.aeosHome, 'registry.json'))).toBe(true);
+    // The scaffold is committed in .aeos, so a run that edits a protected file of it is seen.
+    const aeosGit = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: path.join(project.projectPath, '.aeos'),
+        encoding: 'utf-8',
+      });
+    expect(aeosGit('status', '--porcelain')).toBe('');
+    expect(aeosGit('log', '--format=%s').trim()).toBe('[EE][INIT] scaffold');
     // Commit what init scaffolded (skill symlinks), as a user would, so the
     // first task's baseline has nothing to pick up.
     const git = (...args: string[]): string =>
@@ -1028,7 +1036,7 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
     };
 
     // `.aeos` repository: a rubric the reviewer will judge the work against.
-    // Creating the epic commits the scaffold, so the rubric is tracked.
+    // `project init` committed the scaffold, so the rubric is tracked.
     const epic = await createEpic('An epic');
     await runCli('ticket', 'approve', epic);
     const rubric = '.aeos/rubrics/structure/code-structure.md';

@@ -1999,8 +1999,9 @@ export class TicketRunUseCase implements TicketRunPort {
    * returns, so the engine's own later writes under `.aeos/` never count.
    *
    * shortcut: a set difference, so a further edit to a protected file that
-   * was already uncommitted before the run goes unseen; compare content
-   * hashes if operators keep such files dirty.
+   * was already uncommitted before the run goes unseen. `project init` commits
+   * its scaffold, so that is an operator's own uncommitted edit; compare
+   * content hashes if operators keep such files dirty.
    */
   private restoreProtected(ctx: RunContext, before: ReadonlySet<string>): string | undefined {
     const touched = [...this.changedPaths(ctx)].filter((file) => !before.has(file));

@@ -131,8 +131,13 @@ Everything under `column-specs/`, `agents/`, and `rubrics/` is scaffolded from t
 templates shipped with AEOS and is **yours to edit** — changing pipeline behaviour
 usually means editing this YAML, not TypeScript.
 
+`project init` commits what it wrote in `.aeos` (`[<KEY>][INIT] scaffold`), so the
+protected-path check guards the scaffold from the first run on. If git refuses the commit
+(no identity, usually), it fails and says how to set one; run it again afterwards.
+
 Re-running `aeos project init` is the repair path: it restores anything missing and
-never overwrites a file you have edited.
+never overwrites a file you have edited. It commits what is then uncommitted in `.aeos`,
+your own uncommitted edits there included, as `ticket create` does.
 
 ### Column names
 
@@ -562,6 +567,7 @@ For anyone scripting on "non-zero means failed, and it is always `1`":
 - **`orchestrator run` runs the final gate before halting `HUMAN_GATE`.** It used to halt on arrival and leave `aeos ticket run <epic>` to a person; a budget now also covers that column's agents, so it is refused when one of them does not report cost. A gate run that escalates or fails halts `NEEDS_HUMAN` or `FAILED`, not `HUMAN_GATE`.
 - **An epic with no spec cannot leave `BACKLOG`.** `ticket approve` exits `1` and says to create a new epic with `--spec` and close the old one with `ticket move`. Tasks and bugs are unaffected.
 - **Stub mode pushes nothing.** Under `AEOS_EXECUTOR=stub`, approving used to push `aeos/<id>` to `origin` when the repository had a remote; it no longer does.
+- **`project init` commits the scaffold in `.aeos`** and exits `1` when git refuses the commit (no identity). It used to leave the scaffold uncommitted until the first `ticket create`.
 - **Two error messages are reworded**: an executor that is not one of the four, and a `--key` that is not 2–4 uppercase letters, are now reported by the generated parameter check (`--executor must be one of …, got 'x'.`). All other text output is what it was.
 
 <!-- BEGIN GENERATED CLI REFERENCE -->

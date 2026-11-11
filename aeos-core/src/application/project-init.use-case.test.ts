@@ -194,6 +194,70 @@ describe('ProjectInitUseCase', () => {
     ]);
   });
 
+  describe('committing the scaffold', () => {
+    /** `.aeos` has uncommitted files until a commit is made, as after scaffolding. */
+    const dirtyUntilCommitted = (): void => {
+      let dirty = ['project.json', 'pipelines.yaml'];
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockImplementation(() => dirty);
+      (gitGateway.commit as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        dirty = [];
+      });
+    };
+    const existing = (): void => {
+      (projectRepo.exists as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (projectRepo.read as ReturnType<typeof vi.fn>).mockReturnValue({
+        uuid: 'u',
+        id: 'test',
+        name: 'Test',
+        key: 'TEST',
+        path: '/tmp/test',
+        created_at: 'x',
+      });
+    };
+
+    it('commits what a fresh init wrote in .aeos, once everything is written', () => {
+      dirtyUntilCommitted();
+      const order: string[] = [];
+      (projectRepo.writeConstraintsPlaceholder as ReturnType<typeof vi.fn>).mockImplementation(() =>
+        order.push('written'),
+      );
+      (gitGateway.commit as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        order.push('committed');
+        (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      });
+
+      useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test' });
+
+      expect(gitGateway.commit).toHaveBeenCalledWith('/tmp/test/.aeos', '[TEST][INIT] scaffold');
+      expect(order).toEqual(['written', 'committed']);
+    });
+
+    it('commits what a re-run restored', () => {
+      existing();
+      dirtyUntilCommitted();
+
+      useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test' });
+
+      expect(gitGateway.commit).toHaveBeenCalledWith('/tmp/test/.aeos', '[TEST][INIT] scaffold');
+    });
+
+    it('makes no commit when a re-run finds nothing uncommitted', () => {
+      existing();
+
+      useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test' });
+
+      expect(gitGateway.commit).not.toHaveBeenCalled();
+    });
+
+    it('fails with the fix when the commit does not take, inventing no identity', () => {
+      (gitGateway.changedFiles as ReturnType<typeof vi.fn>).mockReturnValue(['project.json']);
+
+      expect(() => useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test' })).toThrow(
+        /could not be committed.*git config user\.name "Your Name" && git config user\.email you@example\.com.*aeos project init/s,
+      );
+    });
+  });
+
   it('should derive slug correctly for names with special characters', () => {
     useCase.execute({ name: 'My  Cool---Project!!', key: 'MYCO', cwd: '/tmp/test' });
 
