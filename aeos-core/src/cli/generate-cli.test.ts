@@ -189,7 +189,7 @@ describe('scripts/generate-cli.mjs', () => {
   it('writes the exit-code vocabulary and the contract version', () => {
     const codes = read(generateFrom(FIXTURE_CONTRACT), GENERATED[4]);
 
-    expect(codes).toContain('export const CONTRACT_VERSION = 0;');
+    expect(codes).toContain('export const CONTRACT_VERSION = 1;');
     expect(codes).toContain('  success: 0,\n  failure: 1,\n  usage: 2,\n  missing_resource: 4,');
     expect(codes).toContain('export type ExitCode = (typeof EXIT)[keyof typeof EXIT];');
   });

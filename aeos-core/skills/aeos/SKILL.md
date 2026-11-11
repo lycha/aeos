@@ -98,7 +98,7 @@ Add `--json` to any command to get one JSON object on stdout and nothing else
 there (progress and questions go to stderr):
 
 ```json
-{ "ok": true, "command": "ticket create", "exit": 0, "contractVersion": 0,
+{ "ok": true, "command": "ticket create", "exit": 0, "contractVersion": 1,
   "data": { "ticketId": "AEOS-7", "kind": "TASK", "parentId": "AEOS-1", "alreadyExisted": false },
   "error": null, "warnings": [] }
 ```

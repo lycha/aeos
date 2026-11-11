@@ -539,7 +539,7 @@ Every command takes `--json`. With it, stdout carries exactly one JSON object, t
   "ok": false,
   "command": "ticket run",
   "exit": 3,
-  "contractVersion": 0,
+  "contractVersion": 1,
   "data": { "ticketId": "AEOS-4", "column": "CODE_REVIEW", "subState": "ESCALATED", "attempts": 5, "artifactPath": null, "reviewPath": null, "runIds": ["RUN-…"], "costUsd": 1.42, "escalation": { "reason": "ITERATIONS_EXHAUSTED", "message": "…", "attempt": 5 } },
   "error": { "code": "ITERATIONS_EXHAUSTED", "message": "…", "resource": null },
   "warnings": []

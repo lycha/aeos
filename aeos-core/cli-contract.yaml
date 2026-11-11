@@ -39,7 +39,7 @@
 # Help text Every `existing` summary and description is the exact text on
 #           main. Once I1-M4-004b lands, help is generated from this file.
 
-contractVersion: 0
+contractVersion: 1
 
 info:
   title: AEOS command line

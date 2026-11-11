@@ -12,7 +12,7 @@ const envelope = (changes: Record<string, unknown> = {}): string =>
     ok: true,
     command: 'ticket ready',
     exit: 0,
-    contractVersion: 0,
+    contractVersion: 1,
     data: { ticketId: 'AEOS-1', subState: 'READY' },
     error: null,
     warnings: [],
