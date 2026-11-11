@@ -13,7 +13,7 @@ An AI-assisted development pipeline that takes a ticket from idea to code review
   - `opencode` — [install](https://opencode.ai/docs/cli/)
   - `ollama` — [install](https://docs.ollama.com/cli)
 - **GitHub CLI (`gh`)**, authenticated, and a git remote — for the pull requests AEOS opens. Not needed with `"pullRequests": { "enabled": false }` (see [Branches and pull requests](#branches-and-pull-requests)).
-- **Python 3 with `PyYAML` and `jsonschema`** — only for `aeos ticket create --spec`, which runs `lint_decisions.py` (see [Spec-backed epics](#spec-backed-epics)).
+- **Python 3 with `PyYAML` and `jsonschema`** — only for `aeos ticket create --spec`, which runs `lint_decisions.py`. The feature it names must have `spec.md`, `decisions.yaml` and `feature-inventory.yaml`, all committed (see [Spec-backed epics](#spec-backed-epics)).
 - macOS or Linux
 
 ## Install
@@ -1103,6 +1103,12 @@ An epic is always created from a human-written spec in the artefact tree and pin
 ```bash
 aeos ticket create "Checkout flow" --spec checkout     # reads .aeos/features/checkout/
 ```
+
+Before you run it:
+
+- `python3` is on `PATH` and can import `yaml` and `jsonschema` (`python3 -m pip install PyYAML jsonschema`).
+- `.aeos/features/<feature>/` contains `spec.md`, `decisions.yaml` and `feature-inventory.yaml` (the linter reads the inventory alongside the decisions).
+- All three are committed in the `.aeos` repository.
 
 The epic is refused, with the reason, unless all of this holds, checked in this order:
 
