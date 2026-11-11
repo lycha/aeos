@@ -272,7 +272,7 @@ With possible detours to:
 - `FAILED` when execution, validation, or review fails
 - `INTERRUPTED` when work is stopped intentionally
 
-After a human approves the ticket with `aeos ticket approve <id>`, it moves to the next column and is reset to `READY`.
+After a human approves the ticket with `aeos ticket approve <id>`, it moves to the next column and is reset to `READY`. A ticket that reaches `DONE`, by any command, has no sub-state.
 
 ### Valid stored combinations
 

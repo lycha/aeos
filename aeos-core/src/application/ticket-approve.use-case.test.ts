@@ -450,10 +450,33 @@ describe('TicketApproveUseCase', () => {
     });
   });
 
-  it('should return already_done when ticket is in DONE column', () => {
-    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(signedOffTicket('DONE'));
+  it('returns already_done for a finished ticket, which has no sub-state', () => {
+    // READY is what a task approved into DONE was left with before.
+    for (const subState of [null, 'READY', 'SIGNED_OFF'] as const) {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+        ...signedOffTicket('DONE'),
+        subState,
+      });
+      const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+      expect(result).toEqual({ status: 'already_done', ticketId: TICKET_ID });
+    }
+  });
+
+  it('leaves a ticket approved into DONE with no sub-state', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...signedOffTicket('QA'),
+      kind: 'TASK',
+      parentId: 'AEOS-9',
+    });
+
     const result = useCase.execute(PROJECT_ID, PROJECT_PATH, TICKET_ID);
-    expect(result).toEqual({ status: 'already_done', ticketId: TICKET_ID });
+
+    expect(result).toMatchObject({ status: 'advanced', toColumn: 'DONE' });
+    expect(stateMachine.setSubState).not.toHaveBeenCalled();
+    const document = (artifactStore.writeArtifact as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => String(call[3]))
+      .join('\n');
+    expect(document).not.toContain('READY');
   });
 
   it('should return error when transition fails', () => {

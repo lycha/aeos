@@ -563,6 +563,29 @@ describe('prompts', () => {
     expect(ran.envelope()).toMatchObject({ error: { code: 'ALREADY_DONE' } });
   });
 
+  it('ticket approve prints the sub-state of the new column, and none for DONE', async () => {
+    const advanced = (toColumn: string) => ({
+      ticketApprove: {
+        execute: () => ({
+          status: 'advanced',
+          ticketId: 'AEOS-1',
+          fromColumn: 'QA',
+          toColumn,
+          pullRequestUrl: null,
+          gateRecordId: 'GATE-1',
+        }),
+      },
+    });
+
+    const done = await cli(advanced('DONE'), ['ticket', 'approve', 'AEOS-1']);
+    expect(done.out).toEqual([`✓ Ticket AEOS-1 advanced: ${labels.QA} → Done`]);
+
+    const next = await cli(advanced('CODE_REVIEW'), ['ticket', 'approve', 'AEOS-1']);
+    expect(next.out).toEqual([
+      `✓ Ticket AEOS-1 advanced: ${labels.QA} → Code review (sub-state: READY)`,
+    ]);
+  });
+
   it('a command that asks under --json still writes one JSON object to stdout', async () => {
     const person = answering('y');
     const useCase = {

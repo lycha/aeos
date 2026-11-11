@@ -185,9 +185,13 @@ describe('stub end-to-end pipeline', { timeout: 30_000 }, () => {
       `PR:     https://stub.invalid/pull/aeos/${standalone}`,
     );
 
+    // A finished ticket has no sub-state, whichever command finished it.
     for (const id of [epic, ...tasks, standalone]) {
-      expect(ticketState(id).column, id).toBe('DONE');
+      expect(ticketState(id), id).toEqual({ column: 'DONE', subState: null });
     }
+    const again = await runCli('ticket', 'approve', standalone, '--json');
+    expect(again.exitCode).toBe(1);
+    expect(JSON.parse(again.stdout)).toMatchObject({ error: { code: 'ALREADY_DONE' } });
     // Both stub pull requests were recorded, and nothing was pushed for them.
     expect(execFileSync('git', ['for-each-ref'], { cwd: origin, encoding: 'utf-8' })).toBe('');
 

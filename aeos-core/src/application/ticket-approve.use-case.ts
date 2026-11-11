@@ -50,6 +50,11 @@ export class TicketApproveUseCase implements TicketApprovePort {
       return { status: 'error', ticketId, error: `Ticket ${ticketId} not found` };
     }
 
+    // Asked first: a finished ticket has no sub-state, so it is never "not signed off".
+    if (ticket.column === Column.DONE) {
+      return { status: 'already_done', ticketId };
+    }
+
     // BACKLOG tickets can advance without sign-off (no agent pipeline in BACKLOG).
     // All other columns require SIGNED_OFF from the agent pipeline.
     const isBacklog = ticket.column === Column.BACKLOG;
@@ -64,9 +69,6 @@ export class TicketApproveUseCase implements TicketApprovePort {
     }
 
     const currentColumn = ticket.column;
-    if (currentColumn === Column.DONE) {
-      return { status: 'already_done', ticketId };
-    }
 
     // An epic is reviewed against its pinned spec. One created before pins has
     // none, and would reach the spec-review column with nothing to review.
@@ -192,14 +194,18 @@ export class TicketApproveUseCase implements TicketApprovePort {
       return { status: 'error', ticketId, error: transitionResult.reason };
     }
 
-    // Set sub-state to READY (new column awaits its first `ticket run`)
-    const subStateResult = this.stateMachine.setSubState(projectId, ticketId, SubState.READY);
-    if (!subStateResult.ok) {
-      return {
-        status: 'error',
-        ticketId,
-        error: `Failed to set READY state: ${subStateResult.reason}`,
-      };
+    // A new column awaits its first `ticket run`; DONE has no sub-state, and
+    // the transition has already cleared it.
+    const nextSubState = nextColumn === Column.DONE ? null : SubState.READY;
+    if (nextSubState) {
+      const subStateResult = this.stateMachine.setSubState(projectId, ticketId, nextSubState);
+      if (!subStateResult.ok) {
+        return {
+          status: 'error',
+          ticketId,
+          error: `Failed to set READY state: ${subStateResult.reason}`,
+        };
+      }
     }
 
     // Mirrored to disk; SQLite is authoritative for column and sub-state, so
@@ -207,7 +213,7 @@ export class TicketApproveUseCase implements TicketApprovePort {
     syncTicketDocument(this.artifactStore, projectPath, {
       ...ticket,
       column: nextColumn,
-      subState: SubState.READY,
+      subState: nextSubState,
     });
 
     return {

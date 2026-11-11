@@ -1,7 +1,7 @@
 // Adapter — SQLite implementation of TicketRepository port
 
 import type BetterSqlite3 from 'better-sqlite3';
-import type { Column } from '../../domain/model/column.js';
+import { Column } from '../../domain/model/column.js';
 import type { ContractChange, Ticket, TicketEscalation } from '../../domain/model/ticket.js';
 import type { EscalationReason } from '../../domain/model/escalation.js';
 import { SubState } from '../../domain/model/sub-state.js';
@@ -50,7 +50,9 @@ export class SqliteTicketRepository implements TicketRepository {
       parentId: row.parent_id ?? null,
       taskKey: row.task_key ?? null,
       column: row.column,
-      subState: (row.sub_state as SubStateOrNull) ?? null,
+      // DONE has no sub-state. Rows approved into it before that was enforced
+      // are stored READY, so it is settled here, on read, not by a migration.
+      subState: row.column === Column.DONE ? null : ((row.sub_state as SubStateOrNull) ?? null),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       escalation: row.escalation_reason

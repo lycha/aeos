@@ -61,8 +61,8 @@ export class StateMachineService {
     // 5. Update the ticket's column
     this.ticketRepo.updateColumn(projectId, ticketId, targetColumn);
 
-    // BACKLOG exception: reset sub-state to null
-    if (targetColumn === Column.BACKLOG) {
+    // BACKLOG and DONE have no sub-state: nothing runs in either.
+    if (targetColumn === Column.BACKLOG || targetColumn === Column.DONE) {
       this.ticketRepo.updateSubState(projectId, ticketId, null);
     }
 

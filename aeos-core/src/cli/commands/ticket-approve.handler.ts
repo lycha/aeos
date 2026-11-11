@@ -2,6 +2,7 @@
 
 import type { Handlers } from '../generated/commands.gen.js';
 import { done, failed, stopped } from '../result.js';
+import { Column } from '../../domain/model/column.js';
 import { withColumnLabels } from '../../domain/services/column-labels.js';
 
 export const ticketApprove: Handlers['ticketApprove'] = async (
@@ -29,9 +30,8 @@ export const ticketApprove: Handlers['ticketApprove'] = async (
           // A person's approval, which this is, is always recorded.
           gateRecordId: result.gateRecordId!,
         },
-        // READY, not BLOCKED — approve resets the new column to READY so
-        // it awaits its first `ticket run`.
-        `✓ Ticket ${result.ticketId} advanced: ${labels[result.fromColumn]} → ${labels[result.toColumn]} (sub-state: READY)`,
+        // The new column awaits its first `ticket run`; DONE has no sub-state.
+        `✓ Ticket ${result.ticketId} advanced: ${labels[result.fromColumn]} → ${labels[result.toColumn]}${result.toColumn === Column.DONE ? '' : ' (sub-state: READY)'}`,
       );
     case 'already_done': {
       // Nothing moved and nothing was recorded, so there is no result to return.
