@@ -1,0 +1,24 @@
+column: SCAFFOLD
+label: Scaffold
+role: standard
+diffContext: epic
+phase: PREPARE
+# Manifesto stage 9. The scaffold (DTOs, interfaces, repositories, end-to-end
+# suite) is produced deterministically by the project's generators
+# (project.json `generators`), not by this column's worker. The worker reviews
+# the generated scaffold (the epic diff) for fidelity to the contract and
+# schema; fixes go to the inputs, never the generated output.
+workerAgentFile: agents/scaffold-agent.yaml
+reviewerAgentFile: agents/reviewer-agent.yaml
+outputArtifact: scaffold-review.md
+minWordCount: 50
+requiredSections: []
+reviewerRubrics:
+  - rubrics/structure/scaffold-structure.md
+  - rubrics/drift/intent-drift.md
+maxIterations: 3
+escalation: escalate_to_human
+advanceMode: manual
+preflight:
+  enabled: false
+  questionsArtifact: questions.md

@@ -1,9 +1,13 @@
 // Driving port — ProjectInit use case interface
 
+import type { PipelineChoice } from '../driven/project-repository.port.js';
+
 export interface ProjectInitInput {
   name: string;
   key: string;
   cwd: string;
+  /** Column pipeline to scaffold. Defaults to `standard`. */
+  pipeline?: PipelineChoice;
 }
 
 export interface ProjectInitResult {

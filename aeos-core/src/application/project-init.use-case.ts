@@ -20,7 +20,7 @@ export class ProjectInitUseCase implements ProjectInitPort {
   ) {}
 
   execute(input: ProjectInitInput): ProjectInitResult {
-    const { name, key, cwd } = input;
+    const { name, key, cwd, pipeline } = input;
 
     // Derive slug id from name
     const id = name
@@ -36,7 +36,7 @@ export class ProjectInitUseCase implements ProjectInitPort {
     if (this.projectRepo.exists(cwd)) {
       const existing = this.projectRepo.read(cwd);
       this.ensureRegistered(existing, cwd);
-      const restored = this.projectRepo.scaffoldDefaults(cwd);
+      const restored = this.projectRepo.scaffoldDefaults(cwd, pipeline);
       this.projectRepo.writeConstraintsPlaceholder(cwd);
       this.commitScaffold(path.join(cwd, '.aeos'), existing.key);
       return { name: existing.name, key: existing.key, scaffolded: restored };
@@ -63,7 +63,7 @@ export class ProjectInitUseCase implements ProjectInitPort {
     // 3. Scaffold the default column specs, agents, and rubrics. Without these
     //    the project has no pipeline to run — `ticket run` fails immediately
     //    with a missing column spec.
-    const scaffolded = this.projectRepo.scaffoldDefaults(cwd);
+    const scaffolded = this.projectRepo.scaffoldDefaults(cwd, pipeline);
 
     // 4. Write CONSTRAINTS.md placeholder
     this.projectRepo.writeConstraintsPlaceholder(cwd);

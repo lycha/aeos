@@ -606,6 +606,7 @@ Initialise a project in the current directory
 | --- | --- |
 | `--name <name>` | Project name (defaults to directory name) |
 | `--key <key>` | Ticket prefix key (2–4 uppercase letters) |
+| `--pipeline <pipeline>` | Column pipeline to scaffold (standard, or the manifesto full feature pipeline) |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `aeos_home`.

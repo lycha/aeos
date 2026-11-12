@@ -16,6 +16,7 @@ export interface ProjectInitArgs {
 export interface ProjectInitOptions {
   name?: string;
   key?: string;
+  pipeline?: 'standard' | 'manifesto';
   json?: boolean;
 }
 

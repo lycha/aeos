@@ -93,7 +93,12 @@ describe('ProjectInitUseCase', () => {
 
   it('should scaffold default specs, agents, and rubrics', () => {
     useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test' });
-    expect(projectRepo.scaffoldDefaults).toHaveBeenCalledWith('/tmp/test');
+    expect(projectRepo.scaffoldDefaults).toHaveBeenCalledWith('/tmp/test', undefined);
+  });
+
+  it('forwards the chosen pipeline to the scaffold', () => {
+    useCase.execute({ name: 'Test', key: 'TEST', cwd: '/tmp/test', pipeline: 'manifesto' });
+    expect(projectRepo.scaffoldDefaults).toHaveBeenCalledWith('/tmp/test', 'manifesto');
   });
 
   it('should write CONSTRAINTS.md placeholder on fresh init', () => {
