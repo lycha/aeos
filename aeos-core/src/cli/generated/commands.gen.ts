@@ -152,10 +152,12 @@ export function registerGenerated(
     .description('Initialise a project in the current directory')
     .option('--name <name>', 'Project name (defaults to directory name)')
     .option('--key <key>', 'Ticket prefix key (2–4 uppercase letters)')
+    .option('--pipeline <pipeline>', 'Column pipeline to scaffold (standard, or the manifesto full feature pipeline)')
     .option('--json', 'Write one JSON envelope to stdout instead of text')
     .action((options: T.ProjectInitOptions) =>
       run(resources, setExit, 'projectInit', 'project init', options, [
         ['--key', options.key, { type: 'string', pattern: '^[A-Z]{2,4}$' }],
+        ['--pipeline', options.pipeline, { type: 'string', enum: ['standard', 'manifesto'] }],
       ], (context) =>
         handlers.projectInit({}, options, context),
       ),

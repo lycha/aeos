@@ -25,7 +25,12 @@ export const projectInit: Handlers['projectInit'] = async (_args, options, conte
     );
   }
 
-  const result = context.container.projectInit.execute({ name, key, cwd });
+  const result = context.container.projectInit.execute({
+    name,
+    key,
+    cwd,
+    pipeline: options.pipeline,
+  });
 
   const scaffoldNote =
     result.scaffolded.length > 0

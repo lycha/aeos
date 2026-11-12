@@ -4,14 +4,17 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Project } from '../../domain/model/project.js';
 import type { ProjectExecutorConfig } from '../../domain/model/project-executor-config.js';
-import type { ProjectRepository } from '../../domain/ports/driven/project-repository.port.js';
+import type {
+  ProjectRepository,
+  PipelineChoice,
+} from '../../domain/ports/driven/project-repository.port.js';
 import {
   ProjectRootNotFoundError,
   ProjectConfigNotFoundError,
   ProjectConfigCorruptError,
 } from '../../shared/errors.js';
 import { CONSTRAINTS_PLACEHOLDER } from './defaults/constraints-placeholder.js';
-import { readTemplates } from './template-source.js';
+import { templateSet } from './template-source.js';
 import {
   ProjectChecksSchema,
   ProjectProtectedPathsSchema,
@@ -112,14 +115,14 @@ export class FsProjectRepository implements ProjectRepository {
     fs.writeFileSync(filePath, JSON.stringify(project, null, 2) + '\n', 'utf-8');
   }
 
-  scaffoldDefaults(projectPath: string): string[] {
+  scaffoldDefaults(projectPath: string, pipeline: PipelineChoice = 'standard'): string[] {
     const aeosRoot = path.join(projectPath, AEOS_DIR);
     fs.mkdirSync(path.join(aeosRoot, COLUMN_SPECS_DIR), { recursive: true });
     fs.mkdirSync(path.join(aeosRoot, 'features'), { recursive: true });
     fs.mkdirSync(path.join(aeosRoot, 'contexts'), { recursive: true });
 
     const created: string[] = [];
-    for (const template of readTemplates()) {
+    for (const template of templateSet(pipeline)) {
       const target = path.join(aeosRoot, template.relativePath);
       // Skip anything already present: a re-run must not clobber the edits a
       // user has made to their own agents and rubrics.

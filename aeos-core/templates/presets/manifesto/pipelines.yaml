@@ -1,0 +1,33 @@
+# Manifesto preset — the full feature pipeline of the AI-Driven Development
+# manifesto, mapped onto aeos columns. Opt-in; activate per the README in this
+# directory. The standard preset ships at templates/pipelines.yaml.
+#
+# Manifesto stages 1–5 (raw material → spec) are authored BEFORE the epic by the
+# artefact-tree-pipeline plugin and pinned by `ticket create --spec`, so they are
+# not board columns. The board below is stages 5(gate)–14.
+#
+# Same loader rules as the standard pipeline apply (one spec-review before the
+# decomposition column, one decomposition before any integration/final-gate, one
+# final-gate last before DONE, each column once, order changes only when every
+# ticket of the kind is in BACKLOG or DONE).
+
+pipelines_version: 0
+
+pipelines:
+  EPIC:
+    - BACKLOG            # stages 1–5 pinned here (artefact-tree-pipeline plugin)
+    - SPEC_REVIEW        # 5   role: spec-review   (spec gate)
+    - TECH_SPEC          # 6   domain model is part of the tech-spec exercise
+    - API_CONTRACT       # 7   human-owned OpenAPI  (contract gate)
+    - SCHEMA             # 8   human-owned ERD/SQL  (contract gate)
+    - SCAFFOLD           # 9   reviews the generators' deterministic output
+    - TASK_BREAKDOWN     # 10  role: decomposition
+    - INTEGRATION_REVIEW # 14a role: integration
+    - DOD_GATE           # 14b role: final-gate     (release gate)
+    - DONE
+  TASK:
+    - BACKLOG
+    - IMPLEMENTATION     # 11
+    - CODE_REVIEW        # 12  (reviewer "panel" = the column's rubrics)
+    - QA                 # 13  generated e2e first, then wider testing
+    - DONE

@@ -1,0 +1,23 @@
+column: SCHEMA
+label: Schema
+role: standard
+diffContext: none
+phase: PREPARE
+# Manifesto stage 8, run alongside stage 7 (API contract). The schema (ERD or
+# SQL/DDL) is human-owned: the worker reviews the person's schema against the
+# domain model and the pinned spec; it never drafts it. The human sign-off is
+# the same contract gate that clears the API contract.
+workerAgentFile: agents/schema-agent.yaml
+reviewerAgentFile: agents/reviewer-agent.yaml
+outputArtifact: schema-review.md
+minWordCount: 50
+requiredSections: []
+reviewerRubrics:
+  - rubrics/structure/schema-structure.md
+  - rubrics/drift/intent-drift.md
+maxIterations: 3
+escalation: escalate_to_human
+advanceMode: manual
+preflight:
+  enabled: true
+  questionsArtifact: questions.md

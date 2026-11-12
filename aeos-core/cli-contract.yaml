@@ -414,6 +414,12 @@ commands:
         required: false
         description: Ticket prefix key (2–4 uppercase letters)
         schema: { type: string, pattern: "^[A-Z]{2,4}$" }
+      - name: pipeline
+        in: option
+        valueName: pipeline
+        required: false
+        description: Column pipeline to scaffold (standard, or the manifesto full feature pipeline)
+        schema: { type: string, enum: [standard, manifesto] }
     responses:
       "0":
         description: The project is scaffolded.

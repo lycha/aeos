@@ -3,6 +3,9 @@
 import type { Project } from '../../model/project.js';
 import type { ProjectExecutorConfig } from '../../model/project-executor-config.js';
 
+/** The column pipeline a project is scaffolded with. `standard` is the default. */
+export type PipelineChoice = 'standard' | 'manifesto';
+
 export interface ProjectRepository {
   /** Returns true if .aeos/project.json already exists at the given path */
   exists(projectPath: string): boolean;
@@ -16,8 +19,12 @@ export interface ProjectRepository {
    * Never overwrites an existing file, so re-running `project init` restores
    * anything deleted without discarding local edits. Returns the relative
    * paths actually created.
+   *
+   * `pipeline` picks the column pipeline: `manifesto` overlays the manifesto
+   * preset (its `pipelines.yaml` plus the extra column specs, agents and
+   * rubrics) on the standard scaffold. Defaults to `standard`.
    */
-  scaffoldDefaults(projectPath: string): string[];
+  scaffoldDefaults(projectPath: string, pipeline?: PipelineChoice): string[];
   /** Walk up from `startDir` to find the nearest directory containing .aeos/project.json. Returns the project root path, or null if not found. */
   findRoot(startDir: string): string | null;
   /** Reads project.json with any executor defaults needed for runtime selection. Returns null if missing or invalid. */
