@@ -8,6 +8,7 @@ import type { TestResult } from '../ports/driven/test-report-reader.port.js';
 import {
   addInstruments,
   buildConformanceReport,
+  conformanceDigestSource,
   conformanceYaml,
   renderConformanceMarkdown,
   renderConformanceTable,
@@ -152,6 +153,19 @@ describe('buildConformanceReport', () => {
 
     expect(parsed).toEqual(report);
     expect(validate(parsed), JSON.stringify(validate.errors)).toBe(true);
+  });
+
+  it('digests the same regardless of generated_at, but differently on real drift (WEB-5)', () => {
+    const report = build(tests);
+    const rebuiltLater = {
+      ...report,
+      meta: { ...report.meta, generated_at: '2026-11-11T00:00:00.000Z' },
+    };
+    const drifted = build(tests.slice(1));
+
+    expect(conformanceDigestSource(rebuiltLater)).toBe(conformanceDigestSource(report));
+    expect(conformanceDigestSource(drifted)).not.toBe(conformanceDigestSource(report));
+    expect(conformanceDigestSource(report)).not.toContain(report.meta.generated_at);
   });
 
   it('renders a table of id, verdict, instruments and claimed by', () => {

@@ -28,7 +28,7 @@ const report = {
   ],
   summary: { total: 2, pass: 1, fail: 0, unverified: 1 },
 } as unknown as ConformanceReport;
-const review = { report, prUrl: 'https://github.com/o/r/pull/7' };
+const review = { report, prUrl: 'https://github.com/o/r/pull/7', reviewHash: 'HASH-1' };
 
 describe('the ticket dod-approve handler', () => {
   let program: Command;
@@ -120,5 +120,49 @@ describe('the ticket dod-approve handler', () => {
     expect(printed.join('\n')).not.toContain('[y/N]');
     expect(useCase.execute).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
+  });
+
+  it('--dry-run previews the report and review hash, asks nothing, and records nothing', async () => {
+    await run('--dry-run');
+
+    expect(useCase.review).toHaveBeenCalledWith('proj-1', '/test', 'AEOS-1', []);
+    expect(useCase.execute).not.toHaveBeenCalled();
+    expect(printed.join('\n')).not.toContain('[y/N]');
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('--decision approve with a matching --review-hash proceeds without asking', async () => {
+    await run('--decision', 'approve', '--review-hash', 'HASH-1');
+
+    expect(useCase.execute).toHaveBeenCalledWith(
+      'proj-1',
+      '/test',
+      'AEOS-1',
+      true,
+      undefined,
+      review,
+    );
+    expect(printed.join('\n')).not.toContain('[y/N]');
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('--decision reject with a matching --review-hash records the given reason', async () => {
+    await run('--decision', 'reject', '--reason', 'Not ready.', '--review-hash', 'HASH-1');
+
+    expect(useCase.execute).toHaveBeenCalledWith(
+      'proj-1',
+      '/test',
+      'AEOS-1',
+      false,
+      'Not ready.',
+      review,
+    );
+  });
+
+  it('refuses a stale --review-hash as CONFORMANCE_CHANGED, and records nothing', async () => {
+    await run('--decision', 'approve', '--review-hash', 'STALE');
+
+    expect(useCase.execute).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(3);
   });
 });

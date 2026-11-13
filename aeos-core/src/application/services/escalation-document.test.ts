@@ -5,6 +5,7 @@ import {
   parseEscalationResponse,
   buildResolutionDocument,
   escalationFilename,
+  fillEscalationResponse,
 } from './escalation-document.js';
 
 describe('escalation-document', () => {
@@ -59,5 +60,52 @@ describe('escalation-document', () => {
     expect(res).toContain('Operator Resolution: STAN-4');
     expect(res).toContain('do X');
     expect(res).toContain('overrides earlier assumptions');
+  });
+
+  describe('fillEscalationResponse', () => {
+    it('fills the Response fence and round-trips through parseEscalationResponse', () => {
+      const doc = buildEscalationDocument({
+        ticketId: 'STAN-4',
+        column: 'CODE_REVIEW',
+        reason: 'NOT_CONVERGING',
+        message: 'stuck',
+      });
+
+      const filled = fillEscalationResponse(doc, 'Use response_url per D-6, not chat.update.');
+
+      expect(parseEscalationResponse(filled)).toBe('Use response_url per D-6, not chat.update.');
+    });
+
+    it('leaves the Why section and guidance comments untouched', () => {
+      const doc = buildEscalationDocument({
+        ticketId: 'STAN-4',
+        column: 'CODE_REVIEW',
+        reason: 'NOT_CONVERGING',
+        message: 'Attempt 2 reproduced the same blockers.',
+      });
+
+      const filled = fillEscalationResponse(doc, 'do X');
+
+      expect(filled).toContain('## Why\nAttempt 2 reproduced the same blockers.');
+      expect(filled).toContain(
+        '<!-- Write your decision below, then run: aeos ticket resolve STAN-4 -->',
+      );
+      expect(filled).toContain(
+        '<!-- The response is injected into the next run as authoritative operator guidance. -->',
+      );
+    });
+
+    it('supports a multi-line response', () => {
+      const doc = buildEscalationDocument({
+        ticketId: 'STAN-4',
+        column: 'CODE_REVIEW',
+        reason: 'NOT_CONVERGING',
+        message: 'stuck',
+      });
+
+      const filled = fillEscalationResponse(doc, 'Line one.\n\n- bullet point');
+
+      expect(parseEscalationResponse(filled)).toBe('Line one.\n\n- bullet point');
+    });
   });
 });

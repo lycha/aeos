@@ -18,6 +18,7 @@ function createMockTicketShowUseCase(): TicketShowPort {
     execute: vi.fn().mockReturnValue({
       ok: true,
       runs: ['RUN-20261110T100000Z-ab12'],
+      runRecords: [],
       children: [],
       parent: null,
       ticket: {
@@ -31,6 +32,12 @@ function createMockTicketShowUseCase(): TicketShowPort {
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
       },
+      specMoved: false,
+      gitIdentity: null,
+      availableActions: [],
+      availableColumns: [],
+      pendingAmendment: false,
+      gateRecords: [],
       artifacts: ['AEOS-1-ticket.md', 'AEOS-1-prd.md'],
       executions: [
         {
@@ -173,6 +180,7 @@ describe('the ticket show handler', () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: true,
       runs: [],
+      runRecords: [],
       children: [],
       parent: null,
       ticket: {
@@ -186,6 +194,12 @@ describe('the ticket show handler', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
       },
+      specMoved: false,
+      gitIdentity: null,
+      availableActions: [],
+      availableColumns: [],
+      pendingAmendment: false,
+      gateRecords: [],
       artifacts: [],
       executions: [],
     });
@@ -240,6 +254,7 @@ describe('the ticket show handler', () => {
     (useCase.execute as ReturnType<typeof vi.fn>).mockReturnValue({
       ok: true,
       runs: [],
+      runRecords: [],
       children: [],
       parent: null,
       ticket: {
@@ -253,6 +268,12 @@ describe('the ticket show handler', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
       },
+      specMoved: false,
+      gitIdentity: null,
+      availableActions: [],
+      availableColumns: [],
+      pendingAmendment: false,
+      gateRecords: [],
       artifacts: [],
       executions: [],
     });

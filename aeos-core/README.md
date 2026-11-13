@@ -640,6 +640,24 @@ Exit codes:
 - `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
+### `aeos project board [options]`
+
+Cross-project board of every project's tickets, flagging the ones that need a human
+
+| Parameter | Description |
+| --- | --- |
+| `--json` | Write one JSON envelope to stdout instead of text |
+
+Requires: `state_db`.
+
+Exit codes:
+
+- `0` Every registered project, each marked reachable or not, with its tickets.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
 ### `aeos ticket create [options] <title>`
 
 Create a new ticket (an epic by default, or a task with --parent)
@@ -855,16 +873,19 @@ Review the conformance report and approve a final-gate ticket as DONE
 | `<id>` | Ticket ID (e.g. AEOS-1) |
 | `--reason <text>` | Required when any criterion is failed or unverified |
 | `--verified <ids>` | Criteria a person vouches for, comma-separated (e.g. AC-3,AC-7). Each gains a human instrument citing the gate record |
+| `--dry-run` | Rebuild and return the conformance report, pull request URL and review hash without recording anything |
+| `--decision <decision>` | The non-interactive decision; requires --review-hash. Omit to use the terminal prompt |
+| `--review-hash <hash>` | The hash of the conformance report from a prior --dry-run. Exit 3 CONFORMANCE_CHANGED if the report has moved |
 | `--json` | Write one JSON envelope to stdout instead of text |
 
 Requires: `project`, `state_db`, `git_repo`.
 
 Exit codes:
 
-- `0` The decision is recorded as a gate. `approved` is false when the person answered no; the ticket then stays where it is.
+- `0` The decision is recorded as a gate (`approved` false when the person answered no), or, with --dry-run, the rebuilt report and nothing recorded.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
-- `3` Refused. A criterion is failed or unverified and --reason was not given, or stdin is not a terminal.
+- `3` Refused. A criterion is failed or unverified and --reason was not given, stdin is not a terminal, or the report changed since the dry-run (error.code CONFORMANCE_CHANGED).
 - `4` A resource in `requires` is not in place. envelope.error.resource names it.
 
 ### `aeos ticket repin [options] <id>`
@@ -1001,6 +1022,26 @@ Requires: `state_db`.
 Exit codes:
 
 - `0` The spend that matches, possibly none. totalUsd covers known costs; unknownRecords counts the rest.
+- `1` Something broke. envelope.error says what.
+- `2` Invalid arguments or options. Nothing was attempted.
+- `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).
+- `4` A resource in `requires` is not in place. envelope.error.resource names it.
+
+### `aeos serve [options]`
+
+Serve the local web UI and open it in a browser
+
+| Parameter | Description |
+| --- | --- |
+| `--port <port>` | Port to listen on (defaults to a free loopback port) |
+| `--no-open` | Do not open the browser automatically |
+| `--json` | Write one JSON envelope to stdout instead of text |
+
+Requires: `aeos_home`, `state_db`.
+
+Exit codes:
+
+- `0` The server ran and stopped cleanly on SIGINT/SIGTERM.
 - `1` Something broke. envelope.error says what.
 - `2` Invalid arguments or options. Nothing was attempted.
 - `3` Stopped for a person before the command ran, e.g. the pipelines file changed while tickets are in flight (error.code PIPELINE_CHANGE_IN_FLIGHT).

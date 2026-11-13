@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DecisionPromotionService } from './decision-promotion.service.js';
+import {
+  DecisionPromotionService,
+  listQuestions,
+  fillAnswers,
+} from './decision-promotion.service.js';
 import type { ArtifactStore } from '../../domain/ports/driven/artifact-store.port.js';
 
 function createMockArtifactStore(): ArtifactStore {
@@ -319,6 +323,141 @@ describe('DecisionPromotionService', () => {
       (artifactStore.readArtifact as ReturnType<typeof vi.fn>).mockReturnValue(questions(''));
 
       expect(() => service.answered('/project', 'AEOS-1')).toThrow(/Missing required answers/);
+    });
+  });
+
+  describe('listQuestions', () => {
+    const twoQuestions = (secondAnswer: string): string =>
+      [
+        '# AEOS Questions',
+        'Format-Version: 2',
+        'Ticket: AEOS-1',
+        '',
+        '## Q-001',
+        'Status: OPEN',
+        'Topic: executor-scope',
+        'Required: yes',
+        '',
+        '### Question',
+        TEXT_FENCE,
+        'Which executors are in scope for v1?',
+        END_FENCE,
+        '',
+        '### Answer',
+        TEXT_FENCE,
+        'Support `claude` and `stub` only in v1.',
+        END_FENCE,
+        '',
+        '### Notes',
+        TEXT_FENCE,
+        'Carried over from the spike.',
+        END_FENCE,
+        '',
+        '## Q-002',
+        'Status: OPEN',
+        'Topic: retry-policy',
+        '',
+        '### Question',
+        TEXT_FENCE,
+        'Do we need retries?',
+        END_FENCE,
+        '',
+        '### Answer',
+        TEXT_FENCE,
+        ...(secondAnswer ? [secondAnswer] : []),
+        END_FENCE,
+      ].join('\n');
+
+    it('returns one entry per Q-NNN block, including a block with no answer yet', () => {
+      expect(listQuestions(twoQuestions(''))).toEqual([
+        {
+          id: 'Q-001',
+          topic: 'executor-scope',
+          required: true,
+          question: 'Which executors are in scope for v1?',
+          answer: 'Support `claude` and `stub` only in v1.',
+          notes: 'Carried over from the spike.',
+        },
+        {
+          id: 'Q-002',
+          topic: 'retry-policy',
+          required: false,
+          question: 'Do we need retries?',
+          answer: '',
+          notes: null,
+        },
+      ]);
+    });
+  });
+
+  describe('fillAnswers', () => {
+    const doc = [
+      '# AEOS Questions',
+      'Format-Version: 2',
+      'Ticket: AEOS-1',
+      '',
+      '## Q-001',
+      'Status: OPEN',
+      'Topic: executor-scope',
+      'Required: yes',
+      '',
+      '### Question',
+      TEXT_FENCE,
+      'Which executors are in scope for v1?',
+      END_FENCE,
+      '',
+      '### Answer',
+      TEXT_FENCE,
+      END_FENCE,
+      '',
+      '## Q-002',
+      'Status: OPEN',
+      'Topic: retry-policy',
+      '',
+      '### Question',
+      TEXT_FENCE,
+      'Do we need retries?',
+      END_FENCE,
+      '',
+      '### Answer',
+      TEXT_FENCE,
+      END_FENCE,
+    ].join('\n');
+
+    it('fills only the matched blocks’ Answer fence, leaving other blocks and fields untouched', () => {
+      const filled = fillAnswers(doc, { 'Q-001': 'Support `claude` and `stub` only in v1.' });
+
+      expect(listQuestions(filled)).toEqual([
+        {
+          id: 'Q-001',
+          topic: 'executor-scope',
+          required: true,
+          question: 'Which executors are in scope for v1?',
+          answer: 'Support `claude` and `stub` only in v1.',
+          notes: null,
+        },
+        {
+          id: 'Q-002',
+          topic: 'retry-policy',
+          required: false,
+          question: 'Do we need retries?',
+          answer: '',
+          notes: null,
+        },
+      ]);
+    });
+
+    it('round-trips a multi-line answer back through listQuestions unchanged', () => {
+      const multiLine = 'Line one.\n\n- bullet point';
+      const filled = fillAnswers(doc, { 'Q-001': multiLine, 'Q-002': 'yes' });
+
+      const fields = listQuestions(filled);
+      expect(fields[0].answer).toBe(multiLine);
+      expect(fields[1].answer).toBe('yes');
+    });
+
+    it('leaves the document unchanged when no id matches', () => {
+      expect(fillAnswers(doc, { 'Q-999': 'unused' })).toBe(doc);
     });
   });
 });

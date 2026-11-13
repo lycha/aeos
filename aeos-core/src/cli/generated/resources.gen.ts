@@ -18,6 +18,7 @@ export const COMMAND_RESOURCES = {
   install: { requires: [], conditionalRequires: [] },
   projectInit: { requires: ['aeos_home'], conditionalRequires: [] },
   projectSync: { requires: ['project'], conditionalRequires: [] },
+  projectBoard: { requires: ['state_db'], conditionalRequires: [] },
   ticketCreate: { requires: ['project', 'state_db'], conditionalRequires: ['python'] },
   ticketList: { requires: ['project', 'state_db'], conditionalRequires: [] },
   ticketShow: { requires: ['project', 'state_db'], conditionalRequires: [] },
@@ -36,6 +37,7 @@ export const COMMAND_RESOURCES = {
   orchestratorClearBudget: { requires: ['project', 'state_db'], conditionalRequires: [] },
   orchestratorStatus: { requires: ['project', 'state_db'], conditionalRequires: [] },
   costs: { requires: ['state_db'], conditionalRequires: [] },
+  serve: { requires: ['aeos_home', 'state_db'], conditionalRequires: [] },
 } as const satisfies Record<
   string,
   { requires: readonly ResourceName[]; conditionalRequires: readonly ResourceName[] }

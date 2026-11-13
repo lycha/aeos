@@ -1,12 +1,18 @@
 // Use case — TicketShow
 
+import { columnOrderFor } from '../domain/model/column.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { CostRepository } from '../domain/ports/driven/cost-repository.port.js';
 import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { ArtefactTree } from '../domain/ports/driven/artefact-tree.port.js';
-import { resolveSpecPin } from './services/spec-pin.js';
+import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
+import type { PipelineLoader } from '../domain/ports/driven/pipeline-loader.port.js';
+import type { GateRecordStore } from '../domain/ports/driven/gate-record-store.port.js';
+import { roleOf } from './services/column-roles.js';
+import { availableActionsFor } from './services/ticket-actions.js';
+import { resolveSpecPin, pendingAmendment } from './services/spec-pin.js';
 import type {
   TicketShowPort,
   TicketShowInput,
@@ -22,6 +28,9 @@ export class TicketShowUseCase implements TicketShowPort {
     private readonly runRecordStore: RunRecordStore,
     private readonly gitGateway: GitGateway,
     private readonly artefactTree: ArtefactTree,
+    private readonly columnSpecLoader: ColumnSpecLoader,
+    private readonly pipelineLoader: PipelineLoader,
+    private readonly gateRecordStore: GateRecordStore,
   ) {}
 
   execute(input: TicketShowInput): TicketShowResult {
@@ -50,9 +59,8 @@ export class TicketShowUseCase implements TicketShowPort {
       ? this.ticketRepo.findById(input.projectId, ticket.parentId)
       : null;
 
-    const runs = this.runRecordStore
-      .list(input.projectPath, ticket.id)
-      .map((record) => record.run_id);
+    const runRecords = this.runRecordStore.list(input.projectPath, ticket.id);
+    const runs = runRecords.map((record) => record.run_id);
 
     const specPin = resolveSpecPin(this.ticketRepo, ticket);
     const specMoved =
@@ -68,6 +76,39 @@ export class TicketShowUseCase implements TicketShowPort {
         ),
       );
 
-    return { ok: true, ticket, artifacts, executions, runs, children, parent, specPin, specMoved };
+    const hasPendingAmendment =
+      specPin !== null &&
+      pendingAmendment(this.gateRecordStore, input.projectPath, specPin) !== undefined;
+    const role = roleOf(this.columnSpecLoader, input.projectPath)(ticket.column);
+    const availableActions = availableActionsFor({
+      column: ticket.column,
+      subState: ticket.subState,
+      role,
+      pendingAmendment: hasPendingAmendment,
+    });
+    const availableColumns = columnOrderFor(
+      this.pipelineLoader.load(input.projectPath),
+      ticket.kind,
+    ).filter((column) => column !== ticket.column);
+    const gateRecords = this.gateRecordStore.list(input.projectPath, { ticketId: ticket.id });
+    const gitIdentity = this.gitGateway.userIdentity(input.projectPath);
+
+    return {
+      ok: true,
+      ticket,
+      artifacts,
+      executions,
+      runs,
+      runRecords,
+      children,
+      parent,
+      specPin,
+      specMoved,
+      gitIdentity,
+      availableActions: [...availableActions],
+      availableColumns: [...availableColumns],
+      pendingAmendment: hasPendingAmendment,
+      gateRecords,
+    };
   }
 }

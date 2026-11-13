@@ -1,3 +1,4 @@
+// Criteria traced here: @AC-20 (vouch + approve/reject with reason) @AC-21 (refuse on report drift) @AC-36 (review hash ignores generation time).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -195,6 +196,13 @@ describe('TicketDodApproveUseCase', () => {
     });
   });
 
+  it('reviews a ticket with no spec pin as a null report and a null review hash', async () => {
+    const result = await useCase.review(PROJECT_ID, PROJECT_PATH, TICKET_ID);
+
+    expect(result).toEqual({ ok: true, review: { report: null, prUrl: null, reviewHash: null } });
+    expect(conformance.buildConformance).not.toHaveBeenCalled();
+  });
+
   describe('conformance at the gate', () => {
     const PIN = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
     const specBacked = (overrides: Partial<Ticket> = {}): Ticket => ({
@@ -297,6 +305,17 @@ describe('TicketDodApproveUseCase', () => {
       );
 
       expect(verdictOf((await review()).report!, 'AC-3').verdict).toBe('unverified');
+    });
+
+    it('gives the same review hash for an unchanged report, and a different one on real drift', async () => {
+      const first = await review();
+      const second = await review();
+      conformance.buildConformance.mockResolvedValue({ report: built(true) }); // AC-2 now passes
+      const drifted = await review();
+
+      expect(first.reviewHash).not.toBeNull();
+      expect(second.reviewHash).toBe(first.reviewHash);
+      expect(drifted.reviewHash).not.toBe(first.reviewHash);
     });
 
     it('refuses to vouch for a criterion the spec does not have', async () => {

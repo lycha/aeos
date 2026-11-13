@@ -17,7 +17,9 @@ import type { TicketReadyPort } from '../domain/ports/driving/ticket-ready.port.
 import type { TicketDodApprovePort } from '../domain/ports/driving/ticket-dod-approve.port.js';
 import type { OrchestratorPort } from '../domain/ports/driving/orchestrator.port.js';
 import type { CostsPort } from '../domain/ports/driving/costs.port.js';
+import type { ProjectBoardPort } from '../domain/ports/driving/project-board.port.js';
 import { CostsUseCase } from '../application/costs.use-case.js';
+import { ProjectBoardUseCase } from '../application/project-board.use-case.js';
 import { OrchestratorUseCase } from '../application/orchestrator.use-case.js';
 import { SqliteOrchestratorStateRepository } from '../infrastructure/persistence/sqlite-orchestrator-state.repository.js';
 import type { ProjectRepository } from '../domain/ports/driven/project-repository.port.js';
@@ -101,6 +103,7 @@ export interface Container {
   ticketDodApprove: TicketDodApprovePort;
   orchestrator: OrchestratorPort;
   costs: CostsPort;
+  projectBoard: ProjectBoardPort;
   projectRepo: ProjectRepository;
   /** The label of every column of the project at this path. Throws when they are invalid. */
   columnLabels: (projectPath: string) => ColumnLabels;
@@ -243,6 +246,9 @@ export function createContainer(): Container {
         runRecordStore,
         gitGateway,
         artefactTree,
+        new YamlColumnSpecLoader(),
+        newPipelineLoader(),
+        gateRecordStore,
       );
     },
     get ticketAnswer() {
@@ -387,6 +393,9 @@ export function createContainer(): Container {
     },
     get costs() {
       return new CostsUseCase(getCostRepo(), configStore);
+    },
+    get projectBoard() {
+      return new ProjectBoardUseCase(getTicketRepo(), configStore);
     },
     projectRepo,
     columnLabels: labelsOf,

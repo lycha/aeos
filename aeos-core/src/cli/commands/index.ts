@@ -10,8 +10,10 @@ import {
   orchestratorRun,
   orchestratorStatus,
 } from './orchestrator.handler.js';
+import { projectBoard } from './project-board.handler.js';
 import { projectInit } from './project-init.handler.js';
 import { projectSync } from './project-sync.handler.js';
+import { serve } from './serve.handler.js';
 import { ticketAnswer } from './ticket-answer.handler.js';
 import { ticketApprove } from './ticket-approve.handler.js';
 import { ticketCreate } from './ticket-create.handler.js';
@@ -27,6 +29,7 @@ import { ticketSignOff } from './ticket-sign-off.handler.js';
 
 export const handlers: Handlers = {
   install,
+  projectBoard,
   projectInit,
   projectSync,
   ticketCreate,
@@ -47,4 +50,5 @@ export const handlers: Handlers = {
   orchestratorClearBudget,
   orchestratorStatus,
   costs,
+  serve,
 };

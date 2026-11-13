@@ -69,6 +69,23 @@ export function parseEscalationResponse(content: string): string | null {
   return body.length > 0 ? body : null;
 }
 
+/**
+ * Replaces only the fenced block under `## Response`; the `## Why` section
+ * and the HTML-comment guidance lines above the fence are left untouched.
+ */
+export function fillEscalationResponse(content: string, response: string): string {
+  const responseIdx = content.indexOf('## Response');
+  if (responseIdx === -1) return content;
+
+  const before = content.slice(0, responseIdx);
+  const after = content.slice(responseIdx);
+  const fence = after.match(/```(?:text)?\n[\s\S]*?```/);
+  if (!fence) return content;
+
+  const filledAfter = after.replace(fence[0], () => `\`\`\`text\n${response}\n\`\`\``);
+  return before + filledAfter;
+}
+
 /** Renders the operator's resolution as a context artifact for the retry. */
 export function buildResolutionDocument(
   ticketId: string,

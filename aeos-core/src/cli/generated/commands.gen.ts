@@ -24,6 +24,7 @@ export interface Handlers {
   install: Handler<'install', T.InstallArgs, T.InstallOptions, T.InstallData>;
   projectInit: Handler<'projectInit', T.ProjectInitArgs, T.ProjectInitOptions, T.ProjectInitData>;
   projectSync: Handler<'projectSync', T.ProjectSyncArgs, T.ProjectSyncOptions, T.ProjectSyncData>;
+  projectBoard: Handler<'projectBoard', T.ProjectBoardArgs, T.ProjectBoardOptions, T.ProjectBoardData>;
   ticketCreate: Handler<'ticketCreate', T.TicketCreateArgs, T.TicketCreateOptions, T.TicketCreateData>;
   ticketList: Handler<'ticketList', T.TicketListArgs, T.TicketListOptions, T.TicketListData>;
   ticketShow: Handler<'ticketShow', T.TicketShowArgs, T.TicketShowOptions, T.TicketShowData>;
@@ -42,6 +43,7 @@ export interface Handlers {
   orchestratorClearBudget: Handler<'orchestratorClearBudget', T.OrchestratorClearBudgetArgs, T.OrchestratorClearBudgetOptions, T.OrchestratorClearBudgetData>;
   orchestratorStatus: Handler<'orchestratorStatus', T.OrchestratorStatusArgs, T.OrchestratorStatusOptions, T.OrchestratorStatusData>;
   costs: Handler<'costs', T.CostsArgs, T.CostsOptions, T.CostsData>;
+  serve: Handler<'serve', T.ServeArgs, T.ServeOptions, T.ServeData>;
 }
 
 const integer = (value: string): number => parseInt(value, 10);
@@ -174,6 +176,17 @@ export function registerGenerated(
       run(resources, setExit, 'projectSync', 'project sync', options, [
       ], (context) =>
         handlers.projectSync({}, options, context),
+      ),
+    );
+
+  project
+    .command('board')
+    .description('Cross-project board of every project\'s tickets, flagging the ones that need a human')
+    .option('--json', 'Write one JSON envelope to stdout instead of text')
+    .action((options: T.ProjectBoardOptions) =>
+      run(resources, setExit, 'projectBoard', 'project board', options, [
+      ], (context) =>
+        handlers.projectBoard({}, options, context),
       ),
     );
 
@@ -322,10 +335,14 @@ export function registerGenerated(
     .argument('<id>', 'Ticket ID (e.g. AEOS-1)')
     .option('--reason <text>', 'Required when any criterion is failed or unverified')
     .option('--verified <ids>', 'Criteria a person vouches for, comma-separated (e.g. AC-3,AC-7). Each gains a human instrument citing the gate record', list(','))
+    .option('--dry-run', 'Rebuild and return the conformance report, pull request URL and review hash without recording anything')
+    .option('--decision <decision>', 'The non-interactive decision; requires --review-hash. Omit to use the terminal prompt')
+    .option('--review-hash <hash>', 'The hash of the conformance report from a prior --dry-run. Exit 3 CONFORMANCE_CHANGED if the report has moved')
     .option('--json', 'Write one JSON envelope to stdout instead of text')
     .action((id: string, options: T.TicketDodApproveOptions) =>
       run(resources, setExit, 'ticketDodApprove', 'ticket dod-approve', options, [
         ['--verified', options.verified, { type: 'array', items: { type: 'string', pattern: '^AC-[0-9]+[a-z]?$' } }],
+        ['--decision', options.decision, { type: 'string', enum: ['approve', 'reject'] }],
       ], (context) =>
         handlers.ticketDodApprove({ id }, options, context),
       ),
@@ -422,6 +439,20 @@ export function registerGenerated(
         ['--since', options.since, { type: 'string', format: 'date' }],
       ], (context) =>
         handlers.costs({}, options, context),
+      ),
+    );
+
+  program
+    .command('serve')
+    .description('Serve the local web UI and open it in a browser')
+    .option('--port <port>', 'Port to listen on (defaults to a free loopback port)', integer)
+    .option('--no-open', 'Do not open the browser automatically')
+    .option('--json', 'Write one JSON envelope to stdout instead of text')
+    .action((options: T.ServeOptions) =>
+      run(resources, setExit, 'serve', 'serve', options, [
+        ['--port', options.port, { type: 'integer', minimum: 1 }],
+      ], (context) =>
+        handlers.serve({}, options, context),
       ),
     );
 }

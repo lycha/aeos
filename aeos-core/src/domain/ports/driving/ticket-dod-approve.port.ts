@@ -10,6 +10,12 @@ export interface DodReview {
    */
   readonly report: ConformanceReport | null;
   readonly prUrl: string | null;
+  /**
+   * sha256 of the report with `meta.generated_at` blanked, null when there is
+   * no report. Proves, on a later `--decision`, that the report is still the
+   * one reviewed (AC-21, AC-36).
+   */
+  readonly reviewHash: string | null;
 }
 
 export type TicketDodApproveResult =
