@@ -110,3 +110,14 @@ export function validateOutput(content: string, columnSpec: ColumnSpec): Validat
     violations: allViolations,
   };
 }
+
+/**
+ * Drops what an agent says before its artefact ("Tests pass. Done."): everything
+ * ahead of the first Markdown heading. Text with no heading is returned as it is.
+ * The full output stays in the run record's log.
+ */
+export function stripPreamble(content: string): string {
+  // shortcut: a `# ` line inside a code fence in the preamble counts as the heading; track fences if that shows up.
+  const start = content.search(/^#{1,6} /m);
+  return start > 0 ? content.slice(start) : content;
+}
