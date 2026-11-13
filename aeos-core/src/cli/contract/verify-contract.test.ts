@@ -31,8 +31,9 @@ describe('verifyContract', () => {
     );
 
     expect(report.mismatches).toEqual([]);
-    // What Iteration 1 has not built yet is pending, not wrong.
-    expect(report.pending).toEqual(['dashboard: command (I1-M5-001)']);
+    // What is not built yet is pending, not wrong: Iteration 1's dashboard. (The
+    // AEOS Web UI (WEB-1) surface has landed; `serve` was the last of it.)
+    expect([...report.pending].sort()).toEqual(['dashboard: command (I1-M5-001)'].sort());
     // Everything built is marked existing: nothing waits for the owner's marker.
     expect(report.landed).toEqual([]);
   });

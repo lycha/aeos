@@ -55,6 +55,55 @@ export interface AnsweredQuestion {
   readonly answer: string;
 }
 
+/** One `## Q-NNN` block of a structured questions file, answered or not. */
+export interface QuestionField {
+  readonly id: string;
+  readonly topic: string;
+  readonly required: boolean;
+  readonly question: string;
+  readonly answer: string;
+  readonly notes: string | null;
+}
+
+/** Every question of a structured questions file, including unanswered ones. */
+export function listQuestions(content: string): QuestionField[] {
+  return parseQuestionFile(content).map((question) => ({
+    id: question.id,
+    topic: question.topic,
+    required: isRequired(question.required),
+    question: question.question,
+    answer: question.answer,
+    notes: question.notes,
+  }));
+}
+
+/**
+ * Replaces only the `### Answer` fenced text of each matched `## Q-NNN` block
+ * named in `answers`; every other block and field is left byte-identical.
+ */
+export function fillAnswers(content: string, answers: Record<string, string>): string {
+  const headingPattern = /^## (Q-[0-9]+)\s*$/gm;
+  const matches = [...content.matchAll(headingPattern)];
+  if (matches.length === 0) return content;
+
+  let result = content.slice(0, matches[0].index ?? 0);
+  for (let i = 0; i < matches.length; i += 1) {
+    const start = matches[i].index ?? 0;
+    const end = i + 1 < matches.length ? (matches[i + 1].index ?? content.length) : content.length;
+    const id = matches[i][1];
+    const block = content.slice(start, end);
+    result += id in answers ? replaceAnswerFence(block, answers[id]) : block;
+  }
+  return result;
+}
+
+function replaceAnswerFence(block: string, answer: string): string {
+  return block.replace(
+    /### Answer\n```text\n[\s\S]*?```/,
+    () => `### Answer\n\`\`\`text\n${answer}\n\`\`\``,
+  );
+}
+
 export class DecisionPromotionService {
   constructor(private readonly artifactStore: ArtifactStore) {}
 

@@ -136,9 +136,22 @@ export const ticketShow: Handlers['ticketShow'] = async ({ id }, _options, conte
         specPin: result.specPin,
         pullRequestUrl: result.ticket.prUrl ?? null,
         contractChange: contractChange ?? null,
+        specMoved: result.specMoved,
+        gitIdentity: result.gitIdentity,
+        availableActions: result.availableActions,
+        availableColumns: result.availableColumns.map((column) => ({
+          id: column,
+          label: labels[column],
+        })),
       },
       artifacts: result.artifacts,
       costUsd: knownTotal(result.executions.map((execution) => execution.costUsd)),
+      children: result.children.map((child) => summaryOf(child, labels)),
+      runs: result.runRecords,
+      gateRecords: result.gateRecords.map((record) => ({
+        ...record,
+        evidence: [...record.evidence],
+      })),
     },
     out.join('\n'),
   );

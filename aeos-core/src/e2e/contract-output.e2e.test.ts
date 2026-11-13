@@ -77,11 +77,18 @@ describe('every command under --json', () => {
     await json('orchestrator resume', epic);
     await json('orchestrator clear-budget', epic);
     await json('orchestrator status');
+    await json('project board');
     await json('costs');
     await json('costs', '--project', 'NOPE'); // exit 4
 
     expect(problems).toEqual([]);
-    expect([...ran.keys()].sort()).toEqual(leaves(buildProgram()).sort());
+    // `serve` is the one leaf this walk cannot drive: it blocks until SIGINT/SIGTERM and
+    // binds a real port, so its envelope is held by serve.handler.test.ts instead.
+    expect([...ran.keys()].sort()).toEqual(
+      leaves(buildProgram())
+        .filter((c) => c !== 'serve')
+        .sort(),
+    );
     // The walk is worth something only if the commands did their work: all but these succeeded once.
     const refused = [...ran].filter(([, exits]) => !exits.includes(0)).map(([command]) => command);
     expect(refused.sort()).toEqual([

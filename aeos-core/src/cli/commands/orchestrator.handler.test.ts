@@ -1,3 +1,4 @@
+// Criteria traced here: @AC-25 @AC-41 (epic halt summary — status/halt reason/message — shown at rest).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 import { programWith } from './program.fixture.js';

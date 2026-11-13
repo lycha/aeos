@@ -34,6 +34,15 @@ export interface ProjectSyncOptions {
 
 export type ProjectSyncData = { missing: StringList; drifted: StringList; written: StringList };
 
+export interface ProjectBoardArgs {
+}
+
+export interface ProjectBoardOptions {
+  json?: boolean;
+}
+
+export type ProjectBoardData = { projects: Array<{ key: string; name: string; path: string; available: boolean; tickets: Array<{ id: TicketId; title: string; kind: Kind; parentId: NullableTicketId; column: Column; columnLabel: string; subState: SubState; needsHuman: boolean }> }> };
+
 export interface TicketCreateArgs {
   title: string;
 }
@@ -69,7 +78,7 @@ export interface TicketShowOptions {
   json?: boolean;
 }
 
-export type TicketShowData = { ticket: TicketDetail; artifacts: StringList; costUsd: Usd };
+export type TicketShowData = { ticket: TicketDetail; artifacts: StringList; costUsd: Usd; children?: Array<TicketSummary>; runs?: Array<RunRecord>; gateRecords?: Array<GateRecord> };
 
 export interface TicketAnswerArgs {
   id: string;
@@ -156,10 +165,13 @@ export interface TicketDodApproveArgs {
 export interface TicketDodApproveOptions {
   reason?: string;
   verified?: string[];
+  dryRun?: boolean;
+  decision?: 'approve' | 'reject';
+  reviewHash?: string;
   json?: boolean;
 }
 
-export type TicketDodApproveData = { ticketId: TicketId; approved: boolean; conformance: { pass: number; fail: number; unverified: number; total: number }; gateRecordId: GateRecordId };
+export type TicketDodApproveData = { ticketId: TicketId; approved: boolean; conformance: { pass: number; fail: number; unverified: number; total: number }; gateRecordId: GateRecordId } | { report: ConformanceReport | null; prUrl: NullableString; reviewHash: NullableString };
 
 export interface TicketRepinArgs {
   id: string;
@@ -236,6 +248,17 @@ export interface CostsOptions {
 
 export type CostsData = { totalUsd: Usd; unknownRecords: number; byProject: Array<ProjectCost> };
 
+export interface ServeArgs {
+}
+
+export interface ServeOptions {
+  port?: number;
+  noOpen?: boolean;
+  json?: boolean;
+}
+
+export type ServeData = { port: number; url: string };
+
 export type Envelope = { ok: boolean; command: string; exit: 0 | 1 | 2 | 3 | 4 | 130; contractVersion: number; data: unknown; error: Error | null; warnings: Array<Warning> };
 
 export type Error = { code: string; message: string; resource: 'aeos_home' | 'project' | 'state_db' | 'git_repo' | 'executor' | 'python' | 'gh' | null };
@@ -272,7 +295,7 @@ export type HaltReason = 'COMPLETE' | 'HUMAN_GATE' | 'NEEDS_HUMAN' | 'FAILED' | 
 
 export type TicketSummary = { id: TicketId; title: string; kind: Kind; parentId: NullableTicketId; column: Column; columnLabel: string; subState: SubState };
 
-export type TicketDetail = { id: TicketId; title: string; kind: Kind; parentId: NullableTicketId; column: Column; columnLabel: string; subState: SubState; escalation: Escalation | null; specPin: NullableSpecPin; pullRequestUrl: NullableString; contractChange: ContractChange | null };
+export type TicketDetail = { id: TicketId; title: string; kind: Kind; parentId: NullableTicketId; column: Column; columnLabel: string; subState: SubState; escalation: Escalation | null; specPin: NullableSpecPin; pullRequestUrl: NullableString; contractChange: ContractChange | null; specMoved?: boolean; gitIdentity?: NullableString; availableActions?: Array<AvailableActionId>; availableColumns?: Array<{ id: Column; label: string }> };
 
 export type ContractChange = { paths: StringList; approvedBy: GateRecordId | null };
 
@@ -286,10 +309,18 @@ export type OrchestratorRunResult = { epicId: TicketId; haltReason: HaltReason; 
 
 export type PauseState = { epicId: TicketId; paused: boolean };
 
-export type EpicState = { epicId: TicketId; status: string; haltReason: HaltReason | null; paused: boolean; budgetUsd: number | null; spentUsd: Usd };
+export type EpicState = { epicId: TicketId; status: string; haltReason: HaltReason | null; message: string | null; paused: boolean; budgetUsd: number | null; spentUsd: Usd };
 
 export type CostBreakdown = Record<string, Usd>;
 
 export type TicketCost = { ticketId: TicketId; totalUsd: Usd; byColumn: CostBreakdown; byRole: CostBreakdown };
 
 export type ProjectCost = { projectId: string; totalUsd: Usd; byTicket: Array<TicketCost> };
+
+export type AvailableActionId = 'ticketAnswer' | 'ticketResolve' | 'ticketApprove' | 'ticketDodApprove' | 'ticketSignOff' | 'ticketReady' | 'ticketRepin' | 'ticketMove';
+
+export type RunRecord = { schema_version: 0; run_id: RunId; project: string; ticket: string; column: Column; role: 'preflight' | 'worker' | 'checks' | 'reviewer' | 'generator'; agent?: NullableString; attempt: number; executor: string; model?: NullableString; mode?: 'artifact' | 'agentic' | null; brief?: { path: string; sha256: string } | null; output?: NullableString; transcript?: NullableString; verdict?: 'APPROVED' | 'APPROVED_WITH_WARNINGS' | 'REJECTED' | 'UNPARSEABLE' | 'CHECKS_PASSED' | 'CHECKS_FAILED' | null; started_at: string; ended_at: string; duration_ms: number; exit: 'ok' | 'failed' | 'interrupted' | 'timeout'; usage?: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } | null; cost_usd: Usd; cost_basis: 'executor-estimate' | 'computed' | 'none' | 'unknown'; spec_pin?: NullableSpecPin; error?: NullableString };
+
+export type GateRecord = { id: GateRecordId; gate: 'spec' | 'contract' | 'column-approval' | 'definition-of-done' | 'sign-off-override' | 'move-override' | 'answer' | 'escalation-resolution' | 'amendment' | 'repin' | 'pipeline-change'; ticket: string; column?: NullableString; from_column?: NullableString; to_column?: NullableString; decided_by: string; decided_at: string; verdict: 'approved' | 'rejected' | 'overridden'; reason?: string; overrides?: NullableString; evidence?: Array<SpecPin>; spec_pin?: NullableSpecPin };
+
+export type ConformanceReport = { schema_version: 0; meta: { feature: string; epic: string; spec: SpecPin; code: { repo: string; commit: string; base?: string }; generated_at: string }; criteria: Array<{ id: string; verdict: 'pass' | 'fail' | 'unverified'; claimed_by?: StringList; instruments: Array<{ kind: 'test' | 'scenario' | 'check' | 'agent' | 'human'; name: string; result: 'pass' | 'fail'; evidence?: string }>; notes?: string }>; non_goals?: Array<string>; summary: { total: number; pass: number; fail: number; unverified: number } };

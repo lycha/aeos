@@ -155,6 +155,7 @@ export const orchestratorStatus: Handlers['orchestratorStatus'] = async (
     epicId: state.epicId,
     status: state.status,
     haltReason: state.haltReason,
+    message: state.message,
     paused: state.status === 'PAUSED',
     budgetUsd: state.budgetUsd,
     spentUsd: orchestrator.spentUsd(project.id, state.epicId),

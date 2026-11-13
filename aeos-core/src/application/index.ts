@@ -11,4 +11,5 @@ export * from './ticket-answer.use-case.js';
 export * from './ticket-dod-approve.use-case.js';
 export * from './dashboard.use-case.js';
 export * from './costs.use-case.js';
+export * from './project-board.use-case.js';
 export * from './services/index.js';

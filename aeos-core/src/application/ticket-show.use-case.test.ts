@@ -1,3 +1,4 @@
+// Criteria traced here: @AC-8 (ticket column, sub-state, pinned spec + moved warning, children, runs with cost, gates).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TicketShowUseCase } from './ticket-show.use-case.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
@@ -6,6 +7,10 @@ import type { CostRepository } from '../domain/ports/driven/cost-repository.port
 import type { Ticket } from '../domain/model/ticket.js';
 import type { GitGateway } from '../domain/ports/driven/git-gateway.port.js';
 import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
+import type { ColumnSpecLoader } from '../domain/ports/driven/column-spec-loader.port.js';
+import type { PipelineLoader } from '../domain/ports/driven/pipeline-loader.port.js';
+import type { GateRecordStore } from '../domain/ports/driven/gate-record-store.port.js';
+import { templatePipelines } from '../infrastructure/spec-loader/yaml-pipeline-loader.adapter.js';
 
 function createMockTicketRepo(): TicketRepository {
   return {
@@ -65,7 +70,13 @@ describe('TicketShowUseCase', () => {
   let artifactStore: ReturnType<typeof createMockArtifactStore>;
   let costRepo: ReturnType<typeof createMockCostRepo>;
   let runRecordStore: RunRecordStore;
-  let gitGateway: { pathChangedSince: ReturnType<typeof vi.fn> };
+  let gitGateway: {
+    pathChangedSince: ReturnType<typeof vi.fn>;
+    userIdentity: ReturnType<typeof vi.fn>;
+  };
+  let columnSpecLoader: ColumnSpecLoader;
+  let pipelineLoader: PipelineLoader;
+  let gateRecordStore: GateRecordStore;
   let useCase: TicketShowUseCase;
 
   const defaultInput = {
@@ -79,7 +90,13 @@ describe('TicketShowUseCase', () => {
     artifactStore = createMockArtifactStore();
     costRepo = createMockCostRepo();
     runRecordStore = { write: vi.fn(), list: vi.fn().mockReturnValue([]) };
-    gitGateway = { pathChangedSince: vi.fn().mockReturnValue(false) };
+    gitGateway = {
+      pathChangedSince: vi.fn().mockReturnValue(false),
+      userIdentity: vi.fn().mockReturnValue('Dev <dev@example.com>'),
+    };
+    columnSpecLoader = { load: vi.fn().mockReturnValue({ role: 'standard' }) };
+    pipelineLoader = { load: vi.fn().mockReturnValue(templatePipelines()) };
+    gateRecordStore = { append: vi.fn(), list: vi.fn().mockReturnValue([]) };
     useCase = new TicketShowUseCase(
       ticketRepo,
       artifactStore,
@@ -92,6 +109,9 @@ describe('TicketShowUseCase', () => {
         exists: () => true,
         listFeatures: () => [],
       },
+      columnSpecLoader,
+      pipelineLoader,
+      gateRecordStore,
     );
   });
 
@@ -243,5 +263,120 @@ describe('TicketShowUseCase', () => {
 
     expect(runRecordStore.list).toHaveBeenCalledWith('/test/project', 'AEOS-1');
     expect(result.ok && result.runs).toEqual(['RUN-1', 'RUN-2']);
+  });
+
+  it('carries the full run records alongside the ids', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
+    const records = [
+      { run_id: 'RUN-1', cost_usd: 0.5 },
+      { run_id: 'RUN-2', cost_usd: null },
+    ];
+    (runRecordStore.list as ReturnType<typeof vi.fn>).mockReturnValue(records);
+
+    const result = useCase.execute(defaultInput);
+
+    expect(result.ok && result.runRecords).toEqual(records);
+  });
+
+  it('carries the gate records of the ticket', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
+    const records = [{ id: 'GATE-1', gate: 'column-approval' }];
+    (gateRecordStore.list as ReturnType<typeof vi.fn>).mockReturnValue(records);
+
+    const result = useCase.execute(defaultInput);
+
+    expect(gateRecordStore.list).toHaveBeenCalledWith('/test/project', { ticketId: 'AEOS-1' });
+    expect(result.ok && result.gateRecords).toEqual(records);
+  });
+
+  it('reports the git identity a decision would be recorded under', () => {
+    (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(makeTicket());
+    (gitGateway.userIdentity as ReturnType<typeof vi.fn>).mockReturnValue(null);
+
+    const result = useCase.execute(defaultInput);
+
+    expect(gitGateway.userIdentity).toHaveBeenCalledWith('/test/project');
+    expect(result.ok && result.gitIdentity).toBeNull();
+  });
+
+  describe('availableActions', () => {
+    it('at a final-gate column in SIGNED_OFF offers only ticketDodApprove (plus the standing move)', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        makeTicket({ column: 'DOD_GATE', subState: 'SIGNED_OFF' }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue({ role: 'final-gate' });
+
+      const result = useCase.execute(defaultInput);
+
+      expect(result.ok && result.availableActions).toEqual(['ticketDodApprove', 'ticketMove']);
+    });
+
+    it('the same sub-state at a standard-role column offers ticketApprove instead', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        makeTicket({ column: 'INTEGRATION_REVIEW', subState: 'SIGNED_OFF' }),
+      );
+      (columnSpecLoader.load as ReturnType<typeof vi.fn>).mockReturnValue({ role: 'standard' });
+
+      const result = useCase.execute(defaultInput);
+
+      expect(result.ok && result.availableActions).toEqual(['ticketApprove', 'ticketMove']);
+    });
+  });
+
+  describe('availableColumns', () => {
+    it("excludes the ticket's current column and lists only its own pipeline", () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        makeTicket({ kind: 'EPIC', column: 'SPEC_REVIEW' }),
+      );
+
+      const result = useCase.execute(defaultInput);
+
+      expect(result.ok && result.availableColumns).toEqual([
+        'BACKLOG',
+        'TECH_SPEC',
+        'TASK_BREAKDOWN',
+        'INTEGRATION_REVIEW',
+        'DOD_GATE',
+        'DONE',
+      ]);
+    });
+  });
+
+  describe('pendingAmendment, end to end through BLOCKED', () => {
+    const pin = { repo: 'AEOS-aeos', commit: 'c0ffee1', path: 'features/checkout' };
+
+    it('a BLOCKED ticket with no pending amendment offers ticketAnswer/ticketReady', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        makeTicket({ column: 'TECH_SPEC', subState: 'BLOCKED', specPin: pin }),
+      );
+      (gateRecordStore.list as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+      const result = useCase.execute(defaultInput);
+
+      expect(result.ok && result.pendingAmendment).toBe(false);
+      expect(result.ok && result.availableActions).toEqual([
+        'ticketAnswer',
+        'ticketReady',
+        'ticketMove',
+      ]);
+    });
+
+    it('a BLOCKED ticket with a pending amendment offers ticketRepin/ticketReady instead', () => {
+      (ticketRepo.findById as ReturnType<typeof vi.fn>).mockReturnValue(
+        makeTicket({ column: 'TECH_SPEC', subState: 'BLOCKED', specPin: pin }),
+      );
+      (gateRecordStore.list as ReturnType<typeof vi.fn>).mockReturnValue([
+        { gate: 'amendment', spec_pin: pin },
+      ]);
+
+      const result = useCase.execute(defaultInput);
+
+      expect(result.ok && result.pendingAmendment).toBe(true);
+      expect(result.ok && result.availableActions).toEqual([
+        'ticketRepin',
+        'ticketReady',
+        'ticketMove',
+      ]);
+    });
   });
 });

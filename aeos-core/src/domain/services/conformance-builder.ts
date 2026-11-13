@@ -192,3 +192,12 @@ function toYaml(value: unknown, indent: string): string {
 export function conformanceYaml(report: ConformanceReport): string {
   return toYaml(report, '').trimStart();
 }
+
+/**
+ * Serializes the report for a review-hash digest, blanking the build-time
+ * `generated_at` timestamp: it carries no drift signal, and hashing it would
+ * make every rebuild of an otherwise-unchanged report look stale (WEB-5).
+ */
+export function conformanceDigestSource(report: ConformanceReport): string {
+  return conformanceYaml({ ...report, meta: { ...report.meta, generated_at: '' } });
+}

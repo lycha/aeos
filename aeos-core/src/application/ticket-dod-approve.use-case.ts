@@ -1,6 +1,7 @@
 // Use case — TicketDodApprove (final human gate → DONE)
 
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import { Column } from '../domain/model/column.js';
 import type { ArtifactStore } from '../domain/ports/driven/artifact-store.port.js';
 import type { TicketRepository } from '../domain/ports/driven/ticket-repository.port.js';
@@ -15,10 +16,12 @@ import type {
 import type { PullRequestGateway } from '../domain/ports/driven/pull-request-gateway.port.js';
 import type { RunRecordStore } from '../domain/ports/driven/run-record-store.port.js';
 import type { Ticket } from '../domain/model/ticket.js';
+import type { ConformanceReport } from '../domain/model/conformance-report.js';
 import { SubState } from '../domain/model/sub-state.js';
 import { runRecordPaths } from '../domain/model/run-record.js';
 import {
   addInstruments,
+  conformanceDigestSource,
   conformanceYaml,
   renderConformanceMarkdown,
   renderConformanceTable,
@@ -61,7 +64,7 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
     if (!found.ok) return found;
     const { ticket } = found;
     const prUrl = ticket.prUrl ?? null;
-    if (!ticket.specPin) return { ok: true, review: { report: null, prUrl } };
+    if (!ticket.specPin) return { ok: true, review: { report: null, prUrl, reviewHash: null } };
 
     // Rebuilt now, so the report is about the commit being approved.
     const { report } = await this.conformance.buildConformance(projectPath, ticketId);
@@ -73,24 +76,24 @@ export class TicketDodApproveUseCase implements TicketDodApprovePort {
       };
     }
     const person = verified.length > 0 ? this.gateRecorder.decidedBy(projectPath) : '';
-    return {
-      ok: true,
-      review: {
-        report: addInstruments(report, [
-          ...this.agentVerdicts(projectPath, ticket).filter((addition) =>
-            report.criteria.some((c) => c.id === addition.id && c.verdict === 'unverified'),
-          ),
-          // The gate record that will carry the decision is cited once it has an id.
-          ...verified.map(
-            (id): InstrumentAddition => ({
-              id,
-              instrument: { kind: 'human', name: person, result: 'pass' },
-            }),
-          ),
-        ]),
-        prUrl,
-      },
-    };
+    const cited = addInstruments(report, [
+      ...this.agentVerdicts(projectPath, ticket).filter((addition) =>
+        report.criteria.some((c) => c.id === addition.id && c.verdict === 'unverified'),
+      ),
+      // The gate record that will carry the decision is cited once it has an id.
+      ...verified.map(
+        (id): InstrumentAddition => ({
+          id,
+          instrument: { kind: 'human', name: person, result: 'pass' },
+        }),
+      ),
+    ]);
+    return { ok: true, review: { report: cited, prUrl, reviewHash: this.reviewHashOf(cited) } };
+  }
+
+  /** sha256 of the report, its build-time timestamp excluded (AC-21, AC-36). */
+  private reviewHashOf(report: ConformanceReport): string {
+    return createHash('sha256').update(conformanceDigestSource(report)).digest('hex');
   }
 
   /** The verdicts of the column's last worker run, when the run was signed off. */

@@ -14,3 +14,4 @@ export * from './ticket-repin.port.js';
 export * from './ticket-dod-approve.port.js';
 export * from './dashboard.port.js';
 export * from './costs.port.js';
+export * from './project-board.port.js';

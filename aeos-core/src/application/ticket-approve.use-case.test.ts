@@ -1,3 +1,4 @@
+// Criteria traced here: @AC-17 (contract change: list changed paths, require explicit approval).
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
