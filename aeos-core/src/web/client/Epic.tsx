@@ -12,6 +12,7 @@ import type { Contract } from '../../cli/contract/contract-schema.js';
 import type { OrchestratorStatusData } from '../../cli/generated/types.gen.js';
 import { getContract, postCli, startOrchestratorRun } from './api.js';
 import { DecisionForm } from './DecisionForm.js';
+import { go } from './router.js';
 
 export interface EpicProps {
   readonly projectKey: string;
@@ -52,7 +53,11 @@ export function Epic({ projectKey, epicId }: EpicProps) {
       budget: budget ? Number(budget) : undefined,
       maxSteps: maxSteps ? Number(maxSteps) : undefined,
     });
-    setRunMessage(result.ok ? `Run started (job ${result.jobId}).` : result.error.message);
+    if (result.ok) {
+      go({ view: 'run', jobId: result.jobId });
+      return;
+    }
+    setRunMessage(result.error.message);
     void refresh();
   };
 

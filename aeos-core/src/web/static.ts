@@ -32,6 +32,8 @@ export function serveStatic(clientDir: string, req: IncomingMessage, res: Server
   }
 
   const contentType = CONTENT_TYPES[path.extname(servedPath)] ?? 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': contentType });
+  // The single-document bundle is rebuilt in place; never let the browser serve
+  // a stale copy after a rebuild. No separate assets are cached either.
+  res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
   res.end(fs.readFileSync(servedPath));
 }

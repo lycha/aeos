@@ -52,6 +52,15 @@ const APPROVE_COMMAND: ContractCommand = {
 };
 
 describe('visibleParameters', () => {
+  it('excludes the global --json flag (the proxy always adds it)', () => {
+    const withJson: ContractCommand = {
+      ...MOVE_COMMAND,
+      parameters: [...MOVE_COMMAND.parameters, { name: 'json', in: 'flag', description: 'JSON' }],
+    };
+    const visible = visibleParameters(withJson, new Set(), {});
+    expect(visible.map((p) => p.name)).not.toContain('json');
+  });
+
   it('excludes a fixed parameter (the ticket id)', () => {
     const visible = visibleParameters(MOVE_COMMAND, new Set(['id']), {});
     expect(visible.map((p) => p.name)).toEqual(['status', 'reason']);

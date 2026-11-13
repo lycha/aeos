@@ -109,26 +109,36 @@ async function handleCliProxy(
   contract: Contract,
   commandPath: string,
 ): Promise<void> {
-  const body = await readJsonBody(req);
-  const projectKey = typeof body.projectKey === 'string' ? body.projectKey : '';
-  if (!projectKey) {
-    sendJson(res, 400, {
-      ok: false,
-      error: { code: 'PROJECT_KEY_REQUIRED', message: 'projectKey is required', resource: null },
-    });
-    return;
-  }
-  if (!contract.commands[commandPath]) {
+  const command = contract.commands[commandPath];
+  if (!command) {
     notFound(res, 'COMMAND_NOT_FOUND', `Unknown command "${commandPath}"`);
     return;
   }
+  const body = await readJsonBody(req);
+  const parameters =
+    typeof body.parameters === 'object' && body.parameters !== null
+      ? (body.parameters as Record<string, unknown>)
+      : {};
+  const projectKey = typeof body.projectKey === 'string' ? body.projectKey : '';
+
+  // A command that needs a project runs in that project's directory; a
+  // cross-project command (no `project` in its contract `requires`, e.g.
+  // `project board` and `costs`, AC-4/AC-26) reads the global state and runs
+  // without a projectKey, in the server's own working directory.
+  const needsProject = (command.requires ?? []).includes('project');
+  if (!projectKey) {
+    if (needsProject) {
+      sendJson(res, 400, {
+        ok: false,
+        error: { code: 'PROJECT_KEY_REQUIRED', message: 'projectKey is required', resource: null },
+      });
+      return;
+    }
+    sendJson(res, 200, await proxyCommand(contract, commandPath, process.cwd(), parameters));
+    return;
+  }
   await withProject(res, projectKey, async (projectPath) => {
-    const parameters =
-      typeof body.parameters === 'object' && body.parameters !== null
-        ? (body.parameters as Record<string, unknown>)
-        : {};
-    const envelope = await proxyCommand(contract, commandPath, projectPath, parameters);
-    sendJson(res, 200, envelope);
+    sendJson(res, 200, await proxyCommand(contract, commandPath, projectPath, parameters));
   });
 }
 

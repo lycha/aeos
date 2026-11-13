@@ -22,7 +22,11 @@ export function visibleParameters(
   fields: Readonly<Record<string, DecisionFormField>>,
 ): ContractParameter[] {
   return command.parameters.filter(
-    (parameter) => !fixedNames.has(parameter.name) && fields[parameter.name]?.value === undefined,
+    (parameter) =>
+      // `--json` is a global the proxy always adds; it is never a form field.
+      parameter.name !== 'json' &&
+      !fixedNames.has(parameter.name) &&
+      fields[parameter.name]?.value === undefined,
   );
 }
 

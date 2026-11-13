@@ -183,6 +183,15 @@ describe('server routes', () => {
     expect(JSON.parse(res.body)).toHaveProperty('commands');
   });
 
+  it('serves a GET endpoint with a session but no Origin — a same-origin GET sends none', async () => {
+    // Browsers omit Origin on same-origin GET/HEAD and forbid setting it, so a
+    // real in-page `fetch('/api/contract')` carries no Origin. It must still pass.
+    const cookie = await exchangeSession();
+    const res = await send(port, 'GET', '/api/contract', { headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toHaveProperty('commands');
+  });
+
   // ── AC-2/AC-3 — the generic command proxy round-trips the real CLI ──────
 
   it('round-trips a real command through the generic proxy, identically to the CLI itself', async () => {
@@ -226,6 +235,26 @@ describe('server routes', () => {
     expect(res.status).toBe(400);
     expect(JSON.parse(res.body).error.code).toBe('PROJECT_KEY_REQUIRED');
   });
+
+  it('runs a cross-project command (project board) through the proxy with no projectKey (AC-4)', async () => {
+    const cookie = await exchangeSession();
+    const res = await send(port, 'POST', '/api/cli/project/board', {
+      headers: { Cookie: cookie, Origin: origin },
+      body: JSON.stringify({ parameters: {} }),
+    });
+
+    expect(res.status).toBe(200);
+    const envelope = JSON.parse(res.body) as {
+      ok: boolean;
+      exit: number;
+      command: string;
+      data: { projects: Array<{ key: string }> };
+    };
+    expect(envelope.ok).toBe(true);
+    expect(envelope.exit).toBe(0);
+    expect(envelope.command).toBe('project board');
+    expect(envelope.data.projects.map((p) => p.key)).toContain('EE');
+  }, 20_000);
 
   // ── AC-13 — one run at a time per project, other projects proceed ──────
 

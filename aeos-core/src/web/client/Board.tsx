@@ -6,8 +6,18 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { postCli } from './api.js';
-import { buildBoardView, type BoardView } from './board-data.js';
+import { buildBoardView, type BoardView, type TicketRow } from './board-data.js';
+import { hrefFor } from './router.js';
 import type { ProjectBoardData } from '../../cli/generated/types.gen.js';
+
+/** The detail route for a board row — the epic page for an epic, the ticket page otherwise. */
+function ticketHref(projectKey: string, ticket: Pick<TicketRow, 'id' | 'kind'>): string {
+  return hrefFor(
+    ticket.kind === 'EPIC'
+      ? { view: 'epic', projectKey, epicId: ticket.id }
+      : { view: 'ticket', projectKey, ticketId: ticket.id },
+  );
+}
 
 const POLL_MS = 5000;
 
@@ -62,8 +72,10 @@ export function Board() {
           <ul>
             {view.needsHuman.map((ticket) => (
               <li key={ticket.id}>
-                {ticket.projectName} — {ticket.title} ({ticket.columnLabel}
-                {ticket.subState ? ` · ${ticket.subState}` : ''})
+                <a href={ticketHref(ticket.projectKey, ticket)}>
+                  {ticket.projectName} — {ticket.title} ({ticket.columnLabel}
+                  {ticket.subState ? ` · ${ticket.subState}` : ''})
+                </a>
               </li>
             ))}
           </ul>
@@ -73,13 +85,16 @@ export function Board() {
         <section key={project.key} aria-label={project.name}>
           <h2>
             {project.name}
-            {!project.available && <span> (unavailable)</span>}
+            {!project.available && <span> (unavailable)</span>}{' '}
+            <a href={hrefFor({ view: 'create', projectKey: project.key })}>+ New ticket</a>
           </h2>
           <ul>
             {project.tickets.map((ticket) => (
               <li key={ticket.id}>
-                {ticket.title} — {ticket.columnLabel}
-                {ticket.subState ? ` · ${ticket.subState}` : ''}
+                <a href={ticketHref(project.key, ticket)}>
+                  {ticket.title} — {ticket.columnLabel}
+                  {ticket.subState ? ` · ${ticket.subState}` : ''}
+                </a>
               </li>
             ))}
           </ul>

@@ -100,8 +100,8 @@ describe('requireLoopbackAndOrigin', () => {
     expect(requireLoopbackAndOrigin(req, origin)).toBe(false);
   });
 
-  it('rejects a request with no Origin header', () => {
+  it('accepts a request with no Origin header — a same-origin GET/HEAD sends none', () => {
     const req = requestWith({ host: '127.0.0.1:4100' });
-    expect(requireLoopbackAndOrigin(req, origin)).toBe(false);
+    expect(requireLoopbackAndOrigin(req, origin)).toBe(true);
   });
 });

@@ -72,10 +72,15 @@ export function requireLoopback(req: IncomingMessage): boolean {
 
 /**
  * Whether the request is addressed to this machine's own loopback address
- * (AC-28) AND came from the interface's own page (AC-27). Each half is
- * checked on its own value, so a pass in one never substitutes for the other.
+ * (AC-28) AND did not come from another origin (AC-27). A cross-origin request
+ * always carries an `Origin`, so a present `Origin` must match; an absent one
+ * means a same-origin GET/HEAD (browsers omit `Origin` on those, and a page
+ * cannot forge it — `Origin` is a forbidden header), which is allowed. Each
+ * half is checked on its own value, so a pass in one never substitutes for the
+ * other.
  */
 export function requireLoopbackAndOrigin(req: IncomingMessage, expectedOrigin: string): boolean {
-  const originOk = req.headers.origin === expectedOrigin;
+  const { origin } = req.headers;
+  const originOk = origin === undefined || origin === expectedOrigin;
   return requireLoopback(req) && originOk;
 }

@@ -1,22 +1,15 @@
-// Web client — the costs view (AC-26): spend by project and by role, via
-// the existing `costs` command through the generic proxy. `costs` itself is
-// project-independent (CostsUseCase aggregates across every project from
-// the global state.db), but `server.ts`'s generic proxy route requires a
-// `projectKey` on every `/api/cli/*path` call regardless of whether the
-// target command needs one, so a valid `projectKey` is still required here
-// to pick a project whose directory the proxy can spawn the CLI from — it
-// has no effect on the (global) data returned. An unknown cost renders as
-// "unknown" and is never folded into a total — `CostsUseCase` already
-// computes every total that way; this view only has to display it as given.
+// Web client — the costs view (AC-26): spend by project and by role, via the
+// existing `costs` command through the generic proxy. `costs` is cross-project
+// (CostsUseCase aggregates across every project from the global state.db) and
+// the proxy runs such commands without a projectKey, so none is needed here.
+// An unknown cost renders as "unknown" and is never folded into a total —
+// `CostsUseCase` already computes every total that way; this view only displays
+// it as given.
 
 import { useEffect, useState } from 'react';
 
 import type { CostsData } from '../../cli/generated/types.gen.js';
 import { postCli } from './api.js';
-
-export interface CostsProps {
-  readonly projectKey: string;
-}
 
 function formatUsd(amount: number | null): string {
   return amount === null ? 'unknown' : `$${amount.toFixed(2)}`;
@@ -34,19 +27,19 @@ function BreakdownRows({ breakdown }: { readonly breakdown: Record<string, numbe
   );
 }
 
-export function Costs({ projectKey }: CostsProps) {
+export function Costs() {
   const [report, setReport] = useState<CostsData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void postCli('costs', {}, projectKey).then((envelope) => {
+    void postCli('costs').then((envelope) => {
       if (!envelope.ok) {
         setError(envelope.error?.message ?? 'Failed to load costs.');
         return;
       }
       setReport(envelope.data as CostsData);
     });
-  }, [projectKey]);
+  }, []);
 
   if (error) return <p role="alert">{error}</p>;
   if (!report) return <p>Loading…</p>;
